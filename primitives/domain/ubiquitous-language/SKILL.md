@@ -7,7 +7,7 @@ tier_min: 0
 cost: low
 priority: 1
 tags: [ddd, language, naming, glossary, model]
-triggers: [domain model, glossary, naming, ubiquitous language, ddd, entitiy, aggregate]
+triggers: [domain model, glossary, naming, ubiquitous language, ddd, entity, term definition]
 enforces: []
 artifacts: [02-domain-model.md]
 ---

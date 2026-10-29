@@ -7,7 +7,7 @@ tier_min: 2
 cost: high
 priority: 6
 tags: [mutation-testing, assertions, test-quality, stryker, mutmut]
-triggers: [mutation testing, coverage, test quality, stryker, mutmut, surviving mutant]
+triggers: [mutation testing, mutation score, test quality, stryker, mutmut, surviving mutant]
 enforces: []
 artifacts: [05-verification.md]
 ---

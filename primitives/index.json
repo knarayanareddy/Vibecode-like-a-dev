@@ -29,7 +29,7 @@
       "triggers": [
         "handoff",
         "prompt",
-        "brief",
+        "handoff brief",
         "hand to agent",
         "lovable",
         "replit",
@@ -185,9 +185,9 @@
         "auth",
         "payment provider",
         "email",
-        "queue",
         "build or buy",
-        "vendor"
+        "vendor",
+        "dependency choice"
       ],
       "path": "primitives/architecture/build-vs-buy/SKILL.md",
       "dir": "architecture/build-vs-buy"
@@ -345,7 +345,7 @@
         "migration",
         "database change",
         "alter table",
-        "rollback"
+        "migration rollback"
       ],
       "path": "primitives/data/schema-and-migrations/SKILL.md",
       "dir": "data/schema-and-migrations"
@@ -501,8 +501,8 @@
         "naming",
         "ubiquitous language",
         "ddd",
-        "entitiy",
-        "aggregate"
+        "entity",
+        "term definition"
       ],
       "path": "primitives/domain/ubiquitous-language/SKILL.md",
       "dir": "domain/ubiquitous-language"
@@ -891,7 +891,7 @@
         "threat model",
         "attack",
         "trust boundary",
-        "owasp",
+        "stride",
         "vulnerability"
       ],
       "path": "primitives/security/threat-model/SKILL.md",
@@ -923,7 +923,7 @@
         "acceptance criteria",
         "traceability",
         "requirement coverage",
-        "spec drift",
+        "test to requirement",
         "anchor"
       ],
       "path": "primitives/testing/acceptance-traceability/SKILL.md",
@@ -983,7 +983,7 @@
       ],
       "triggers": [
         "mutation testing",
-        "coverage",
+        "mutation score",
         "test quality",
         "stryker",
         "mutmut",
@@ -1018,7 +1018,7 @@
         "generative testing",
         "hypothesis",
         "fast-check",
-        "invariant",
+        "generated inputs",
         "edge cases"
       ],
       "path": "primitives/testing/property-based-testing/SKILL.md",

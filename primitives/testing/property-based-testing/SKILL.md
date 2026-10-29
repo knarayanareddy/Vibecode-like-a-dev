@@ -7,7 +7,7 @@ tier_min: 3
 cost: high
 priority: 7
 tags: [property-based-testing, generative, invariants, hypothesis, fast-check]
-triggers: [property based, generative testing, hypothesis, fast-check, invariant, edge cases]
+triggers: [property based, generative testing, hypothesis, fast-check, generated inputs, edge cases]
 enforces: [payments.correctness]
 artifacts: [05-verification.md]
 ---
