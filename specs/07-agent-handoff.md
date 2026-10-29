@@ -32,10 +32,10 @@ Start with **REQ-001** — A clean clone of Vibecode Like A Dev runs with one do
 | Req | What it must do | Proven by | Anchor |
 | --- | --- | --- | --- |
 | REQ-001 | A clean clone of Vibecode Like A Dev runs with one documented command, and a missing setting is named rather than guessed. | gate | manual run |
-| REQ-002 | An engineering goes from creation to completion end to end, through the documented interface only. | automated | `tests/core/core-primary-journey.test.ts` |
-| REQ-003 | The three things Vibecode Like A Dev will not do are written down and reviewed before the first sprint. | manual | manual run |
-| REQ-004 | Every command that touches an engineering has documented flags, exit codes and a dry run. | automated | `tests/api/cli-ergonomics.test.ts` |
-| REQ-005 | The rules that make an engineering valid are written down, and each one has a test that would fail if it broke. | automated | `tests/core/core-domain-invariants.test.ts` |
+| REQ-002 | One specification goes from created to finished end to end through the documented interface, with no manual step in the middle and nothing reachable only by a developer. | automated | `tests/core/core-primary-journey.test.ts` |
+| REQ-003 | The three things Vibecode Like A Dev will not do in v1 are written down, reviewed before the first sprint, and cited the first time someone asks for a fourth thing. | manual | manual run |
+| REQ-004 | Every command that touches a specification documents its flags and exit codes, rejects unknown input, and supports a dry run that changes nothing. | automated | `tests/api/cli-ergonomics.test.ts` |
+| REQ-005 | The rules that make a specification valid are written down, and each one has a test that fails when the rule is broken rather than a comment saying it matters. | automated | `tests/core/core-domain-invariants.test.ts` |
 
 ## 3. What to read for your area
 

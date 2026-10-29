@@ -12,12 +12,12 @@ First: **REQ-001** — A clean clone of Vibecode Like A Dev runs with one docume
 
 | Question | Document |
 | --- | --- |
-| The rules you cannot break | `00-constitution.md` |
-| What this product is and is not | `01-product-brief.md` |
-| The nouns to use in code | `02-domain-model.md` |
-| What may import what | `03-architecture.md` |
-| Interface shapes | `04-contracts.md` |
-| How your work is judged | `05-verification.md` |
+| The rules you cannot break | `00-constitution.md` — 5 requirements, 17 practices |
+| What this product is and is not | `01-product-brief.md` — specification, developer, non-goals |
+| The nouns to use in code | `02-domain-model.md` — 0 aggregates, 6 candidate terms |
+| What may import what | `03-architecture.md` — 1 contexts, 1 ADRs |
+| Interface shapes | `04-contracts.md` — 1 surfaces on PostgreSQL |
+| How your work is judged | `05-verification.md` — 8 gates |
 
 ## Commands
 
@@ -31,20 +31,20 @@ An agent that cannot run the checks will claim success instead.
 
 ## The rules that bite in this product
 
-- Implement only what `spec.json` lists about the engineering. A missing requirement is a question, not an invitation.
+- Implement only what `spec.json` lists about the specification. A missing requirement is a question, not an invitation.
 - Never weaken a test to pass a check: each of the 3 automated requirements carries an `@req` anchor in the test that proves it.
-- Keep engineering rules out of transport code, and add no dependency to javascript without an ADR.
+- Keep specification rules out of transport code, and add no dependency to javascript without an ADR.
 
 ## Done means
 
-- The criteria of your engineering requirement have passing assertions, not just a green run.
-- `node specs/spec-check.mjs` passes against the 5 requirements in this packet.
-- The traceability row in `05-verification.md` names your test file.
-- You reported what changed, what you are unsure about, and stopped.
+- The criteria of your specification requirement have passing assertions, not just a green run.
+- `node specs/spec-check.mjs` passes against 3 anchored requirements in this packet.
+- The traceability row in `05-verification.md` names your file, and `tests/core/core-runnable.test.ts` exists.
+- You reported what changed on the specification, what you are unsure about, and stopped.
 
 ## Escalate rather than guess
 
 - REQ-001 or another requirement contradicts a document in this packet.
-- A gate fails for a reason outside the engineering change you made.
-- The packet does not decide something about the agent — most often permissions or deletion.
+- A gate fails for a reason outside the specification change you made.
+- The packet does not decide something about the developer — most often permissions or deletion.
 - You have tried the same fix three times.

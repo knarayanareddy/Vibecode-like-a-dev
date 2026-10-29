@@ -10,18 +10,18 @@ The 6 words below come from your idea; the rest from the requirements you select
 
 | Term | Working definition | Source | Confirmed |
 | --- | --- | --- | --- |
-| **engineering** | from your idea — confirm the exact meaning of engineering before it appears in code | the idea | no |
-| **agent** | from your idea — confirm the exact meaning of agent before it appears in code | the idea | no |
-| **deterministic** | from your idea — confirm the exact meaning of deterministic before it appears in code | the idea | no |
 | **specification** | from your idea — confirm the exact meaning of specification before it appears in code | the idea | no |
-| **requirements** | from your idea — confirm the exact meaning of requirements before it appears in code | the idea | no |
+| **developer** | from your idea — confirm the exact meaning of developer before it appears in code | the idea | no |
+| **repository** | from your idea — confirm the exact meaning of repository before it appears in code | the idea | no |
+| **compiler** | from your idea — confirm the exact meaning of compiler before it appears in code | the idea | no |
 | **maintenance** | from your idea — confirm the exact meaning of maintenance before it appears in code | the idea | no |
+| **acceptance** | from your idea — confirm the exact meaning of acceptance before it appears in code | the idea | no |
 | **Command grammar** | The documented shape of commands, flags and exit codes. | REQ-004 | no |
 
 ### Naming rules
 
-- One spelling per concept, used verbatim in code, tests and commit messages: if the table says `engineering`, nothing calls it a "engineering" or a "record".
-- A qualifier ("engineering v2", "user engineering") means two concepts, or a badly named one.
+- One spelling per concept, used verbatim in code, tests and commit messages: if the table says `specification`, nothing calls it a "specification" or a "record".
+- A qualifier ("specification v2", "user specification") means two concepts, or a badly named one.
 
 ## 2. Bounded contexts
 
@@ -42,16 +42,16 @@ No aggregate hints apply yet. Name the core aggregate and list its invariants as
 
 
 
-Any other state machine around an engineering: write the states, the legal transitions and the illegal ones as a table before implementing. An illegal transition returns a typed error, never a silent no-op.
+Any other state machine around a specification: write the states, the legal transitions and the illegal ones as a table before implementing. An illegal transition returns a typed error, never a silent no-op.
 
 ## 5. Domain events
 
 _No cross-context events are required by the selected requirements._
 
-Events carry the engineering id and are named in the past tense; a consumer must survive the same event twice and an event that arrives after the next one.
+Events carry the specification id and are named in the past tense; a consumer must survive the same event twice and an event that arrives after the next one.
 
 ## 6. Rules for domain code
 
 - Nothing under the domain directory imports the web framework, PostgreSQL + Drizzle (forward-only SQL migrations), or a vendor SDK; the import-boundary rule in `03-architecture.md` checks it.
-- Time and randomness are passed in, so a test can pin the moment an engineering changes state.
+- Time and randomness are passed in, so a test can pin the moment a specification changes state.
 - Dates are UTC instants; local time is presentation and belongs to the transport layer.

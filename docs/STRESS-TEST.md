@@ -116,7 +116,7 @@ Eight defects, all found by pushing an input rather than by reading the code.
 
 ## The honest limit this test exposes
 
-**The packet knows engineering classes, not your business.** Mean idea-vocabulary coverage is 21%, and the worst case is the clearest: the Go log shipper's idea names redaction, batched acknowledgements, dead-letter files and durable positions; its packet names none of them, because the catalog has no obligation called "a log shipper". What it does say is that the product must be runnable, observable, well-behaved at the command line, and must pin its own domain invariants — true, useful, and not enough.
+**The packet knows engineering classes, not your business.** Mean idea-vocabulary coverage is 50% — up from 21%, because the domain model now names the idea's own nouns and quotes the rules the idea states verbatim. The worst case is still the clearest: the Go log shipper's idea names redaction, batched acknowledgements, dead-letter files and durable positions. Three of those now appear in its ubiquitous-language table — `position`, `shipper`, `dead-letter` — because the vocabulary is read from the idea, but **no requirement covers the behaviour**: nothing in `spec.json` says redaction, and nothing says a batch is acknowledged only after the endpoint accepts it. What the packet does say is that the product must be runnable, observable, well-behaved at the command line, and must pin its own domain invariants — true, useful, and not enough. Naming a thing is not specifying it, and the difference is exactly the 50% that is missing.
 
 The mitigation is deliberate and bounded:
 

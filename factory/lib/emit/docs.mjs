@@ -35,6 +35,7 @@ export function constitution(plan, d) {
     return [`\`${primitive.id}\``, card?.bindTo ?? primitive.title, `[SKILL.md](${repoUrl}/${primitive.path})`];
   });
 
+  const automatedCount = plan.requirements.filter((requirement) => requirement.verify === 'automated').length;
   const notDoing = plan.skipped.map((entry) => [
     `\`${entry.id}\``,
     entry.title,
@@ -57,16 +58,16 @@ export function constitution(plan, d) {
   const laws = [
     ['The spec is the interface.', `A change to how ${d.aPrimary} behaves starts as a change to a requirement or an ADR — never as a code edit the spec is later bent to match.`],
     ['A failing test comes before behaviour.', `${plan.requirements.filter((requirement) => requirement.verify === 'automated').length} of ${plan.requirements.length} requirements are proven by a test carrying \`@req\`; the rest carry a manual script. Untested behaviour is proposed, not done.`],
-    ['One term, one meaning.', `The nouns in \`02-domain-model.md\` are the only names for those things — in code, in tests, in commit messages.`],
-    ['Boundaries before bodies.', `Interfaces are fixed while changing them is free. Once \`04-contracts.md\` is signed off, a shape change needs its own requirement.`],
+    ['One term, one meaning.', `\`${d.primary}\` and \`${d.secondary}\` are the only names for those things — in code, in tests, in commit messages, and in the UI copy ${d.secondaryPlural} read.`],
+    ['Boundaries before bodies.', `The ${d.surfaces.length} surfaces in \`04-contracts.md\` are fixed while changing them is free; after sign-off, a change to one needs its own requirement.`],
     ['The domain stays pure.', `Rules import no framework, no ${db === 'SQLite' ? 'database driver' : db}, and no vendor SDK. ${d.style.name} only holds if this is checked, not intended.`],
-    ['Boring technology, justified additions.', `Every dependency beyond the declared stack earns an ADR naming what it replaces and what breaks without it.`],
+    ['Boring technology, justified additions.', `${plan.primitives.length} practices were selected for ${d.project}; anything not among them needs an ADR naming what it replaces and what breaks without it.`],
     ['Fail closed.', profile.risks.multiTenant
       ? `Deny by default. A ${primary} read without a resolved tenant is a failure, not an empty list.`
       : 'Deny by default for authorization; refuse rather than guess; never silently weaken a control to make a test pass.'],
-    ['Make it observable.', `Every failure this product can produce is visible in a log with a correlation id, including the ones you think cannot happen.`],
+    ['Make it observable.', `A failed ${d.primary} operation is a log line with a correlation id and the ${d.secondary} it belonged to — including the ones you think cannot happen.`],
     ['Reversible beats predictable.', `Schema changes go forward only, behind a ${db} migration; ${plan.config.weeks}-week scope means something gets cut, so cut features, not rollback paths.`],
-    ['Stop and ask before guessing.', 'Three failed attempts at the same failure means the model of the problem is wrong. Escalate with what you tried.']
+    ['Stop and ask before guessing.', `Three failed attempts on ${d.start.id} means the model of the problem is wrong. Escalate with what you tried and what you ruled out.`]
   ];
 
   const conditional = [];
@@ -77,22 +78,25 @@ export function constitution(plan, d) {
   if (profile.risks.regulated || profile.risks.pii) conditional.push(['Personal data has a reason and a lifetime.', 'Every field has a stated purpose and retention; nothing personal lands in logs, fixtures or error details.']);
   if (profile.traits.includes('upload')) conditional.push(['Uploaded content is hostile.', 'Type is sniffed, size is capped, the filename is never a path, and metadata is stripped before storage.']);
 
-  const dod = [
-    `Every acceptance criterion of the requirement maps to a named test, or to a manual script that has been run once${d.start.verify === 'automated' ? ` — starting with ${d.start.id}, anch\u200bored at \`${d.anchors.get(d.start.id)}\`` : ` — starting with ${d.start.id}`}.`,
-    '`node specs/spec-check.mjs` passes and the anchor exists in the file it names.',
-    'Failure paths are implemented and tested, not only described.',
-    'No new dependency without an ADR; no new environment variable without documentation.'
-  ];
+  // Definition of done is this packet's gates, readings included, rather than a
+  // second list that can drift from 05-verification.md.
+  const dod = plan.gates.slice(0, 4).map((gate) => {
+    const reading = gateReading(gate, plan, d.words);
+    return `**${gate.id}** — ${gate.statement}${reading ? ` _Here: ${reading}._` : ''}`;
+  });
+  dod.push(
+    `${automatedCount} of ${plan.requirements.length} requirements carry an \`@req\` anchor; ${d.start.id} is the first, at \`${d.anchors.get(d.start.id) ?? 'tests/'}\`.`
+  );
   if (profile.traits.includes('payments')) dod.push(`A refund or reversal path exists and is tested for the ${primary} it applies to.`);
   if (profile.risks.multiTenant) dod.push('At least one test proves a cross-tenant read is impossible.');
   if (plan.config.team > 1) dod.push('The change is reviewable in one sitting; if it is not, it is two changes.');
   else dod.push('The change can be reverted with one command or one flag.');
 
   const protocol = [
-    ['New behaviour', 'Add or amend a requirement in `spec.json`, then write the failing test.'],
-    ['Changed interface or error shape', 'Update the contract inventory in 04-contracts.md, then the test.'],
-    ['New dependency or service', 'ADR in 03-architecture.md: what it replaces, what breaks without it, cost of removal.'],
-    ['Test deletion or weakening', 'Not allowed as a fix. Skip it with a requirement reference and escalate.']
+    [`New behaviour on ${d.aPrimary}`, `Add or amend a requirement in \`spec.json\`, then write the failing ${d.primary} test.`],
+    [`Changed ${d.primary} shape or error`, 'Update the contract inventory in 04-contracts.md, then the test that pins it.'],
+    ['New dependency or service', `ADR in 03-architecture.md: what it replaces, what breaks without it, and what removing it later would cost.`],
+    ['Test deletion or weakening', `Not allowed as a fix for ${d.aPrimary}. Skip it with the requirement id and escalate instead.`]
   ];
   if (profile.kind === 'web-app' || profile.traits.includes('auth')) protocol.push(['Scope expansion', 'Edit the brief and remove something of comparable size in the same change.']);
 
@@ -321,9 +325,9 @@ export function domainModel(plan, d) {
       ? [
           h2('1. Rules your idea already states'),
           '',
-          `Read from the idea verbatim. These are ${d.project}'s own invariants — not the catalog's — and each one is a claim a test can make false. If you implement nothing else from this document, implement these.`,
+          `Read from the idea verbatim. These are ${d.projectPossessive} own invariants — not the catalog's — and each one is a claim a test can make false. If you implement nothing else from this document, implement these.`,
           '',
-          ordered(d.ownRules.map((rule) => `"${rule.replace(/\.$/, '')}" — the failing test that would catch a violation belongs beside the ${d.primary} it constrains.`)),
+          ordered(d.ownRules.map((rule) => `"${rule.replace(/\.$/, '')}" — the test that would catch a violation goes beside the ${d.primary} it protects, and it must fail before the rule is implemented.`)),
           ''
         ]
       : []),
@@ -393,18 +397,27 @@ export function architecture(plan, d) {
   const { profile } = plan;
   const monolith = d.style;
 
+  const central = d.aggregates[0]?.name ?? d.primary;
   const moduleRows = d.contexts.map((context) => [
     context.name,
     context.owns.join(', '),
-    context.name === 'Core' ? 'its own domain only' : 'Core, and shared kernel types',
+    context.name === 'Core' ? `its own ${d.primary} rules only` : 'Core, and shared kernel types',
     'web framework, database driver, vendor SDK'
   ]);
 
+  const adapters = [
+    d.db === 'none' ? 'filesystem' : d.db,
+    'http clients',
+    ...(profile.traits.includes('payments') ? ['payment provider'] : []),
+    ...(profile.traits.includes('notifications') ? ['mail'] : []),
+    ...(profile.traits.includes('background-jobs') || profile.traits.includes('offline') ? ['queue'] : [])
+  ];
+
   moduleRows.push([
     'Infrastructure / adapters',
-    'Database, HTTP client, queue, mail, payment provider',
-    'every context\'s interfaces',
-    'domain of any context (no business rules here)'
+    adapters.join(', '),
+    `every context's interfaces for ${central}`,
+    `the ${d.primary} rules of any context`
   ]);
 
   const contextNames = d.contexts.map((context) => context.name.toLowerCase()).join(' · ');
@@ -497,27 +510,27 @@ export function architecture(plan, d) {
     '',
     h2('7. Decision records'),
     '',
-    'Non-functional targets go here too: latency, availability, recovery time. A number with no measurement method is a slogan, so write "not measured in v1" instead.',
+    `Non-functional targets for ${d.project} go here too: latency on the ${d.primary} write path, availability, recovery time. A number with no measurement method is a slogan, so write "not measured in v1" instead of pretending.`,
     '',
     adrs
       .map(([id, title, context, consequence]) =>
         [`**${id} — ${title}**`, `${context} _Consequence:_ ${consequence}`, ''].join('\n')
       )
       .join('\n'),
-    'Add an ADR for every dependency that would take more than a day to remove, and for every boundary decision that a future reader would otherwise reverse-engineer from code.',
+    `Add an ADR for every dependency around ${d.aPrimary} that would take more than a day to remove, and for every boundary decision a future reader would otherwise reverse-engineer from this repository.`,
     '',
     h2('9. Fitness functions'),
     '',
-    'Architecture that is not executable is decoration.',
+    `Architecture that is not executable is decoration, so each of these runs in CI for ${d.project} rather than living in a review checklist.`,
     '',
     table(['Property', 'Check', 'Automated how', 'Fails when'], fitness),
     '',
     h2('10. When this architecture should change'),
     '',
     bullets([
-      'A module needs to scale on a different curve, measured rather than predicted, or two teams need independent releases.',
-      'One domain operation spans three contexts and cannot be made eventually consistent.',
-      'The domain cannot be tested without booting infrastructure: fix the boundary before adding a service.'
+      `A single ${d.primary} operation needs to scale on a different curve from the rest, measured rather than predicted.`,
+      `A ${d.primary} write starts spanning more than two of the ${d.contexts.length} contexts and cannot be made eventually consistent without rewriting the rules.`,
+      `The tests for ${d.primary} rules need ${d.db} running to pass: that is a broken boundary, not a reason to add a service.`
     ]),
     ''
   ].join('\n');
@@ -527,8 +540,8 @@ export function architecture(plan, d) {
 
 export function contracts(plan, d) {
   const { profile } = plan;
-  const nouns = d.nouns.length ? d.nouns.map((entry) => (typeof entry === 'string' ? entry : entry.word)) : [plan.config.name.toLowerCase()];
-  const primary = nouns[0];
+  const nouns = d.words.length ? d.words : [plan.profile.name.toLowerCase()];
+  const primary = d.primary;
 
   const surfaces = plan.requirements
     .filter((requirement) => ['api', 'data', 'reliability', 'ai'].includes(requirement.render))
@@ -542,7 +555,10 @@ export function contracts(plan, d) {
   // Conventions are only worth the reader's attention when the profile makes them
   // binding. Generic advice in every packet is what made these documents read
   // alike; the rest lives in the library practice this packet selected.
-  const conventions = [['Identifiers', 'Opaque and sortable (ULID). Never a sequential integer in an external shape.'], ['Timestamps', 'ISO-8601 UTC with `Z`. Never a local time, never a bare date for an instant.']];
+  const conventions = [
+    ['Identifiers', `Every ${primary} id is opaque and sortable (ULID); a sequential integer never appears in an external shape, because it invites enumeration.`],
+    ['Timestamps', `Instants on a ${primary} are ISO-8601 UTC with \`Z\`; a local time or a bare date is a bug, not a style choice.`]
+  ];
   if (profile.traits.includes('payments')) {
     conventions.push(['Money', 'Integer minor units plus an ISO-4217 code. Never a float, never a pre-formatted string.']);
     conventions.push(['Idempotency', `Every mutation that can move money takes an \`Idempotency-Key\`; a replay returns the first result, never a second ${primary}.`]);
@@ -559,7 +575,7 @@ export function contracts(plan, d) {
   if (profile.traits.includes('ai')) {
     conventions.push(['Model I/O', 'Input and output are declared schemas; a malformed completion is a rejection, never a partial write.']);
   }
-  conventions.push(['Errors', 'One envelope for every failure, including unknown routes. An absent field is absent, not `null`.']);
+  conventions.push(['Errors', `One envelope for every failure — including an unknown route and a rejected ${primary} — and an absent field is absent, not \`null\`.`]);
 
   // The demo error uses this product's own noun and its most likely failure, not a
   // payment example pasted into every packet.
@@ -577,12 +593,18 @@ export function contracts(plan, d) {
     }
   };
 
+  // Only the statuses this product can actually return. A CLI has no 401.
+  const authenticated = profile.traits.includes('auth') || profile.traits.includes('admin') || profile.risks.multiTenant;
   const statuses = [
-    ['401', 'No valid session', 'Missing, expired or revoked credential. No state change.'],
-    ['403', 'Authenticated but not permitted', 'Policy denied. Never reveal whether the resource exists.'],
-    ['404', 'Not found, or not visible to this actor', 'Identical response for both cases.'],
-    ['409', 'Conflict with current state', `An ${primary} would be left in an impossible state, or a replay carries a different payload.`],
-    ['422', 'Semantically invalid', 'Well-formed but breaks a rule in `02-domain-model.md`.']
+    ...(authenticated
+      ? [
+          ['401', 'No valid session', `Missing, expired or revoked credential. No ${primary} is created and no state changes.`],
+          ['403', 'Authenticated but not permitted', `Policy denied for this ${d.aSecondary}. Never reveal whether the ${primary} exists.`]
+        ]
+      : []),
+    ['404', 'Not found, or not visible to this actor', `One response for both cases, so a ${primary} id cannot be used to probe.`],
+    ['409', 'Conflict with current state', `The ${primary} would be left in a state \`02-domain-model.md\` calls illegal, or a replay carries a different payload.`],
+    ['422', 'Semantically invalid', `Well-formed but breaks a rule that makes ${d.aPrimary} valid.`]
   ];
   if (profile.traits.includes('payments') || profile.traits.includes('upload') || profile.traits.includes('ai')) {
     statuses.push(['429', 'Rate or quota limited', 'Includes `Retry-After` and performs no work.']);
@@ -590,7 +612,7 @@ export function contracts(plan, d) {
 
   const shapes = d.surfaces.slice(0, 4).map(([surface, why]) => {
     if (/HTTP/.test(surface)) return [`\`POST /v1/${primary}s\``, `creates ${d.aPrimary}; returns the created id and its version`, why];
-    if (/Session/.test(surface)) return ['`POST /v1/sessions`', `exchanges credentials for a short-lived token tied to a ${nouns[1] ?? 'user'}`, why];
+    if (/Session/.test(surface)) return ['`POST /v1/sessions`', `exchanges credentials for a short-lived token tied to ${d.aSecondary}`, why];
     if (/Upload/.test(surface)) return ['`POST /v1/uploads`', 'returns a content-addressed id the client then attaches', why];
     if (/Payment/.test(surface)) return ['`POST /v1/payment-intents`', 'one intent per attempt, replayable by key', why];
     if (/webhook/i.test(surface)) return ['`POST /hooks/<provider>`', 'verified signature, deduplicated by provider event id', why];
@@ -652,9 +674,9 @@ export function contracts(plan, d) {
     h2(asyncWork ? '6. Contract tests' : '5. Contract tests'),
     '',
     bullets([
-      'Each surface gets one test asserting the happy path shape and one asserting the error envelope.',
-      'A consumed interface is tested against a recorded response, not a hand-written mock that can drift.',
-      'A breaking change to a shape in section 2 fails the build before review, not after deployment.'
+      `Each of the ${d.surfaces.length} surfaces gets one test for its success shape and one for the ${primary} failure it is most likely to hit.`,
+      `Anything this product consumes is tested against a recorded response; a hand-written mock of a ${d.aSecondary} drifts silently.`,
+      `Changing a shape in section 2 fails the build before review, because the test that pins it lives beside the ${primary} it serialises.`
     ]),
     '',
     'Before implementing any row above: shape written, error code chosen, one failure example recorded.',
@@ -742,9 +764,9 @@ export function verification(plan, d) {
     ),
     '',
     bullets([
-      `An anchor in a test file in \`${d.anchors.get(d.start.id)?.replace(/[^/]+$/, '') ?? 'tests/'}\` counts as proof; an anchor in production code does not.`,
-      'More than one anchor on a requirement is fine and counted; zero is a failure.',
-      'Renaming or deleting the anchored test fails the spec check — that is the point.'
+      `An anchor inside \`${d.anchors.get(d.start.id)?.replace(/[^/]+$/, '') ?? 'tests/'}\` counts as proof; an anchor in the ${d.primary} handler does not.`,
+      `Two anchors on one requirement are fine and both are counted; zero on any of the ${automated.length} automated requirements is a failure.`,
+      `Renaming or deleting the test that proves ${d.start.id} fails the spec check — that is the point of the anchor.`
     ]),
     '',
     h2('3. Traceability'),
@@ -802,7 +824,9 @@ export function verification(plan, d) {
       'No test was weakened, skipped or deleted to make CI pass.',
       'The traceability row is updated and its anchor is green.',
       ...(plan.risks?.pii || plan.profile.risks.pii ? [`No personal field of ${d.aSecondary} reaches a log, fixture or error detail.`] : []),
-      ...(plan.profile.traits.includes('auth') || plan.profile.risks.multiTenant ? [`Every new read of another actor's ${d.primary} is authorized server-side.`] : []),
+      ...(plan.profile.traits.includes('auth') || plan.profile.risks.multiTenant
+        ? [`Every new read of another ${d.secondary}'s ${d.primary} is authorized server-side.`]
+        : []),
       ...(plan.primitives.some((primitive) => primitive.id === 'engineering.dependency-policy') ? ['New dependency? ADR present, pinned, removable in a day.'] : [])
     ]),
     '',
@@ -1103,13 +1127,13 @@ export function agentsMd(plan, d) {
         ['The order of work', '`spec.md` section 6']
       ]
     : [
-        ['The rules you cannot break', '`00-constitution.md`'],
-        ['What this product is and is not', '`01-product-brief.md`'],
-        ['The nouns to use in code', '`02-domain-model.md`'],
-        ['What may import what', '`03-architecture.md`'],
-        ['Interface shapes', '`04-contracts.md`'],
-        ['How your work is judged', '`05-verification.md`']
-      ].filter(([, file]) => [...plan.docs, 'AGENTS.md'].includes(file.replace(/`/g, '')));
+        ['The rules you cannot break', `\`00-constitution.md\` — ${plan.requirements.length} requirements, ${plan.primitives.length} practices`],
+        ['What this product is and is not', `\`01-product-brief.md\` — ${d.primary}, ${d.secondary}, non-goals`],
+        ['The nouns to use in code', `\`02-domain-model.md\` — ${d.aggregates.length} aggregates, ${d.nouns.length} candidate terms`],
+        ['What may import what', `\`03-architecture.md\` — ${d.contexts.length} contexts, ${d.decisions.length} ADRs`],
+        ['Interface shapes', `\`04-contracts.md\` — ${d.surfaces.length} surfaces on ${d.db}`],
+        ['How your work is judged', `\`05-verification.md\` — ${plan.gates.length} gates`]
+      ].filter(([, detail]) => plan.docs.includes(detail.split(' ')[0].replace(/`/g, '')));
 
   return [
     h1('AGENTS.md'),
@@ -1159,9 +1183,9 @@ export function agentsMd(plan, d) {
     '',
     bullets([
       `The criteria of your ${d.primary} requirement have passing assertions, not just a green run.`,
-      `\`node specs/spec-check.mjs\` passes against the ${plan.requirements.length} requirements in this packet.`,
-      single ? 'The anchor in `spec.json` matches the test file you wrote.' : 'The traceability row in `05-verification.md` names your test file.',
-      'You reported what changed, what you are unsure about, and stopped.'
+      `\`node specs/spec-check.mjs\` passes against ${automated.length} anchored requirements in this packet.`,
+      single ? `The anchor in \`spec.json\` names \`${d.anchors.get(d.start.id) ?? 'tests/'}\`.` : `The traceability row in \`05-verification.md\` names your file, and \`${d.anchors.get(d.start.id) ?? 'tests/'}\` exists.`,
+      `You reported what changed on the ${d.primary}, what you are unsure about, and stopped.`
     ]),
     '',
     h2('Escalate rather than guess'),

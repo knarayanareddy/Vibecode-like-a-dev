@@ -7,7 +7,7 @@
 **Modular monolith with enforced boundaries.** One deployable, several modules, boundaries checked mechanically. Microservices multiply failure modes before a product has found its shape; the seams here are the ones that survive the split if it ever comes.
 
 - Rejected: microservices — a board write would need a distributed transaction, and there is no team boundary to gain.
-- Rejected: serverless-per-endpoint — the board lifecycle crosses several calls, and cold starts would be paid by a teams.
+- Rejected: serverless-per-endpoint — the board lifecycle crosses several calls, and cold starts would be paid by a facilitator.
 - Rejected: framework-shaped folders — they would put the board rules next to the transport code that is supposed to be the thinnest layer.
 
 ## 2. Shape
@@ -28,10 +28,10 @@ Imports point downward only. Anything pointing back up is a bug in Retro Board, 
 
 | Module | Responsibility | May import | Must not import |
 | --- | --- | --- | --- |
-| Core | the product's central aggregate (name it) | its own domain only | web framework, database driver, vendor SDK |
+| Core | the product's central aggregate (name it) | its own board rules only | web framework, database driver, vendor SDK |
 | Identity & Access | Account, Session, Policy, Membership | Core, and shared kernel types | web framework, database driver, vendor SDK |
 | Realtime | Channel, Subscription | Core, and shared kernel types | web framework, database driver, vendor SDK |
-| Infrastructure / adapters | Database, HTTP client, queue, mail, payment provider | every context's interfaces | domain of any context (no business rules here) |
+| Infrastructure / adapters | PostgreSQL, http clients | every context's interfaces for Record | the board rules of any context |
 
 ## 4. Stack
 
@@ -74,7 +74,7 @@ Written for **REQ-001 Runnable from a clean clone** — the first requirement, a
 
 ## 7. Decision records
 
-Non-functional targets go here too: latency, availability, recovery time. A number with no measurement method is a slogan, so write "not measured in v1" instead.
+Non-functional targets for Retro Board go here too: latency on the board write path, availability, recovery time. A number with no measurement method is a slogan, so write "not measured in v1" instead of pretending.
 
 **ADR-001 — Architecture: Modular monolith with enforced boundaries**
 One deployable, several modules, boundaries checked mechanically. Microservices multiply failure modes before a product has found its shape; the seams here are the ones that survive the split if it ever comes. _Consequence:_ Boundaries are checked by an import rule in CI, not by review.
@@ -88,11 +88,11 @@ Client-side checks are hints, not controls; the server is the only caller that c
 **ADR-006 — Realtime transport: one ordering guarantee, stated**
 Realtime failures are ordering failures far more often than delivery failures. _Consequence:_ Every event carries a sequence; the client reconciles on reconnect rather than assuming.
 
-Add an ADR for every dependency that would take more than a day to remove, and for every boundary decision that a future reader would otherwise reverse-engineer from code.
+Add an ADR for every dependency around a board that would take more than a day to remove, and for every boundary decision a future reader would otherwise reverse-engineer from this repository.
 
 ## 9. Fitness functions
 
-Architecture that is not executable is decoration.
+Architecture that is not executable is decoration, so each of these runs in CI for Retro Board rather than living in a review checklist.
 
 | Property | Check | Automated how | Fails when |
 | --- | --- | --- | --- |
@@ -105,6 +105,6 @@ Architecture that is not executable is decoration.
 
 ## 10. When this architecture should change
 
-- A module needs to scale on a different curve, measured rather than predicted, or two teams need independent releases.
-- One domain operation spans three contexts and cannot be made eventually consistent.
-- The domain cannot be tested without booting infrastructure: fix the boundary before adding a service.
+- A single board operation needs to scale on a different curve from the rest, measured rather than predicted.
+- A board write starts spanning more than two of the 3 contexts and cannot be made eventually consistent without rewriting the rules.
+- The tests for board rules need PostgreSQL running to pass: that is a broken boundary, not a reason to add a service.

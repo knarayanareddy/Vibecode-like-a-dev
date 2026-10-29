@@ -27,9 +27,9 @@ test('runnable from a clean clone (AC-01)', async () => {
 });
 ```
 
-- An anchor in a test file in `tests/core/` counts as proof; an anchor in production code does not.
-- More than one anchor on a requirement is fine and counted; zero is a failure.
-- Renaming or deleting the anchored test fails the spec check — that is the point.
+- An anchor inside `tests/core/` counts as proof; an anchor in the board handler does not.
+- Two anchors on one requirement are fine and both are counted; zero on any of the 10 automated requirements is a failure.
+- Renaming or deleting the test that proves REQ-001 fails the spec check — that is the point of the anchor.
 
 ## 3. Traceability
 
@@ -38,19 +38,19 @@ Anchor column: suggested path, followed by `?` until the file exists. Toggle the
 | Req | Criteria | Verified by | Anchor |
 | --- | --- | --- | --- |
 | REQ-001 | A clean clone of Retro Board runs with one documented command, and a missing setting is named rather than guessed. | gate | manual script | ☐ |
-| REQ-002 | A board goes from creation to completion end to end, through the documented interface only. | automated | `tests/core/core-primary-journey.test.ts?` | ☐ |
-| REQ-003 | The three things Retro Board will not do are written down and reviewed before the first sprint. | manual | manual script | ☐ |
-| REQ-004 | State about a board survives a restart in PostgreSQL, and every schema change is a forward-only migration. | automated | `tests/data/data-persistence.test.ts?` | ☐ |
-| REQ-005 | A team signs in and out, and a revoked session stops working server-side. | automated | `tests/security/auth-identity.test.ts?` | ☐ |
-| REQ-006 | Reading or changing someone else's board is refused by the server, not hidden by the client. | automated | `tests/security/auth-authorization.test.ts?` | ☐ |
-| REQ-007 | The main board journey is completable with a keyboard and a screen reader. | manual | manual script | ☐ |
-| REQ-008 | Every board screen has loading, empty, error and success states — not only success. | manual | manual script | ☐ |
-| REQ-009 | Colour and spacing come from one token source, so rebranding the board view is one file. | automated | `tests/frontend/ui-design-tokens.test.ts?` | ☐ |
-| REQ-010 | A board error is classified before it is rendered, so the message tells teams what to do next. | automated | `tests/frontend/ux-error-taxonomy.test.ts?` | ☐ |
-| REQ-011 | The board interface has a versioned, machine-readable contract that a test enforces. | automated | `tests/api/api-contract.test.ts?` | ☐ |
-| REQ-012 | Every failure on the board interface returns the same envelope, and every id in it is opaque. | automated | `tests/api/api-error-envelope.test.ts?` | ☐ |
-| REQ-013 | Public entry points that create or change board data are limited per identity and per address. | automated | `tests/security/ops-rate-limits.test.ts?` | ☐ |
-| REQ-014 | The rules that make a board valid are written down, and each one has a test that would fail if it broke. | automated | `tests/core/core-domain-invariants.test.ts?` | ☐ |
+| REQ-002 | One board goes from created to finished end to end through the documented interface, with no manual step in the middle and nothing reachable only by a developer. | automated | `tests/core/core-primary-journey.test.ts?` | ☐ |
+| REQ-003 | The three things Retro Board will not do in v1 are written down, reviewed before the first sprint, and cited the first time someone asks for a fourth thing. | manual | manual script | ☐ |
+| REQ-004 | What Retro Board knows about a board survives a restart in PostgreSQL, and every schema change is a forward-only migration with a restore step that has been run once. | automated | `tests/data/data-persistence.test.ts?` | ☐ |
+| REQ-005 | A facilitator signs in and signs out, and a revoked session stops working on the server immediately rather than at the next token expiry. | automated | `tests/security/auth-identity.test.ts?` | ☐ |
+| REQ-006 | Reading or changing another facilitator's board is refused by the server; the interface is allowed to hide the control but never to be the control. | automated | `tests/security/auth-authorization.test.ts?` | ☐ |
+| REQ-007 | The main board journey completes with a keyboard and a screen reader, error states included, and focus lands somewhere sensible after every navigation. | manual | manual script | ☐ |
+| REQ-008 | Every board screen has loading, empty, error and success states, and the error state carries the next action rather than an apology. | manual | manual script | ☐ |
+| REQ-009 | Colour, spacing and type come from one token source, so restyling the board views is a change to one file and not to every component. | automated | `tests/frontend/ui-design-tokens.test.ts?` | ☐ |
+| REQ-010 | A board failure is classified before it is rendered, so the message tells the facilitator what to do next and never leaks an identifier they cannot act on. | automated | `tests/frontend/ux-error-taxonomy.test.ts?` | ☐ |
+| REQ-011 | The board interface has a versioned, machine-readable contract kept in the repository, and a breaking change fails before merge rather than after a consumer notices. | automated | `tests/api/api-contract.test.ts?` | ☐ |
+| REQ-012 | Every failure on the board interface returns one envelope shape, with an opaque identifier a support conversation can quote. | automated | `tests/api/api-error-envelope.test.ts?` | ☐ |
+| REQ-013 | Public entry points that create or change board data are limited per identity and per address, and say how long to wait when they refuse. | automated | `tests/security/ops-rate-limits.test.ts?` | ☐ |
+| REQ-014 | The rules that make a board valid are written down, and each one has a test that fails when the rule is broken rather than a comment saying it matters. | automated | `tests/core/core-domain-invariants.test.ts?` | ☐ |
 
 ## 4. Gates for tier 1
 
@@ -97,7 +97,7 @@ What it fails on: a missing document, one of the 10 automated requirements witho
 - [ ] The failure path of the board change exists in code and in a test.
 - [ ] No test was weakened, skipped or deleted to make CI pass.
 - [ ] The traceability row is updated and its anchor is green.
-- [ ] No personal field of a teams reaches a log, fixture or error detail.
-- [ ] Every new read of another actor's board is authorized server-side.
+- [ ] No personal field of a facilitator reaches a log, fixture or error detail.
+- [ ] Every new read of another facilitator's board is authorized server-side.
 
 Deliberately absent: a coverage percentage target (it rewards executing code, not checking it), mocks of the domain to test the domain, and tests of framework behaviour. Reasoning: `testing.test-budget` in the library.

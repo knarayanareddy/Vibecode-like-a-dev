@@ -212,6 +212,10 @@ export function selectRequirements(profile, catalog, rigor, previousIds = {}) {
     render: requirement.render,
     title: requirement.title,
     statement: requirement.statement,
+    // How this obligation reads in *this* product's words. The catalog owns the
+    // sentence; the emitter only fills in the vocabulary, so improving what a
+    // requirement means is a catalog edit rather than a change to the compiler.
+    definition: requirement.definition ?? null,
     failurePath: requirement.failurePath,
     acceptance: (requirement.acceptance ?? []).map((text, acIndex) => ({
       id: `AC-${String(acIndex + 1).padStart(2, '0')}`,

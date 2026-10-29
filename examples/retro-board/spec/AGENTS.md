@@ -12,12 +12,12 @@ First: **REQ-001** — A clean clone of Retro Board runs with one documented com
 
 | Question | Document |
 | --- | --- |
-| The rules you cannot break | `00-constitution.md` |
-| What this product is and is not | `01-product-brief.md` |
-| The nouns to use in code | `02-domain-model.md` |
-| What may import what | `03-architecture.md` |
-| Interface shapes | `04-contracts.md` |
-| How your work is judged | `05-verification.md` |
+| The rules you cannot break | `00-constitution.md` — 14 requirements, 22 practices |
+| What this product is and is not | `01-product-brief.md` — board, facilitator, non-goals |
+| The nouns to use in code | `02-domain-model.md` — 4 aggregates, 6 candidate terms |
+| What may import what | `03-architecture.md` — 3 contexts, 4 ADRs |
+| Interface shapes | `04-contracts.md` — 3 surfaces on PostgreSQL |
+| How your work is judged | `05-verification.md` — 8 gates |
 
 ## Commands
 
@@ -38,13 +38,13 @@ An agent that cannot run the checks will claim success instead.
 ## Done means
 
 - The criteria of your board requirement have passing assertions, not just a green run.
-- `node specs/spec-check.mjs` passes against the 14 requirements in this packet.
-- The traceability row in `05-verification.md` names your test file.
-- You reported what changed, what you are unsure about, and stopped.
+- `node specs/spec-check.mjs` passes against 10 anchored requirements in this packet.
+- The traceability row in `05-verification.md` names your file, and `tests/core/core-runnable.test.ts` exists.
+- You reported what changed on the board, what you are unsure about, and stopped.
 
 ## Escalate rather than guess
 
 - REQ-001 or another requirement contradicts a document in this packet.
 - A gate fails for a reason outside the board change you made.
-- The packet does not decide something about the teams — most often permissions or deletion.
+- The packet does not decide something about the facilitator — most often permissions or deletion.
 - You have tried the same fix three times.
