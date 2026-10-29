@@ -707,7 +707,7 @@ export function verification(plan, d) {
     stamp(plan),
     '',
     quote(
-      'Coverage measures execution. Assertions measure whether a test would notice a bug. This plan optimises for the second, and binds every automated requirement to a named test so the spec cannot drift away from the code without CI saying so.'
+      `Coverage measures execution; assertions measure whether a test would notice ${d.aPrimary} going wrong. This plan optimises for the second and binds ${automated.length} of ${plan.requirements.length} requirements to a named test, so ${d.project} cannot drift away from its spec without CI saying so.`
     ),
     '',
     h2('1. Test layers'),
