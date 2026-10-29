@@ -34,7 +34,7 @@ Start with **REQ-001** — A clean clone of Retro Board runs with one documented
 | REQ-001 | A clean clone of Retro Board runs with one documented command, and a missing setting is named rather than guessed. | gate | manual run |
 | REQ-002 | A board goes from creation to completion end to end, through the documented interface only. | automated | `tests/core/core-primary-journey.test.ts` |
 | REQ-003 | The three things Retro Board will not do are written down and reviewed before the first sprint. | manual | manual run |
-| REQ-004 | Board survive a restart in PostgreSQL, and every schema change is a forward-only migration. | automated | `tests/data/data-persistence.test.ts` |
+| REQ-004 | State about a board survives a restart in PostgreSQL, and every schema change is a forward-only migration. | automated | `tests/data/data-persistence.test.ts` |
 | REQ-005 | A team signs in and out, and a revoked session stops working server-side. | automated | `tests/security/auth-identity.test.ts` |
 | REQ-006 | Reading or changing someone else's board is refused by the server, not hidden by the client. | automated | `tests/security/auth-authorization.test.ts` |
 | REQ-007 | The main board journey is completable with a keyboard and a screen reader. | manual | manual run |
@@ -43,7 +43,7 @@ Start with **REQ-001** — A clean clone of Retro Board runs with one documented
 | REQ-010 | A board error is classified before it is rendered, so the message tells teams what to do next. | automated | `tests/frontend/ux-error-taxonomy.test.ts` |
 | REQ-011 | The board interface has a versioned, machine-readable contract that a test enforces. | automated | `tests/api/api-contract.test.ts` |
 | REQ-012 | Every failure on the board interface returns the same envelope, and every id in it is opaque. | automated | `tests/api/api-error-envelope.test.ts` |
-| REQ-013 | Public entry points that create or change board are limited per identity and per address. | automated | `tests/security/ops-rate-limits.test.ts` |
+| REQ-013 | Public entry points that create or change board data are limited per identity and per address. | automated | `tests/security/ops-rate-limits.test.ts` |
 | REQ-014 | The rules that make a board valid are written down, and each one has a test that would fail if it broke. | automated | `tests/core/core-domain-invariants.test.ts` |
 
 ## 3. What to read for your area

@@ -30,13 +30,13 @@ Answer from the board side, in the user's words. These four answers are what an 
 
 **Data**
 
-- `REQ-004` Board survive a restart in PostgreSQL, and every schema change is a forward-only migration. _(durable state with forward-only migrations)_
+- `REQ-004` State about a board survives a restart in PostgreSQL, and every schema change is a forward-only migration. _(durable state with forward-only migrations)_
 
 **Security**
 
 - `REQ-005` A team signs in and out, and a revoked session stops working server-side. _(authentication with explicit session lifecycle)_
 - `REQ-006` Reading or changing someone else's board is refused by the server, not hidden by the client. _(server-side authorization with deny-by-default)_
-- `REQ-013` Public entry points that create or change board are limited per identity and per address. _(abuse limits on public entry points)_
+- `REQ-013` Public entry points that create or change board data are limited per identity and per address. _(abuse limits on public entry points)_
 
 **Interface**
 

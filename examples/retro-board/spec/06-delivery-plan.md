@@ -52,10 +52,10 @@ _Every boundary is fixed while changing it is still free._
 
 _Working board behaviour end to end, one requirement at a time._
 
-- [ ] REQ-004 Board survive a restart in PostgreSQL, and every schema change is a forward-only migration. Test first, then implement, then trace.
+- [ ] REQ-004 State about a board survives a restart in PostgreSQL, and every schema change is a forward-only migration. Test first, then implement, then trace.
 - [ ] REQ-005 A team signs in and out, and a revoked session stops working server-side. Test first, then implement, then trace.
 - [ ] REQ-006 Reading or changing someone else's board is refused by the server, not hidden by the client. Test first, then implement, then trace.
-- [ ] REQ-013 Public entry points that create or change board are limited per identity and per address. Test first, then implement, then trace.
+- [ ] REQ-013 Public entry points that create or change board data are limited per identity and per address. Test first, then implement, then trace.
 - [ ] REQ-011 The board interface has a versioned, machine-readable contract that a test enforces. Test first, then implement, then trace.
 - [ ] REQ-012 Every failure on the board interface returns the same envelope, and every id in it is opaque. Test first, then implement, then trace.
 
