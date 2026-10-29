@@ -126,6 +126,16 @@ const enforced = new Set(primitives.flatMap((primitive) => primitive.enforces ??
 const unenforced = catalog.map((requirement) => requirement.key).filter((key) => !enforced.has(key));
 const unbound = primitives.filter((primitive) => (primitive.enforces ?? []).length === 0).map((primitive) => primitive.id);
 
+// A requirement whose text cannot be said in the product's own words is a
+// requirement that will be copied verbatim into every packet. The `definition`
+// template is what makes it read about *this* product, so a missing or
+// placeholder-free definition is a catalog defect, not a style preference.
+const PRODUCT_SLOT = /\{(primary|aPrimary|primaryPlural|secondary|aSecondary|secondaryPlural|project|db)\}/;
+const missingDefinition = catalog.filter((requirement) => !requirement.definition).map((requirement) => requirement.key);
+const genericDefinition = catalog
+  .filter((requirement) => requirement.definition && !PRODUCT_SLOT.test(requirement.definition))
+  .map((requirement) => requirement.key);
+
 const findings = [];
 if (selfRecallAtOne < THRESHOLDS.selfRecallAtOne) {
   findings.push({
@@ -138,6 +148,15 @@ if (collisions.length > THRESHOLDS.maxCollisions) {
 }
 if (never.length > THRESHOLDS.maxUnselected) {
   findings.push({ id: 'dead-weight', detail: `never selected by any of ${profilesRun} profiles: ${never.join(', ')}` });
+}
+if (missingDefinition.length > 0) {
+  findings.push({ id: 'requirement-without-definition', detail: missingDefinition.join(', ') });
+}
+if (genericDefinition.length > 0) {
+  findings.push({
+    id: 'requirement-definition-is-generic',
+    detail: `no product slot in: ${genericDefinition.join(', ')}`
+  });
 }
 if (universal.length > 0) {
   findings.push({
@@ -159,6 +178,8 @@ const report = {
   declaredAlways: [...declaredAlways],
   unenforced,
   unbound,
+  missingDefinition,
+  genericDefinition,
   selectionCount: Object.fromEntries([...selectionCount.entries()].sort((a, b) => b[1] - a[1])),
   findings
 };
@@ -180,6 +201,11 @@ if (JSON_OUT) {
   const ranked = Object.entries(report.selectionCount).slice(0, 6);
   console.log(`  most selected:  ${ranked.map(([id, count]) => `${id} ${count}`).join(' · ')}`);
   console.log(`catalog reach     ${catalog.length - unenforced.length}/${catalog.length} requirements have an enforcing practice`);
+  console.log(
+    `product wording   ${catalog.length - missingDefinition.length - genericDefinition.length}/${catalog.length} requirements define themselves in the product's words`
+  );
+  if (missingDefinition.length > 0) console.log(`  no definition: ${missingDefinition.join(', ')}`);
+  if (genericDefinition.length > 0) console.log(`  definition never names the product: ${genericDefinition.join(', ')}`);
   if (unenforced.length > 0) console.log(`  no practice enforces: ${unenforced.join(', ')}`);
   if (unbound.length > 0) console.log(`  practices that enforce nothing: ${unbound.length} (${unbound.slice(0, 6).join(', ')}${unbound.length > 6 ? ', …' : ''})`);
 

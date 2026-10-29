@@ -304,7 +304,7 @@ The two runs found fourteen defects. The first wave: catalog insertions renumber
 
 The adversarial wave broke eight more: an idea could forge a document heading; a long idea pushed a tier-1 packet over its ceiling; unrecognised stacks were given invented npm commands; an `agent` without the `ai` trait had no model guardrails; payments declared as a feature but not as a risk earned neither the obligation nor the rigor; a tier-0 sketch could receive ten requirements; `compile -o <existing file>` crashed with a stack trace; and a library was told to enforce tenant isolation "at its data access layer". All fixed, all with a test.
 
-The finding that did not get fixed, because it is the product's actual boundary: **mean idea-vocabulary coverage is 21%**. The catalog knows engineering classes — payments, tenancy, pipelines, public libraries — not your business. So every normative sentence in an idea that no requirement covers is quoted back as an *unmapped obligation*, and `vld change` is how it becomes a requirement. Full results and method: [`docs/STRESS-TEST.md`](docs/STRESS-TEST.md).
+The finding that is only partly fixed, because it is the product's actual boundary: **mean idea-vocabulary coverage is 50%** (it was 21% before the packet started deriving its vocabulary from the idea; the remaining half is the business logic no catalog can predict). The catalog knows engineering classes — payments, tenancy, pipelines, public libraries — not your business. So every normative sentence in an idea that no requirement covers is quoted back as an *unmapped obligation*, and `vld change` is how it becomes a requirement. Full results and method: [`docs/STRESS-TEST.md`](docs/STRESS-TEST.md).
 
 ## Why not just use Spec Kit / Kiro / BMAD / OpenSpec?
 
@@ -360,6 +360,7 @@ primitives/            34 practices, grouped by module, each with SKILL.md
 prompts/
   bootstrap.md         agent-driven path: one prompt, no CLI
 factory/
+  lib/emit/vocabulary.mjs   the product's nouns: scored from the idea, grammatical or it falls back
   cli.mjs              init · plan · compile · verify · index
   policy.json          tiers, risk signals, gates, size ceilings
   routing.json         which practice applies when, and why
@@ -403,7 +404,7 @@ npm run check   # index freshness + tests + example packet + own drift guard + s
 - **Delta specs are declarative.** `vld change` produces the proposal, the manifest diff and the verification rules, but it cannot apply a migration or prove the blast radius is complete for you.
 - **MCP tools select; they do not write.** The server answers "what applies and why". Composing the packet is still a compile (or a human/agent writing prose).
 - **The CLI path assumes the profile describes the project honestly.** If you say `mvp` about a regulated product, you get a light packet. The `risks` fields exist because intent cannot be inferred.
-- **The catalog knows classes, not businesses.** Measured over ten ideas, 21% of the idea's distinctive vocabulary reaches the requirements or the domain model. Payments, tenancy, pipelines and public libraries are well covered because they are heavily conventional; a log shipper or a standup bot is a scaffold plus a checklist of the author's own rules. The packet says so out loud rather than pretending otherwise.
+- **The catalog knows classes, not businesses.** Measured over ten ideas, 50% of the idea's distinctive vocabulary reaches the requirements or the domain model — up from 21%, because the domain model now leads with the idea's own nouns and its own stated rules. The other half is genuinely absent: a log shipper's packet now lists `position`, `shipper` and `dead-letter` as terms (the vocabulary comes from the idea), but no requirement covers redaction or acknowledged-after-acceptance, because no catalog obligation says "log shipper". Naming a thing is not specifying it. Payments, tenancy, pipelines and public libraries are well covered because they are heavily conventional; a log shipper or a standup bot is a scaffold plus a checklist of the author's own rules. The packet says so out loud rather than pretending otherwise.
 - **Tier 1 has very little headroom.** The tightest packet in the stress set sits at 885 of 900 lines. The ceiling is deliberate — length is this category's main failure — but it means a new tier-1 obligation requires trimming prose first.
 - **Self-consistency is not effectiveness.** This repository passes its own guard, which shows the pipeline is coherent, not that the resulting software is better. The packet also describes a tool whose requirements are unusually easy to anchor because the tool is tested; other products will find that step harder, and nothing here measures that difficulty.
 - **Not published to npm yet.** Clone and use `node factory/cli.mjs`. The `bin` entry is ready.

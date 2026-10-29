@@ -13,7 +13,7 @@ Answer from the board side, in the user's words. These four answers are what an 
 | Question | Answer for Retro Board |
 | --- | --- |
 | Who handles the board today? | _confirm_ |
-| What do they do instead — a spreadsheet, a chat thread, a teams in another tool? | _confirm_ |
+| What do they do instead — a spreadsheet, a chat thread, a facilitator in another tool? | _confirm_ |
 | What does Retro Board remove from that day? | _confirm_ |
 | What makes them abandon it after one use? | _confirm_ |
 
@@ -24,42 +24,42 @@ Answer from the board side, in the user's words. These four answers are what an 
 **Foundation**
 
 - `REQ-001` A clean clone of Retro Board runs with one documented command, and a missing setting is named rather than guessed. _(runnable from a clean clone)_
-- `REQ-002` A board goes from creation to completion end to end, through the documented interface only. _(the primary journey works end to end)_
-- `REQ-003` The three things Retro Board will not do are written down and reviewed before the first sprint. _(explicit non-goals)_
-- `REQ-014` The rules that make a board valid are written down, and each one has a test that would fail if it broke. _(the product's own rules are named and pinned)_
+- `REQ-002` One board goes from created to finished end to end through the documented interface, with no manual step in the middle and nothing reachable only by a developer. _(the primary journey works end to end)_
+- `REQ-003` The three things Retro Board will not do in v1 are written down, reviewed before the first sprint, and cited the first time someone asks for a fourth thing. _(explicit non-goals)_
+- `REQ-014` The rules that make a board valid are written down, and each one has a test that fails when the rule is broken rather than a comment saying it matters. _(the product's own rules are named and pinned)_
 
 **Data**
 
-- `REQ-004` State about a board survives a restart in PostgreSQL, and every schema change is a forward-only migration. _(durable state with forward-only migrations)_
+- `REQ-004` What Retro Board knows about a board survives a restart in PostgreSQL, and every schema change is a forward-only migration with a restore step that has been run once. _(durable state with forward-only migrations)_
 
 **Security**
 
-- `REQ-005` A team signs in and out, and a revoked session stops working server-side. _(authentication with explicit session lifecycle)_
-- `REQ-006` Reading or changing someone else's board is refused by the server, not hidden by the client. _(server-side authorization with deny-by-default)_
-- `REQ-013` Public entry points that create or change board data are limited per identity and per address. _(abuse limits on public entry points)_
+- `REQ-005` A facilitator signs in and signs out, and a revoked session stops working on the server immediately rather than at the next token expiry. _(authentication with explicit session lifecycle)_
+- `REQ-006` Reading or changing another facilitator's board is refused by the server; the interface is allowed to hide the control but never to be the control. _(server-side authorization with deny-by-default)_
+- `REQ-013` Public entry points that create or change board data are limited per identity and per address, and say how long to wait when they refuse. _(abuse limits on public entry points)_
 
 **Interface**
 
-- `REQ-007` The main board journey is completable with a keyboard and a screen reader. _(accessible primary journey)_
-- `REQ-008` Every board screen has loading, empty, error and success states — not only success. _(every screen has loading, empty, error and success states)_
-- `REQ-009` Colour and spacing come from one token source, so rebranding the board view is one file. _(one design token source)_
-- `REQ-010` A board error is classified before it is rendered, so the message tells teams what to do next. _(errors are classified before they are rendered)_
+- `REQ-007` The main board journey completes with a keyboard and a screen reader, error states included, and focus lands somewhere sensible after every navigation. _(accessible primary journey)_
+- `REQ-008` Every board screen has loading, empty, error and success states, and the error state carries the next action rather than an apology. _(every screen has loading, empty, error and success states)_
+- `REQ-009` Colour, spacing and type come from one token source, so restyling the board views is a change to one file and not to every component. _(one design token source)_
+- `REQ-010` A board failure is classified before it is rendered, so the message tells the facilitator what to do next and never leaks an identifier they cannot act on. _(errors are classified before they are rendered)_
 
 **Interface & contracts**
 
-- `REQ-011` The board interface has a versioned, machine-readable contract that a test enforces. _(versioned machine-readable interface contract)_
-- `REQ-012` Every failure on the board interface returns the same envelope, and every id in it is opaque. _(one error envelope and one identifier scheme)_
+- `REQ-011` The board interface has a versioned, machine-readable contract kept in the repository, and a breaking change fails before merge rather than after a consumer notices. _(versioned machine-readable interface contract)_
+- `REQ-012` Every failure on the board interface returns one envelope shape, with an opaque identifier a support conversation can quote. _(one error envelope and one identifier scheme)_
 
 ## Out of scope
 
 Written for Retro Board specifically. Confirm or replace before Phase 2 — the list is worth more than any single line on it.
 
 - Any board capability the idea does not name. When in doubt, it is out of scope and gets its own version.
-- Importing board data from an existing system: v1 starts empty and the first teams enters it by hand.
-- Any generated or summarised board content. Every word in v1 is written by a team.
-- Notifying teams outside the product: no email, no push, no digest.
+- Importing board data from an existing system: v1 starts empty and the first facilitator enters it by hand.
+- Any generated or summarised board content. Every word in v1 is written by a facilitator.
+- Notifying facilitator outside the product: no email, no push, no digest.
 - A public board API for third parties, SDKs and published integrations.
-- A native client for the board. If teams need it offline, that is a v2 decision with its own sync contract.
+- A native client for the board. If facilitator need it offline, that is a v2 decision with its own sync contract.
 - Custom reporting and exports over board data beyond what one screen shows.
 
 ## Success measures
@@ -88,8 +88,8 @@ These do not block Phase 0; they block the board slice they belong to. An answer
 
 1. Who creates the first board, and what do they use today instead?
 2. What must never happen to a board — and what does it cost when it does?
-3. Which part of the board workflow could be dropped without losing the reason teams open it?
-4. How many board records exist in year one, and how many teams touch them at once?
+3. Which part of the board workflow could be dropped without losing the reason facilitator open it?
+4. How many board records exist in year one, and how many facilitator touch them at once?
 5. Who notices first when a board is wrong, and how do they find out?
 6. Which fields are personal data, and what is the retention period and lawful basis for each?
 7. Which sign-in methods are in scope for v1 — password, magic link, OAuth provider?

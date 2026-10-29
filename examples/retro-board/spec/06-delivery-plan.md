@@ -14,20 +14,20 @@ Build the smallest end-to-end slice of **The primary journey works end to end** 
 
 ### Phase 0 — Skeleton and guardrails · week 1-1
 
-_A running, tested, documented empty box. Nothing built on a broken foundation._
+_A running, tested, documented box that can create and delete a board and nothing else._
 
 - [ ] Initialise the repository with TypeScript (strict) and PostgreSQL; commit the lockfile.
 - [ ] Add the CI workflow with lint, typecheck and test jobs, and make it required on the default branch.
 - [ ] Add configuration validation that names every missing variable before the first board is created.
-- [ ] Write the runbook: install, run, test, deploy, and what teams see when the board service is down.
+- [ ] Write the runbook: install, run, test, deploy, and what facilitators see when the board service is down.
 - [ ] Copy the specification packet into specs/ and wire the spec check into CI.
 - [ ] Answer the open questions that block the board slice; the rest can wait for their phase.
 
-**Exit:** A new contributor can clone, run and test with the documented commands. CI is green on an empty suite.
+**Exit:** The documented command creates and deletes a board through PostgreSQL, and CI is green on that alone.
 
 ### Phase 1 — Domain core · week 2-2
 
-_The rules of the product, expressed in code, before any framework is chosen for them._
+_The rules that make a board valid, in code, before any framework is chosen for them._
 
 - [ ] Fill the language table around a board: one term, one meaning, no synonyms.
 - [ ] Write failing tests for each rule a board must satisfy, including the ones the idea states in its own words.
@@ -35,56 +35,56 @@ _The rules of the product, expressed in code, before any framework is chosen for
 - [ ] Define typed errors for the ways a board can be rejected; no exception control flow across module boundaries.
 - [ ] Review assertion quality by hand: every board test must fail if its rule is inverted.
 
-**Exit:** Domain tests pass and the domain layer imports nothing from infrastructure.
+**Exit:** A board rules pass their tests with no infrastructure imported — no PostgreSQL, no framework.
 
 ### Phase 2 — Contracts before implementation · week 3-3
 
-_Every boundary is fixed while changing it is still free._
+_Every boundary around a board fixed while changing it is still free._
 
 - [ ] Fix each shape in the contract inventory: REQ-011, REQ-012.
 - [ ] Write the acceptance tests for a board first; they must fail for missing behaviour, not missing setup.
 - [ ] Record a real response for every external dependency, or write down the stub and why.
 - [ ] Record an ADR for each library that a reviewer could plausibly want removed.
 
-**Exit:** Acceptance tests exist and fail for the right reason (missing behaviour, not missing setup).
+**Exit:** The a board acceptance tests exist and fail because the behaviour is missing, not because the setup is.
 
 ### Phase 3 — Vertical slices · week 4-4
 
 _Working board behaviour end to end, one requirement at a time._
 
-- [ ] REQ-004 State about a board survives a restart in PostgreSQL, and every schema change is a forward-only migration. Test first, then implement, then trace.
-- [ ] REQ-005 A team signs in and out, and a revoked session stops working server-side. Test first, then implement, then trace.
-- [ ] REQ-006 Reading or changing someone else's board is refused by the server, not hidden by the client. Test first, then implement, then trace.
-- [ ] REQ-013 Public entry points that create or change board data are limited per identity and per address. Test first, then implement, then trace.
-- [ ] REQ-011 The board interface has a versioned, machine-readable contract that a test enforces. Test first, then implement, then trace.
-- [ ] REQ-012 Every failure on the board interface returns the same envelope, and every id in it is opaque. Test first, then implement, then trace.
+- [ ] REQ-004 What Retro Board knows about a board survives a restart in PostgreSQL, and every schema change is a forward-only migration with a restore step that has been run once. Test first, then implement, then trace.
+- [ ] REQ-005 A facilitator signs in and signs out, and a revoked session stops working on the server immediately rather than at the next token expiry. Test first, then implement, then trace.
+- [ ] REQ-006 Reading or changing another facilitator's board is refused by the server; the interface is allowed to hide the control but never to be the control. Test first, then implement, then trace.
+- [ ] REQ-013 Public entry points that create or change board data are limited per identity and per address, and say how long to wait when they refuse. Test first, then implement, then trace.
+- [ ] REQ-011 The board interface has a versioned, machine-readable contract kept in the repository, and a breaking change fails before merge rather than after a consumer notices. Test first, then implement, then trace.
+- [ ] REQ-012 Every failure on the board interface returns one envelope shape, with an opaque identifier a support conversation can quote. Test first, then implement, then trace.
 
-**Exit:** Each requirement is traceable from criterion to test, and its anchor is green in CI.
+**Exit:** Each of the 14 requirements is traceable from criterion to test, with its anchor green in CI.
 
 ### Phase 4 — Interface and hardening · week 5-4
 
-_The product feels finished and fails predictably._
+_Retro Board feels finished to a facilitator and fails predictably._
 
-- [ ] REQ-007 The main board journey is completable with a keyboard and a screen reader.
-- [ ] REQ-008 Every board screen has loading, empty, error and success states — not only success.
-- [ ] REQ-009 Colour and spacing come from one token source, so rebranding the board view is one file.
-- [ ] REQ-010 A board error is classified before it is rendered, so the message tells teams what to do next.
+- [ ] REQ-007 The main board journey completes with a keyboard and a screen reader, error states included, and focus lands somewhere sensible after every navigation.
+- [ ] REQ-008 Every board screen has loading, empty, error and success states, and the error state carries the next action rather than an apology.
+- [ ] REQ-009 Colour, spacing and type come from one token source, so restyling the board views is a change to one file and not to every component.
+- [ ] REQ-010 A board failure is classified before it is rendered, so the message tells the facilitator what to do next and never leaks an identifier they cannot act on.
 - [ ] Bind every component to design tokens; remove raw values.
 - [ ] Exercise every failure path in the requirements, manually or by test.
 - [ ] Mutation testing is deferred; keep assertions specific anyway.
 
-**Exit:** All gates for the tier pass in CI, and manual verification scripts have been run once.
+**Exit:** All 8 gates pass in CI, and the manual checks have been run once and dated.
 
 ### Phase 5 — Release and first observation · week 5-4
 
-_Ship with a way back._
+_Ship a board change with a way back._
 
 - [ ] Write the release checklist and the rollback procedure for a PostgreSQL migration.
 - [ ] Deploy to staging and take one board through the primary journey there.
-- [ ] Observe for one window: error rate, latency, and one board created by a real team.
+- [ ] Observe for one window: error rate, latency, and one board created by a real facilitator.
 - [ ] Record what changed in the spec as a result, then archive the changed requirements.
 
-**Exit:** A release has been observed and a rollback has been rehearsed or explicitly accepted as untested.
+**Exit:** A release has been observed with real facilitators data, and the rollback has been rehearsed or explicitly accepted as untested.
 
 ## 3. Commit and branch protocol
 

@@ -8,12 +8,12 @@
 
 ## Problem and primary user
 
-Answer from the engineering side, in the user's words. These four answers are what an agent will otherwise invent.
+Answer from the specification side, in the user's words. These four answers are what an agent will otherwise invent.
 
 | Question | Answer for Vibecode Like A Dev |
 | --- | --- |
-| Who handles the engineering today? | _confirm_ |
-| What do they do instead — a spreadsheet, a chat thread, an agent in another tool? | _confirm_ |
+| Who handles the specification today? | _confirm_ |
+| What do they do instead — a spreadsheet, a chat thread, a developer in another tool? | _confirm_ |
 | What does Vibecode Like A Dev remove from that day? | _confirm_ |
 | What makes them abandon it after one use? | _confirm_ |
 
@@ -24,25 +24,25 @@ Answer from the engineering side, in the user's words. These four answers are wh
 **Foundation**
 
 - `REQ-001` A clean clone of Vibecode Like A Dev runs with one documented command, and a missing setting is named rather than guessed. _(runnable from a clean clone)_
-- `REQ-002` An engineering goes from creation to completion end to end, through the documented interface only. _(the primary journey works end to end)_
-- `REQ-003` The three things Vibecode Like A Dev will not do are written down and reviewed before the first sprint. _(explicit non-goals)_
-- `REQ-005` The rules that make an engineering valid are written down, and each one has a test that would fail if it broke. _(the product's own rules are named and pinned)_
+- `REQ-002` One specification goes from created to finished end to end through the documented interface, with no manual step in the middle and nothing reachable only by a developer. _(the primary journey works end to end)_
+- `REQ-003` The three things Vibecode Like A Dev will not do in v1 are written down, reviewed before the first sprint, and cited the first time someone asks for a fourth thing. _(explicit non-goals)_
+- `REQ-005` The rules that make a specification valid are written down, and each one has a test that fails when the rule is broken rather than a comment saying it matters. _(the product's own rules are named and pinned)_
 
 **Interface & contracts**
 
-- `REQ-004` Every command that touches an engineering has documented flags, exit codes and a dry run. _(predictable command-line behaviour)_
+- `REQ-004` Every command that touches a specification documents its flags and exit codes, rejects unknown input, and supports a dry run that changes nothing. _(predictable command-line behaviour)_
 
 ## Out of scope
 
 Written for Vibecode Like A Dev specifically. Confirm or replace before Phase 2 — the list is worth more than any single line on it.
 
-- Any engineering capability the idea does not name. When in doubt, it is out of scope and gets its own version.
-- Importing engineering data from an existing system: v1 starts empty and the first agent enters it by hand.
-- Live collaboration on the same engineering, presence and cursors.
-- Any generated or summarised engineering content. Every word in v1 is written by an agent.
-- Notifying agent outside the product: no email, no push, no digest.
-- A native client for the engineering. If agent need it offline, that is a v2 decision with its own sync contract.
-- Custom reporting and exports over engineering data beyond what one screen shows.
+- Any specification capability the idea does not name. When in doubt, it is out of scope and gets its own version.
+- Importing specification data from an existing system: v1 starts empty and the first developer enters it by hand.
+- Live collaboration on the same specification, presence and cursors.
+- Any generated or summarised specification content. Every word in v1 is written by a developer.
+- Notifying developer outside the product: no email, no push, no digest.
+- A native client for the specification. If developer need it offline, that is a v2 decision with its own sync contract.
+- Custom reporting and exports over specification data beyond what one screen shows.
 
 ## Success measures
 
@@ -66,10 +66,10 @@ Assumptions: the idea paragraph is a complete statement of intent, tier 1 matche
 
 ## Open questions
 
-These do not block Phase 0; they block the engineering slice they belong to. An answered question here is a decision you do not discover in production.
+These do not block Phase 0; they block the specification slice they belong to. An answered question here is a decision you do not discover in production.
 
-1. Who creates the first engineering, and what do they use today instead?
-2. What must never happen to an engineering — and what does it cost when it does?
-3. Which part of the engineering workflow could be dropped without losing the reason agent open it?
-4. How many engineering records exist in year one, and how many agent touch them at once?
-5. Who notices first when an engineering is wrong, and how do they find out?
+1. Who creates the first specification, and what do they use today instead?
+2. What must never happen to a specification — and what does it cost when it does?
+3. Which part of the specification workflow could be dropped without losing the reason developer open it?
+4. How many specification records exist in year one, and how many developer touch them at once?
+5. Who notices first when a specification is wrong, and how do they find out?

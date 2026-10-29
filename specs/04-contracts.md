@@ -18,7 +18,7 @@ These are the four that other code will be written against. Naming them now is c
 
 | Shape | Behaviour | Why it is on this list |
 | --- | --- | --- |
-| `<tool> engineering <action> [flags]` | exit codes are part of the contract | one command per user-facing operation, documented grammar |
+| `<tool> specification <action> [flags]` | exit codes are part of the contract | one command per user-facing operation, documented grammar |
 
 ## 3. Conventions that bind you
 
@@ -26,9 +26,9 @@ Only the conventions this profile makes load-bearing are listed. The rest are in
 
 | Concern | Rule |
 | --- | --- |
-| Identifiers | Opaque and sortable (ULID). Never a sequential integer in an external shape. |
-| Timestamps | ISO-8601 UTC with `Z`. Never a local time, never a bare date for an instant. |
-| Errors | One envelope for every failure, including unknown routes. An absent field is absent, not `null`. |
+| Identifiers | Every specification id is opaque and sortable (ULID); a sequential integer never appears in an external shape, because it invites enumeration. |
+| Timestamps | Instants on a specification are ISO-8601 UTC with `Z`; a local time or a bare date is a bug, not a style choice. |
+| Errors | One envelope for every failure — including an unknown route and a rejected specification — and an absent field is absent, not `null`. |
 
 ## 4. Error envelope
 
@@ -37,12 +37,12 @@ One shape for every failure. A caller must be able to handle an unknown route wi
 ```json
 {
   "error": {
-    "code": "ENGINEERING_CONFLICT",
-    "message": "The engineering is not in a state that allows this.",
+    "code": "SPECIFICATION_CONFLICT",
+    "message": "The specification is not in a state that allows this.",
     "correlationId": "01J8Z9W3Q4K5M6N7P8R9S0T1V2",
     "details": [
       {
-        "field": "agent",
+        "field": "developer",
         "reason": "conflict"
       }
     ]
@@ -52,16 +52,14 @@ One shape for every failure. A caller must be able to handle an unknown route wi
 
 | Status | Meaning | When |
 | --- | --- | --- |
-| 401 | No valid session | Missing, expired or revoked credential. No state change. |
-| 403 | Authenticated but not permitted | Policy denied. Never reveal whether the resource exists. |
-| 404 | Not found, or not visible to this actor | Identical response for both cases. |
-| 409 | Conflict with current state | An engineering would be left in an impossible state, or a replay carries a different payload. |
-| 422 | Semantically invalid | Well-formed but breaks a rule in `02-domain-model.md`. |
+| 404 | Not found, or not visible to this actor | One response for both cases, so a specification id cannot be used to probe. |
+| 409 | Conflict with current state | The specification would be left in a state `02-domain-model.md` calls illegal, or a replay carries a different payload. |
+| 422 | Semantically invalid | Well-formed but breaks a rule that makes a specification valid. |
 
 ## 5. Contract tests
 
-- Each surface gets one test asserting the happy path shape and one asserting the error envelope.
-- A consumed interface is tested against a recorded response, not a hand-written mock that can drift.
-- A breaking change to a shape in section 2 fails the build before review, not after deployment.
+- Each of the 1 surfaces gets one test for its success shape and one for the specification failure it is most likely to hit.
+- Anything this product consumes is tested against a recorded response; a hand-written mock of a a developer drifts silently.
+- Changing a shape in section 2 fails the build before review, because the test that pins it lives beside the specification it serialises.
 
 Before implementing any row above: shape written, error code chosen, one failure example recorded.

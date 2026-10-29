@@ -22,35 +22,36 @@ The left column is law for every project this factory compiles. The right column
 
 | Law | In Vibecode Like A Dev |
 | --- | --- |
-| The spec is the interface. | A change to how an engineering behaves starts as a change to a requirement or an ADR — never as a code edit the spec is later bent to match. |
+| The spec is the interface. | A change to how a specification behaves starts as a change to a requirement or an ADR — never as a code edit the spec is later bent to match. |
 | A failing test comes before behaviour. | 3 of 5 requirements are proven by a test carrying `@req`; the rest carry a manual script. Untested behaviour is proposed, not done. |
-| One term, one meaning. | The nouns in `02-domain-model.md` are the only names for those things — in code, in tests, in commit messages. |
-| Boundaries before bodies. | Interfaces are fixed while changing them is free. Once `04-contracts.md` is signed off, a shape change needs its own requirement. |
+| One term, one meaning. | `specification` and `developer` are the only names for those things — in code, in tests, in commit messages, and in the UI copy developers read. |
+| Boundaries before bodies. | The 1 surfaces in `04-contracts.md` are fixed while changing them is free; after sign-off, a change to one needs its own requirement. |
 | The domain stays pure. | Rules import no framework, no PostgreSQL, and no vendor SDK. Hexagonal single artifact only holds if this is checked, not intended. |
-| Boring technology, justified additions. | Every dependency beyond the declared stack earns an ADR naming what it replaces and what breaks without it. |
+| Boring technology, justified additions. | 17 practices were selected for Vibecode Like A Dev; anything not among them needs an ADR naming what it replaces and what breaks without it. |
 | Fail closed. | Deny by default for authorization; refuse rather than guess; never silently weaken a control to make a test pass. |
-| Make it observable. | Every failure this product can produce is visible in a log with a correlation id, including the ones you think cannot happen. |
+| Make it observable. | A failed specification operation is a log line with a correlation id and the developer it belonged to — including the ones you think cannot happen. |
 | Reversible beats predictable. | Schema changes go forward only, behind a PostgreSQL migration; 8-week scope means something gets cut, so cut features, not rollback paths. |
-| Stop and ask before guessing. | Three failed attempts at the same failure means the model of the problem is wrong. Escalate with what you tried. |
+| Stop and ask before guessing. | Three failed attempts on REQ-001 means the model of the problem is wrong. Escalate with what you tried and what you ruled out. |
 
 ## 2. Definition of done
 
-An engineering change is done when all of the following are true for Vibecode Like A Dev. Not "mostly true".
+A specification change is done when all of the following are true for Vibecode Like A Dev. Not "mostly true".
 
-- [ ] Every acceptance criterion of the requirement maps to a named test, or to a manual script that has been run once — starting with REQ-001.
-- [ ] `node specs/spec-check.mjs` passes and the anchor exists in the file it names.
-- [ ] Failure paths are implemented and tested, not only described.
-- [ ] No new dependency without an ADR; no new environment variable without documentation.
+- [ ] **G0-RUN** — The project starts from a clean clone with one documented command. _Here: for Vibecode Like A Dev: one command, and a missing variable is named._
+- [ ] **G0-CHECK** — Lint or typecheck runs in CI on every pull request.
+- [ ] **G0-SMOKE** — One happy-path smoke test exercises the primary user journey. _Here: one specification taken from creation to done through the documented interface._
+- [ ] **G1-CI** — The full test suite runs in CI on every pull request and is required to merge.
+- [ ] 3 of 5 requirements carry an `@req` anchor; REQ-001 is the first, at `tests/core/core-runnable.test.ts`.
 - [ ] The change can be reverted with one command or one flag.
 
 ## 3. Change protocol
 
 | Change | What must happen first |
 | --- | --- |
-| New behaviour | Add or amend a requirement in `spec.json`, then write the failing test. |
-| Changed interface or error shape | Update the contract inventory in 04-contracts.md, then the test. |
-| New dependency or service | ADR in 03-architecture.md: what it replaces, what breaks without it, cost of removal. |
-| Test deletion or weakening | Not allowed as a fix. Skip it with a requirement reference and escalate. |
+| New behaviour on a specification | Add or amend a requirement in `spec.json`, then write the failing specification test. |
+| Changed specification shape or error | Update the contract inventory in 04-contracts.md, then the test that pins it. |
+| New dependency or service | ADR in 03-architecture.md: what it replaces, what breaks without it, and what removing it later would cost. |
+| Test deletion or weakening | Not allowed as a fix for a specification. Skip it with the requirement id and escalate instead. |
 
 ## 4. Selected practices
 
@@ -58,21 +59,21 @@ An engineering change is done when all of the following are true for Vibecode Li
 
 | Practice | Bound to here | Read it |
 | --- | --- | --- |
-| `product.product-brief` | `01-product-brief.md` | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/product/product-brief/SKILL.md) |
-| `product.non-goals-and-scope` | REQ-003 The three things Vibecode Like A Dev will not do are written down and reviewed before the first sprint. | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/product/non-goals-and-scope/SKILL.md) |
-| `domain.ubiquitous-language` | `02-domain-model.md` | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/domain/ubiquitous-language/SKILL.md) |
-| `testing.tdd-loop` | `05-verification.md` | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/testing/tdd-loop/SKILL.md) |
-| `testing.acceptance-traceability` | `05-verification.md` | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/testing/acceptance-traceability/SKILL.md) |
-| `agent.handoff-packet` | `07-agent-handoff.md` | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/agent/handoff-packet/SKILL.md) |
-| `domain.aggregates-and-invariants` | `02-domain-model.md` | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/domain/aggregates-and-invariants/SKILL.md) |
+| `product.product-brief` | `01-product-brief.md` — REQ-001, REQ-002, REQ-003, +1 | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/product/product-brief/SKILL.md) |
+| `product.non-goals-and-scope` | REQ-003 The three things Vibecode Like A Dev will not do in v1 are written down, reviewed before the first sprint, and cited the first time someone asks for a fourth thing. | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/product/non-goals-and-scope/SKILL.md) |
+| `domain.ubiquitous-language` | `02-domain-model.md` — REQ-001, REQ-002, REQ-003, +1 | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/domain/ubiquitous-language/SKILL.md) |
+| `testing.tdd-loop` | `05-verification.md` — REQ-002, REQ-004, REQ-005 | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/testing/tdd-loop/SKILL.md) |
+| `testing.acceptance-traceability` | `05-verification.md` — REQ-002, REQ-004, REQ-005 | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/testing/acceptance-traceability/SKILL.md) |
+| `agent.handoff-packet` | `07-agent-handoff.md` — REQ-001, REQ-002 | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/agent/handoff-packet/SKILL.md) |
+| `domain.aggregates-and-invariants` | `02-domain-model.md` — REQ-001, REQ-002, REQ-003, +1 | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/domain/aggregates-and-invariants/SKILL.md) |
 | `architecture.style-selection` | `03-architecture.md` | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/architecture/style-selection/SKILL.md) |
 | `security.secrets-and-supply-chain` | `03-architecture.md` | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/security/secrets-and-supply-chain/SKILL.md) |
 | `delivery.ci-gates` | REQ-001 A clean clone of Vibecode Like A Dev runs with one documented command, and a missing setting is named rather than guessed. | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/delivery/ci-gates/SKILL.md) |
-| `product.user-journeys` | `01-product-brief.md` | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/product/user-journeys/SKILL.md) |
-| `domain.bounded-contexts` | `02-domain-model.md` | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/domain/bounded-contexts/SKILL.md) |
-| `testing.test-budget` | `05-verification.md` | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/testing/test-budget/SKILL.md) |
-| `agent.review-protocol` | `07-agent-handoff.md` | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/agent/review-protocol/SKILL.md) |
-| `architecture.ports-and-adapters` | REQ-004 Every command that touches an engineering has documented flags, exit codes and a dry run. | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/architecture/ports-and-adapters/SKILL.md) |
+| `product.user-journeys` | `01-product-brief.md` — REQ-001, REQ-002, REQ-003, +1 | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/product/user-journeys/SKILL.md) |
+| `domain.bounded-contexts` | `02-domain-model.md` — REQ-001, REQ-002, REQ-003, +1 | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/domain/bounded-contexts/SKILL.md) |
+| `testing.test-budget` | `05-verification.md` — REQ-002, REQ-004, REQ-005 | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/testing/test-budget/SKILL.md) |
+| `agent.review-protocol` | `07-agent-handoff.md` — REQ-001, REQ-002 | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/agent/review-protocol/SKILL.md) |
+| `architecture.ports-and-adapters` | REQ-004 Every command that touches a specification documents its flags and exit codes, rejects unknown input, and supports a dry run that changes nothing. | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/architecture/ports-and-adapters/SKILL.md) |
 | `architecture.adr-log` | `03-architecture.md` | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/architecture/adr-log/SKILL.md) |
 | `architecture.build-vs-buy` | `03-architecture.md` | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/architecture/build-vs-buy/SKILL.md) |
 

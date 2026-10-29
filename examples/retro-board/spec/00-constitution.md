@@ -25,14 +25,14 @@ The left column is law for every project this factory compiles. The right column
 | --- | --- |
 | The spec is the interface. | A change to how a board behaves starts as a change to a requirement or an ADR — never as a code edit the spec is later bent to match. |
 | A failing test comes before behaviour. | 10 of 14 requirements are proven by a test carrying `@req`; the rest carry a manual script. Untested behaviour is proposed, not done. |
-| One term, one meaning. | The nouns in `02-domain-model.md` are the only names for those things — in code, in tests, in commit messages. |
-| Boundaries before bodies. | Interfaces are fixed while changing them is free. Once `04-contracts.md` is signed off, a shape change needs its own requirement. |
+| One term, one meaning. | `board` and `facilitator` are the only names for those things — in code, in tests, in commit messages, and in the UI copy facilitators read. |
+| Boundaries before bodies. | The 3 surfaces in `04-contracts.md` are fixed while changing them is free; after sign-off, a change to one needs its own requirement. |
 | The domain stays pure. | Rules import no framework, no PostgreSQL, and no vendor SDK. Modular monolith with enforced boundaries only holds if this is checked, not intended. |
-| Boring technology, justified additions. | Every dependency beyond the declared stack earns an ADR naming what it replaces and what breaks without it. |
+| Boring technology, justified additions. | 22 practices were selected for Retro Board; anything not among them needs an ADR naming what it replaces and what breaks without it. |
 | Fail closed. | Deny by default for authorization; refuse rather than guess; never silently weaken a control to make a test pass. |
-| Make it observable. | Every failure this product can produce is visible in a log with a correlation id, including the ones you think cannot happen. |
+| Make it observable. | A failed board operation is a log line with a correlation id and the facilitator it belonged to — including the ones you think cannot happen. |
 | Reversible beats predictable. | Schema changes go forward only, behind a PostgreSQL migration; 4-week scope means something gets cut, so cut features, not rollback paths. |
-| Stop and ask before guessing. | Three failed attempts at the same failure means the model of the problem is wrong. Escalate with what you tried. |
+| Stop and ask before guessing. | Three failed attempts on REQ-001 means the model of the problem is wrong. Escalate with what you tried and what you ruled out. |
 
 ## 2. Laws this profile adds
 
@@ -46,20 +46,21 @@ These bind because of what the product does, not because they are generally good
 
 A board change is done when all of the following are true for Retro Board. Not "mostly true".
 
-- [ ] Every acceptance criterion of the requirement maps to a named test, or to a manual script that has been run once — starting with REQ-001.
-- [ ] `node specs/spec-check.mjs` passes and the anchor exists in the file it names.
-- [ ] Failure paths are implemented and tested, not only described.
-- [ ] No new dependency without an ADR; no new environment variable without documentation.
+- [ ] **G0-RUN** — The project starts from a clean clone with one documented command. _Here: for Retro Board: one command, and a missing variable is named._
+- [ ] **G0-CHECK** — Lint or typecheck runs in CI on every pull request.
+- [ ] **G0-SMOKE** — One happy-path smoke test exercises the primary user journey. _Here: one board taken from creation to done through the documented interface._
+- [ ] **G1-CI** — The full test suite runs in CI on every pull request and is required to merge.
+- [ ] 10 of 14 requirements carry an `@req` anchor; REQ-001 is the first, at `tests/core/core-runnable.test.ts`.
 - [ ] The change is reviewable in one sitting; if it is not, it is two changes.
 
 ## 4. Change protocol
 
 | Change | What must happen first |
 | --- | --- |
-| New behaviour | Add or amend a requirement in `spec.json`, then write the failing test. |
-| Changed interface or error shape | Update the contract inventory in 04-contracts.md, then the test. |
-| New dependency or service | ADR in 03-architecture.md: what it replaces, what breaks without it, cost of removal. |
-| Test deletion or weakening | Not allowed as a fix. Skip it with a requirement reference and escalate. |
+| New behaviour on a board | Add or amend a requirement in `spec.json`, then write the failing board test. |
+| Changed board shape or error | Update the contract inventory in 04-contracts.md, then the test that pins it. |
+| New dependency or service | ADR in 03-architecture.md: what it replaces, what breaks without it, and what removing it later would cost. |
+| Test deletion or weakening | Not allowed as a fix for a board. Skip it with the requirement id and escalate instead. |
 | Scope expansion | Edit the brief and remove something of comparable size in the same change. |
 
 ## 5. Selected practices
@@ -68,27 +69,27 @@ A board change is done when all of the following are true for Retro Board. Not "
 
 | Practice | Bound to here | Read it |
 | --- | --- | --- |
-| `product.product-brief` | `01-product-brief.md` | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/product/product-brief/SKILL.md) |
-| `product.non-goals-and-scope` | REQ-003 The three things Retro Board will not do are written down and reviewed before the first sprint. | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/product/non-goals-and-scope/SKILL.md) |
-| `domain.ubiquitous-language` | `02-domain-model.md` | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/domain/ubiquitous-language/SKILL.md) |
-| `testing.tdd-loop` | `05-verification.md` | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/testing/tdd-loop/SKILL.md) |
-| `testing.acceptance-traceability` | `05-verification.md` | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/testing/acceptance-traceability/SKILL.md) |
-| `agent.handoff-packet` | `07-agent-handoff.md` | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/agent/handoff-packet/SKILL.md) |
-| `domain.aggregates-and-invariants` | `02-domain-model.md` | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/domain/aggregates-and-invariants/SKILL.md) |
+| `product.product-brief` | `01-product-brief.md` — REQ-001, REQ-002, REQ-003, +1 | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/product/product-brief/SKILL.md) |
+| `product.non-goals-and-scope` | REQ-003 The three things Retro Board will not do in v1 are written down, reviewed before the first sprint, and cited the first time someone asks for a fourth thing. | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/product/non-goals-and-scope/SKILL.md) |
+| `domain.ubiquitous-language` | `02-domain-model.md` — REQ-001, REQ-002, REQ-003, +5 | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/domain/ubiquitous-language/SKILL.md) |
+| `testing.tdd-loop` | `05-verification.md` — REQ-002, REQ-004, REQ-005, +7 | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/testing/tdd-loop/SKILL.md) |
+| `testing.acceptance-traceability` | `05-verification.md` — REQ-002, REQ-004, REQ-005, +7 | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/testing/acceptance-traceability/SKILL.md) |
+| `agent.handoff-packet` | `07-agent-handoff.md` — REQ-001, REQ-002 | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/agent/handoff-packet/SKILL.md) |
+| `domain.aggregates-and-invariants` | `02-domain-model.md` — REQ-001, REQ-002, REQ-003, +5 | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/domain/aggregates-and-invariants/SKILL.md) |
 | `architecture.style-selection` | `03-architecture.md` | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/architecture/style-selection/SKILL.md) |
 | `security.secrets-and-supply-chain` | `03-architecture.md` | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/security/secrets-and-supply-chain/SKILL.md) |
 | `delivery.ci-gates` | REQ-001 A clean clone of Retro Board runs with one documented command, and a missing setting is named rather than guessed. | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/delivery/ci-gates/SKILL.md) |
-| `product.user-journeys` | `01-product-brief.md` | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/product/user-journeys/SKILL.md) |
-| `domain.bounded-contexts` | `02-domain-model.md` | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/domain/bounded-contexts/SKILL.md) |
-| `architecture.api-contract-first` | REQ-011 The board interface has a versioned, machine-readable contract that a test enforces. | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/architecture/api-contract-first/SKILL.md) |
-| `data.schema-and-migrations` | REQ-004 State about a board survives a restart in PostgreSQL, and every schema change is a forward-only migration. | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/data/schema-and-migrations/SKILL.md) |
-| `testing.test-budget` | `05-verification.md` | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/testing/test-budget/SKILL.md) |
-| `security.authz-model` | REQ-006 Reading or changing someone else's board is refused by the server, not hidden by the client. | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/security/authz-model/SKILL.md) |
-| `security.asvs-baseline` | REQ-005 A team signs in and out, and a revoked session stops working server-side. | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/security/asvs-baseline/SKILL.md) |
-| `frontend.design-system-tokens` | REQ-009 Colour and spacing come from one token source, so rebranding the board view is one file. | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/frontend/design-system-tokens/SKILL.md) |
-| `frontend.accessibility-baseline` | REQ-007 The main board journey is completable with a keyboard and a screen reader. | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/frontend/accessibility-baseline/SKILL.md) |
-| `frontend.ui-state-model` | REQ-008 Every board screen has loading, empty, error and success states — not only success. | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/frontend/ui-state-model/SKILL.md) |
-| `agent.review-protocol` | `07-agent-handoff.md` | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/agent/review-protocol/SKILL.md) |
+| `product.user-journeys` | `01-product-brief.md` — REQ-001, REQ-002, REQ-003, +1 | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/product/user-journeys/SKILL.md) |
+| `domain.bounded-contexts` | `02-domain-model.md` — REQ-001, REQ-002, REQ-003, +5 | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/domain/bounded-contexts/SKILL.md) |
+| `architecture.api-contract-first` | REQ-011 The board interface has a versioned, machine-readable contract kept in the repository, and a breaking change fails before merge rather than after a consumer notices. (and 1 more) | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/architecture/api-contract-first/SKILL.md) |
+| `data.schema-and-migrations` | REQ-004 What Retro Board knows about a board survives a restart in PostgreSQL, and every schema change is a forward-only migration with a restore step that has been run once. | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/data/schema-and-migrations/SKILL.md) |
+| `testing.test-budget` | `05-verification.md` — REQ-002, REQ-004, REQ-005, +7 | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/testing/test-budget/SKILL.md) |
+| `security.authz-model` | REQ-006 Reading or changing another facilitator's board is refused by the server; the interface is allowed to hide the control but never to be the control. | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/security/authz-model/SKILL.md) |
+| `security.asvs-baseline` | REQ-005 A facilitator signs in and signs out, and a revoked session stops working on the server immediately rather than at the next token expiry. (and 1 more) | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/security/asvs-baseline/SKILL.md) |
+| `frontend.design-system-tokens` | REQ-009 Colour, spacing and type come from one token source, so restyling the board views is a change to one file and not to every component. | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/frontend/design-system-tokens/SKILL.md) |
+| `frontend.accessibility-baseline` | REQ-007 The main board journey completes with a keyboard and a screen reader, error states included, and focus lands somewhere sensible after every navigation. | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/frontend/accessibility-baseline/SKILL.md) |
+| `frontend.ui-state-model` | REQ-008 Every board screen has loading, empty, error and success states, and the error state carries the next action rather than an apology. (and 1 more) | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/frontend/ui-state-model/SKILL.md) |
+| `agent.review-protocol` | `07-agent-handoff.md` — REQ-001, REQ-002 | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/agent/review-protocol/SKILL.md) |
 | `architecture.ports-and-adapters` | `03-architecture.md` | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/architecture/ports-and-adapters/SKILL.md) |
 
 ## 6. Deliberately not doing

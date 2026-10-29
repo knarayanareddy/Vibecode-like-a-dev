@@ -6,6 +6,7 @@
  */
 
 import { aggregatesFor, contextsFor, termsFor } from '../domain-hints.mjs';
+import { articleFor, ideaNouns, singularOf, vocabularyFor } from './vocabulary.mjs';
 
 export const FACTORY_VERSION = '0.3.0';
 
@@ -246,16 +247,17 @@ export function buildPhases(plan, phrases) {
   const hasTokens = primitives.some((primitive) => primitive.id === 'frontend.design-system-tokens');
 
   const reqList = (render) => (groups.find((group) => group.render === render)?.items ?? []);
-  const words = ideaNouns(profile).map((entry) => entry.word);
-  const primary = words[0] ?? 'record';
-  const aPrimary = `${articleFor(primary)} ${primary}`;
-  const secondary = (words[1] ?? 'user').replace(/s$/, '');
+  const vocab = vocabularyFor(profile);
+  const { primary, aPrimary, secondary, secondaryPlural } = vocab;
+  const aSecondary = `${articleFor(secondary)} ${secondary}`;
   const db = String(stackFor(profile).stack.db).split(/[(+]/)[0].trim();
+  const projectLabel = titleize(profile.name).replace(/^\d+\s*/, '');
+  const gatesCount = plan.gates?.length ?? 0;
 
   const phases = [
     {
       name: 'Phase 0 — Skeleton and guardrails',
-      goal: 'A running, tested, documented empty box. Nothing built on a broken foundation.',
+      goal: `A running, tested, documented box that can create and delete ${aPrimary} and nothing else.`,
       tasks: [
         `Initialise the repository with ${stackFor(profile).stack.language} and ${db}; commit the lockfile.`,
         'Add the CI workflow with lint, typecheck and test jobs, and make it required on the default branch.',
@@ -264,11 +266,11 @@ export function buildPhases(plan, phrases) {
         'Copy the specification packet into specs/ and wire the spec check into CI.',
         `Answer the open questions that block the ${primary} slice; the rest can wait for their phase.`
       ],
-      exit: 'A new contributor can clone, run and test with the documented commands. CI is green on an empty suite.'
+      exit: `The documented command creates and deletes ${aPrimary} through ${db}, and CI is green on that alone.`
     },
     {
       name: 'Phase 1 — Domain core',
-      goal: 'The rules of the product, expressed in code, before any framework is chosen for them.',
+      goal: `The rules that make ${aPrimary} valid, in code, before any framework is chosen for them.`,
       tasks: [
         `Fill the language table around ${aPrimary}: one term, one meaning, no synonyms.`,
         `Write failing tests for each rule ${aPrimary} must satisfy, including the ones the idea states in its own words.`,
@@ -276,18 +278,18 @@ export function buildPhases(plan, phrases) {
         `Define typed errors for the ways ${aPrimary} can be rejected; no exception control flow across module boundaries.`,
         hasMutation ? `Run the mutation check on the ${primary} domain and record the baseline score.` : `Review assertion quality by hand: every ${primary} test must fail if its rule is inverted.`
       ],
-      exit: 'Domain tests pass and the domain layer imports nothing from infrastructure.'
+      exit: `${aPrimary.charAt(0).toUpperCase()}${aPrimary.slice(1)} rules pass their tests with no infrastructure imported — no ${db}, no framework.`
     },
     {
       name: 'Phase 2 — Contracts before implementation',
-      goal: 'Every boundary is fixed while changing it is still free.',
+      goal: `Every boundary around ${aPrimary} fixed while changing it is still free.`,
       tasks: [
         `Fix each shape in the contract inventory: ${reqList('api').map((r) => r.id).join(', ') || 'internal module interfaces behind the ' + primary + ' use case'}.`,
         `Write the acceptance tests for ${aPrimary} first; they must fail for missing behaviour, not missing setup.`,
         'Record a real response for every external dependency, or write down the stub and why.',
         `Record an ADR for each library that a reviewer could plausibly want removed.`
       ],
-      exit: 'Acceptance tests exist and fail for the right reason (missing behaviour, not missing setup).'
+      exit: `The ${aPrimary} acceptance tests exist and fail because the behaviour is missing, not because the setup is.`
     },
     {
       name: 'Phase 3 — Vertical slices',
@@ -299,11 +301,11 @@ export function buildPhases(plan, phrases) {
             (requirement) => `${requirement.id} ${phrases?.get(requirement.key) ?? requirement.title} Test first, then implement, then trace.`
           )
         ),
-      exit: 'Each requirement is traceable from criterion to test, and its anchor is green in CI.'
+      exit: `Each of the ${requirements.length} requirements is traceable from criterion to test, with its anchor green in CI.`
     },
     {
       name: 'Phase 4 — Interface and hardening',
-      goal: 'The product feels finished and fails predictably.',
+      goal: `${projectLabel} feels finished to ${aSecondary} and fails predictably.`,
       tasks: [
         ...reqList('frontend').map((requirement) => `${requirement.id} ${phrases?.get(requirement.key) ?? requirement.title}`),
         hasTokens ? 'Bind every component to design tokens; remove raw values.' : null,
@@ -312,18 +314,18 @@ export function buildPhases(plan, phrases) {
         'Exercise every failure path in the requirements, manually or by test.',
         hasMutation ? 'Raise the mutation score to target on the domain layer.' : 'Mutation testing is deferred; keep assertions specific anyway.'
       ],
-      exit: 'All gates for the tier pass in CI, and manual verification scripts have been run once.'
+      exit: `All ${gatesCount} gates pass in CI, and the manual checks have been run once and dated.`
     },
     {
       name: 'Phase 5 — Release and first observation',
-      goal: 'Ship with a way back.',
+      goal: `Ship ${aPrimary} change with a way back.`,
       tasks: [
         `Write the release checklist and the rollback procedure for a ${db} migration.`,
         `Deploy to staging and take one ${primary} through the primary journey there.`,
         `Observe for one window: error rate, latency, and one ${primary} created by a real ${secondary}.`,
         'Record what changed in the spec as a result, then archive the changed requirements.'
       ],
-      exit: 'A release has been observed and a rollback has been rehearsed or explicitly accepted as untested.'
+      exit: `A release has been observed with real ${secondaryPlural} data, and the rollback has been rehearsed or explicitly accepted as untested.`
     }
   ];
 
@@ -494,47 +496,28 @@ export const AREA_DOCUMENT = {
  * anchors stay stable while the documents talk like the product.
  */
 export function phrasesFor(plan, words) {
-  const singular = (word) => (word && word.endsWith('s') && !word.endsWith('ss') ? word.slice(0, -1) : word);
-  const primaryPlural = words[0] ?? 'records';
-  const primary = singular(primaryPlural);
-  const secondary = words[1] ?? 'users';
-  const db = String(stackFor(plan.profile).stack.db).split(/[(+]/)[0].trim();
+  const vocab = vocabularyFor(plan.profile);
   const project = titleize(plan.profile.name).replace(/^\d+\s*/, '');
-  const aPrimary = `${articleFor(primary)} ${primary}`;
-
-  const templates = {
-    'core.runnable': `A clean clone of ${project} runs with one documented command, and a missing setting is named rather than guessed.`,
-    'core.primary-journey': `${aPrimary.charAt(0).toUpperCase()}${aPrimary.slice(1)} goes from creation to completion end to end, through the documented interface only.`,
-    'core.non-goals': `The three things ${project} will not do are written down and reviewed before the first sprint.`,
-    'data.persistence': `State about ${aPrimary} survives a restart in ${db}, and every schema change is a forward-only migration.`,
-    'data.lifecycle': `A ${singular(secondary)}'s ${primary} data has a stated retention period, an export and a deletion path.`,
-    'auth.identity': `A ${singular(secondary)} signs in and out, and a revoked session stops working server-side.`,
-    'auth.authorization': `Reading or changing someone else's ${primary} is refused by the server, not hidden by the client.`,
-    'auth.tenant-isolation': `Two ${secondary}s' ${primary} data cannot be mixed by any query or handler.`,
-    'ui.accessibility': `The main ${primary} journey is completable with a keyboard and a screen reader.`,
-    'ui.states': `Every ${primary} screen has loading, empty, error and success states — not only success.`,
-    'ui.design-tokens': `Colour and spacing come from one token source, so rebranding the ${primary} view is one file.`,
-    'ux.error-taxonomy': `A ${primary} error is classified before it is rendered, so the message tells ${secondary} what to do next.`,
-    'api.contract': `The ${primary} interface has a versioned, machine-readable contract that a test enforces.`,
-    'api.error-envelope': `Every failure on the ${primary} interface returns the same envelope, and every id in it is opaque.`,
-    'integration.retries': `A retried ${primary} request produces the same outcome, not two records.`,
-    'payments.correctness': `Money attached to ${aPrimary} stays correct under retries and partial failure.`,
-    'ai.guardrails': `Model calls that touch ${primary} content are bounded, observable and evaluated against a fixture.`,
-    'ops.observability': `A failed ${primary} operation is visible in a log with a correlation id, without a debugger.`,
-    'ops.rate-limits': `Public entry points that create or change ${primary} data are limited per identity and per address.`,
-    'delivery.audit-trail': `Privileged changes to ${aPrimary} are append-only and attributable to an actor.`,
-    'pipeline.idempotency': `Re-running a window of ${primary} data replaces its output instead of duplicating it.`,
-    'library.api-stability': `The public surface measured in ${primary} terms is versioned; a breaking change needs a major version.`,
-    'cli.ergonomics': `Every command that touches ${aPrimary} has documented flags, exit codes and a dry run.`,
-    'spec.drift-guard': `A test that loses its ${primary} requirement anchor fails the build.`,
-    'core.domain-invariants': `The rules that make ${aPrimary} valid are written down, and each one has a test that would fail if it broke.`,
-    'data.uploads': `A file attached to ${aPrimary} is type-checked, size-capped and stripped before it is stored.`,
-    'mobile.offline': `${aPrimary.charAt(0).toUpperCase()}${aPrimary.slice(1)} change made offline replays exactly once, even after the app is killed.`
-  };
+  const fill = (template) =>
+    String(template)
+      .replace(/\{project\}/g, project)
+      .replace(/\{aPrimary\}/g, vocab.aPrimary)
+      .replace(/\{primaryPlural\}/g, vocab.primaryPlural)
+      .replace(/\{primary\}/g, vocab.primary)
+      .replace(/\{aSecondary\}/g, `${articleFor(vocab.secondary)} ${vocab.secondary}`)
+      .replace(/\{secondaryPlural\}/g, vocab.secondaryPlural)
+      .replace(/\{secondary\}/g, vocab.secondary)
+      .replace(/\{db\}/g, dbLabel(plan.profile));
 
   const capitalise = (text) => String(text).replace(/^./, (char) => char.toUpperCase());
   return new Map(
-    plan.requirements.map((requirement) => [requirement.key, capitalise(templates[requirement.key] ?? requirement.title)])
+    plan.requirements.map((requirement) => {
+      // The catalog's product-language definition is the source of truth. A
+      // requirement without one still gets a sentence, but the library eval
+      // reports it, so the gap is visible instead of silent.
+      const definition = requirement.definition ? fill(requirement.definition) : fill(`${requirement.title} holds for {aPrimary}.`);
+      return [requirement.key, capitalise(definition)];
+    })
   );
 }
 
@@ -547,38 +530,6 @@ export function firstOpenRequirement(plan) {
     if (match) return match;
   }
   return open[0] ?? plan.requirements[0];
-}
-
-const NOUN_STOP = new Set([
-  'must', 'never', 'always', 'that', 'this', 'with', 'from', 'they', 'them', 'their', 'there', 'these',
-  'those', 'when', 'then', 'than', 'which', 'while', 'where', 'what', 'have', 'been', 'will', 'would',
-  'should', 'could', 'each', 'every', 'some', 'such', 'only', 'also', 'must', 'into', 'over', 'under',
-  'about', 'because', 'between', 'within', 'without', 'after', 'before', 'during', 'through', 'using',
-  'used', 'make', 'makes', 'made', 'take', 'takes', 'give', 'gives', 'show', 'shows', 'keep', 'keeps',
-  'work', 'works', 'need', 'needs', 'want', 'wants', 'like', 'said', 'says', 'goes', 'going', 'gets',
-  'every', 'other', 'another', 'people', 'person', 'thing', 'things', 'something', 'anything',
-  'which', 'whose', 'while', 'still', 'even', 'just', 'very', 'much', 'many', 'more', 'most', 'less',
-  'first', 'second', 'third', 'next', 'last', 'same', 'different', 'possible', 'available', 'required',
-  'users', 'user', 'application', 'service', 'system', 'product', 'records', 'record', 'data', 'app',
-  'tool', 'thing', 'stuff', 'able', 'allow', 'allows', 'allowed', 'ensure', 'ensures', 'provide',
-  'provides', 'support', 'supports', 'including', 'includes', 'based', 'across', 'where', 'whose'
-]);
-
-/**
- * Candidate nouns for the ubiquitous language, taken from the idea itself.
- * These are candidates, not conclusions: the document says so.
- */
-export function ideaNouns(profile, limit = 6) {
-  const counts = new Map();
-  for (const word of String(profile.idea ?? '').toLowerCase().split(/[^a-z0-9-]+/)) {
-    if (word.length < 5 || NOUN_STOP.has(word)) continue;
-    if (/^\d+$/.test(word)) continue;
-    counts.set(word, (counts.get(word) ?? 0) + 1);
-  }
-  return [...counts.entries()]
-    .sort((a, b) => b[1] - a[1] || b[0].length - a[0].length)
-    .slice(0, limit)
-    .map(([word, count]) => ({ word, count }));
 }
 
 /**
@@ -696,22 +647,55 @@ export function gateReading(gate, plan, words) {
 }
 
 export function practiceCards(plan, phrases = new Map()) {
+  // Which requirements a document governs, so a practice can be bound to the
+  // actual obligations in this packet rather than to a filename that is the same
+  // in every packet.
+  const inDoc = (doc) => {
+    if (doc === '05-verification.md') {
+      return plan.requirements.filter((requirement) => requirement.verify === 'automated').map((requirement) => requirement.id);
+    }
+    if (doc === '02-domain-model.md') {
+      return plan.requirements
+        .filter((requirement) => ['core', 'data', 'security'].includes(requirement.render))
+        .map((requirement) => requirement.id);
+    }
+    if (doc === '07-agent-handoff.md' || doc === 'AGENTS.md') {
+      return [plan.requirements[0]?.id, plan.requirements[1]?.id].filter(Boolean);
+    }
+    return plan.requirements
+      .filter((requirement) => {
+        const target = AREA_DOCUMENT[requirement.render] ?? '01-product-brief.md';
+        return target === doc || (doc === '01-product-brief.md' && requirement.render === 'core');
+      })
+      .map((requirement) => requirement.id);
+  };
+
   return plan.primitives.map((primitive) => {
     const enforces = (primitive.enforces ?? [])
       .map((key) => plan.requirements.find((requirement) => requirement.key === key))
       .filter(Boolean);
-    // A practice is bound either to a requirement it enforces, or to the artefact it
-    // produces. Both are specific to this packet; the practice's own prose is not.
-    const target =
-      enforces.length > 0
-        ? `${enforces[0].id} ${phrases.get(enforces[0].key) ?? enforces[0].title}`
-        : primitive.artifacts?.length
-          ? `\`${primitive.artifacts[0]}\``
-          : 'the whole packet';
+
+    let bindTo;
+    if (enforces.length > 0) {
+      const [first, ...rest] = enforces;
+      bindTo = `${first.id} ${phrases.get(first.key) ?? first.title}${rest.length > 0 ? ` (and ${rest.length} more)` : ''}`;
+    } else if (primitive.artifacts?.length) {
+      const doc = primitive.artifacts[0];
+      const ids = inDoc(doc);
+      const gates = (primitive.gates ?? []).map((gate) => gate.id).filter(Boolean);
+      bindTo = ids.length > 0
+        ? `\`${doc}\` — ${ids.slice(0, 3).join(', ')}${ids.length > 3 ? `, +${ids.length - 3}` : ''}`
+        : gates.length > 0
+          ? `\`${doc}\` — ${gates.join(', ')}`
+          : `\`${doc}\``;
+    } else {
+      bindTo = 'the whole packet';
+    }
+
     return {
       id: primitive.id,
       title: primitive.title,
-      bindTo: target,
+      bindTo,
       because: primitive.why
     };
   });
@@ -719,9 +703,7 @@ export function practiceCards(plan, phrases = new Map()) {
 
 // ---------- whole-packet derivation ----------
 
-const VOWEL = /^[aeiou]/i;
-/** "a" or "an", so a derived noun does not produce "a engineering". */
-export const articleFor = (word) => (VOWEL.test(String(word)) ? 'an' : 'a');
+export { articleFor };
 /** The short label of the database, without the migration tooling in brackets. */
 export const dbLabel = (profile) => String(stackFor(profile).stack.db).split(/[(+]/)[0].trim();
 
@@ -733,18 +715,30 @@ export function derive(plan) {
   const domainText = aggregates
     .map((aggregate) => `${aggregate.name} ${(aggregate.invariants ?? []).join(' ')}`)
     .join(' ');
-  const nouns = ideaNouns(plan.profile);
-  const phrases = phrasesFor(plan, nouns.map((entry) => (typeof entry === 'string' ? entry : entry.word)));
+  const vocab = vocabularyFor(plan.profile);
+  const nouns = vocab.candidates;
   const words = nouns.map((entry) => (typeof entry === 'string' ? entry : entry.word));
+  const phrases = phrasesFor(plan, words);
   return {
     project: titleize(plan.profile.name),
+    // "Clinic Bookings' own rules", not "04 Clinic Bookings's own rules".
+    projectPossessive: (() => {
+      const name = titleize(plan.profile.name).replace(/^\d+\s*/, '');
+      return /s$/i.test(name) ? `${name}'` : `${name}'s`;
+    })(),
     // The product's own vocabulary, so a document can name the thing it is talking
     // about instead of saying "the record".
     words,
-    primary: words[0] ?? plan.profile.name,
-    secondary: words[1] ?? words[0] ?? plan.profile.name,
-    aPrimary: `${articleFor(words[0] ?? plan.profile.name)} ${words[0] ?? plan.profile.name}`,
-    aSecondary: `${articleFor(words[1] ?? words[0] ?? plan.profile.name)} ${words[1] ?? words[0] ?? plan.profile.name}`,
+    // The product's nouns, always safe to use in a sentence. `vocabSource` says
+    // whether they came from the idea or from what its kind implies, so a document
+    // can be honest when the idea gave us nothing to name.
+    primary: vocab.primary,
+    secondary: vocab.secondary,
+    secondaryPlural: vocab.secondaryPlural,
+    primaryPlural: vocab.primaryPlural,
+    aPrimary: vocab.aPrimary,
+    aSecondary: `${articleFor(vocab.secondary)} ${vocab.secondary}`,
+    vocabSource: vocab.source,
     db: dbLabel(plan.profile),
     contexts,
     terms: termsFor(plan.requirements),
