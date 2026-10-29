@@ -25,6 +25,29 @@ jobs:
       - name: Committed example packet verifies
         run: node factory/cli.mjs verify examples/retro-board/spec
 
+      # Dogfooding: this repository is planned, compiled and guarded by its own
+      # pipeline. The packet is committed, so it must also match the generator.
+      - name: Self-spec packet is in sync with the generator
+        run: |
+          node factory/cli.mjs compile profile.json -o /tmp/self-spec
+          for f in /tmp/self-spec/*.md /tmp/self-spec/spec.json /tmp/self-spec/AGENTS.md /tmp/self-spec/spec-check.mjs; do
+            name=$(basename "$f")
+            if ! diff -q "$f" "specs/$name" > /dev/null; then
+              echo "::error::specs/$name is stale. Run: npm run dogfood"
+              exit 1
+            fi
+          done
+          echo "self-spec packet is in sync"
+
+      - name: This repository passes its own drift guard
+        run: node specs/spec-check.mjs --repo . --strict
+
+      - name: Ten ideas survive the pipeline
+        run: node scripts/stress-test.mjs
+
+      - name: Twenty hostile ideas and six invalid profiles
+        run: node scripts/stress-adversarial.mjs
+
       - name: Adoption runs against this repository
         run: node factory/cli.mjs adopt . -o /tmp/self-profile.json --force
 

@@ -30,5 +30,5 @@ tmp/
 .tmp/
 *.log
 
-# adopted profiles are per-developer artefacts
-/profile.json
+
+examples/ideas/build/

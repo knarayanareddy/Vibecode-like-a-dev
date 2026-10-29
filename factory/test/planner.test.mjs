@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildIndex } from '../lib/indexer.mjs';
-import { buildPlan, computeRigor, loadPolicy } from '../lib/planner.mjs';
+import { buildPlan, computeRigor, loadCatalog, loadPolicy } from '../lib/planner.mjs';
 import { normalizeProfile, validateProfile } from '../lib/profile.mjs';
 
 const index = buildIndex();
@@ -112,6 +112,103 @@ test('skipped and deferred practices are recorded with reasons, never dropped si
   assert.ok(recorded >= 34 - 0, 'every routed practice is accounted for');
 });
 
+// @req REQ-005
+test('kind and trait decide which obligations apply, not a generic checklist', () => {
+  const sdk = normalizeProfile({
+    name: 'flags-sdk',
+    idea: 'A library that evaluates feature flags in-process for applications that embed it.',
+    kind: 'library',
+    stage: 'production',
+    risks: { publicFacing: true }
+  });
+  const keys = (profile) => buildPlan(profile, { index }).requirements.map((requirement) => requirement.key);
+
+  assert.ok(keys(sdk).includes('library.api-stability'), 'a library is held to its public surface');
+  assert.ok(!keys(sdk).includes('ops.rate-limits'), 'a library has no endpoints to rate limit, even when public');
+
+  const web = normalizeProfile({
+    name: 'public-web',
+    idea: 'A public website with an API for its own frontend.',
+    kind: 'web-app',
+    stage: 'mvp',
+    risks: { publicFacing: true }
+  });
+  assert.ok(keys(web).includes('ops.rate-limits'), 'a public web application is rate limited');
+
+  const uploads = normalizeProfile({
+    name: 'photo-app',
+    idea: 'A public website where people upload photographs they own.',
+    kind: 'web-app',
+    stage: 'mvp',
+    traits: ['upload'],
+    risks: { publicFacing: true }
+  });
+  assert.ok(keys(uploads).includes('data.uploads'), 'an upload surface brings an upload obligation');
+
+  const offline = normalizeProfile({
+    name: 'offline-app',
+    idea: 'A mobile app that must work with no network and sync later.',
+    kind: 'mobile',
+    stage: 'mvp',
+    traits: ['offline'],
+    risks: { pii: true }
+  });
+  assert.ok(keys(offline).includes('mobile.offline'), 'offline is an obligation, not only a practice');
+
+  const daemon = normalizeProfile({
+    name: 'shipper',
+    idea: 'A background process that ships logs and must not lose records on restart.',
+    kind: 'cli',
+    stage: 'mvp',
+    traits: ['background-jobs']
+  });
+  assert.ok(keys(daemon).includes('ops.observability'), 'a tier-1 daemon still has to be observable');
+});
+
+// @req REQ-005
+test('a requirement keeps its id when the catalog grows around it', () => {
+  const catalog = loadCatalog();
+  const before = buildPlan(payout, { index, catalog });
+  const ids = Object.fromEntries(before.requirements.map((requirement) => [requirement.key, requirement.id]));
+
+  // Insert a new obligation at the top of the catalog: worst case for positional ids.
+  const grown = {
+    ...catalog,
+    requirements: [
+      {
+        key: 'core.placeholder-new',
+        when: { field: 'kind', eq: 'api' },
+        render: 'core',
+        title: 'A newly catalogued obligation',
+        statement: 'Something the catalog did not previously ask for, inserted before everything else in the list.',
+        failurePath: 'Nothing fails; that is the point of this fixture.',
+        acceptance: ['Given a fixture, when the catalog grows, then no existing id moves.'],
+        verify: 'automated'
+      },
+      ...catalog.requirements
+    ]
+  };
+
+  const previousIds = ids;
+  const after = buildPlan(payout, { index, catalog: grown, previousIds });
+  const afterIds = Object.fromEntries(after.requirements.map((requirement) => [requirement.key, requirement.id]));
+
+  for (const [key, id] of Object.entries(ids)) {
+    assert.equal(afterIds[key], id, `${key} kept ${id}: an anchor citing it still points at the same rule`);
+  }
+
+  const fresh = afterIds['core.placeholder-new'];
+  assert.ok(fresh, 'the new requirement got an id');
+  assert.ok(!Object.values(ids).includes(fresh), `the new id ${fresh} does not recycle an id that anchors may cite`);
+  assert.equal(new Set(after.requirements.map((requirement) => requirement.id)).size, after.requirements.length, 'ids stay unique');
+
+  // Without previous ids the planner is still a deterministic function of the catalog.
+  const cold = buildPlan(payout, { index, catalog: grown });
+  const coldIds = Object.fromEntries(cold.requirements.map((requirement) => [requirement.key, requirement.id]));
+  assert.equal(coldIds['core.placeholder-new'], 'REQ-001', 'a first compile numbers from the catalog order');
+});
+
+// @req REQ-005
 test('planning is deterministic apart from the timestamp', () => {
   const a = buildPlan(payout, { index });
   const b = buildPlan(payout, { index });

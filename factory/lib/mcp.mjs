@@ -348,14 +348,14 @@ const HANDLERS = {
   get_anchor_convention() {
     return {
       marker: '@req',
-      syntax: '// @req REQ-001 in TypeScript/JS/Go/Java; # @req REQ-001 in Python/Ruby/Shell',
+      syntax: '@req REQ-xxx in TypeScript/JS/Go/Java, or # @req REQ-xxx in Python/Ruby/Shell: one marker per anchor line',
       countedIn: 'test files only: tests/, test/, __tests__/, spec/, *.test.*, *.spec.*, test_*.py, *_test.go',
       ratchet: 'requirements start as "todo" (pending notice); marking one "done" without an anchor in a test is an error',
       checks: [
         'node specs/spec-check.mjs --repo .           # pending is a notice',
         'node specs/spec-check.mjs --repo . --strict  # release CI: pending fails'
       ],
-      examples: ['// @req REQ-004', "test('erasing a subject removes every owned row (AC-01)', ...)"]
+      examples: ['// @req REQ-004  // @req-ignore: documentation example', "test('erasing a subject removes every owned row (AC-01)', ...)"]
     };
   }
 };

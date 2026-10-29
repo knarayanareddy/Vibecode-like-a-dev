@@ -1,0 +1,25 @@
+{
+  "name": "06-habit-sync",
+  "idea": "A mobile habit tracker that works offline and syncs across a user's devices. Users define habits with a target frequency, tick them off each day, and see a streak. Ticking must work with no network and must never be lost when the app is killed. Conflicts are resolved per habit-day, last write wins, and the streak is recomputed from the day records rather than stored. Sign-in is optional at first launch so the app is usable before an account exists.",
+  "kind": "mobile",
+  "stage": "mvp",
+  "users": {
+    "scale": "medium"
+  },
+  "traits": [
+    "auth",
+    "offline",
+    "realtime",
+    "persistence",
+    "notifications"
+  ],
+  "risks": {
+    "pii": true
+  },
+  "constraints": {
+    "team": 2,
+    "weeks": 10,
+    "stack": "typescript",
+    "mustUse": []
+  }
+}

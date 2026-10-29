@@ -1,0 +1,28 @@
+{
+  "name": "05-payout-ledger",
+  "idea": "A double-entry ledger and payout service for a marketplace. Sellers accumulate balances from orders, and on a daily schedule the service creates payouts to connected bank accounts. Every movement of money is a ledger entry with two sides; the sum of all entries is always zero. A payout is idempotent per seller per day: replaying the job must not move money twice. Refunds, chargebacks and reversals are modelled as compensating entries, never as edits to history. Operators need a view of an account's current balance derived from entries, not stored as a number. Regulated, multi-tenant, with a full audit trail of who did what.",
+  "kind": "api",
+  "stage": "production",
+  "users": {
+    "scale": "large"
+  },
+  "traits": [
+    "auth",
+    "admin",
+    "background-jobs",
+    "webhooks"
+  ],
+  "risks": {
+    "payments": true,
+    "regulated": true,
+    "pii": true,
+    "multiTenant": true,
+    "destructiveWrites": true
+  },
+  "constraints": {
+    "team": 6,
+    "weeks": 20,
+    "stack": "python",
+    "mustUse": []
+  }
+}

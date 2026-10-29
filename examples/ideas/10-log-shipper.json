@@ -1,0 +1,21 @@
+{
+  "name": "10-log-shipper",
+  "idea": "A log shipper written in Go that tails application log files, parses them into structured records, redacts configured patterns such as card numbers and tokens, and ships batches to an HTTP endpoint with retry and backpressure. The shipper must survive restarts without duplicating or losing records: it records its position durably and acknowledges only after the endpoint accepts a batch. Malformed lines go to a dead-letter file rather than blocking the stream.",
+  "kind": "cli",
+  "stage": "production",
+  "users": {
+    "scale": "medium"
+  },
+  "traits": [
+    "background-jobs"
+  ],
+  "risks": {
+    "destructiveWrites": true
+  },
+  "constraints": {
+    "team": 2,
+    "weeks": 6,
+    "stack": "go",
+    "mustUse": []
+  }
+}

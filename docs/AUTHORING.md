@@ -103,6 +103,15 @@ If a payload changes, tell the reader what changed rather than quietly regenerat
 - **New risk signal** — give it a weight and a label; the plan prints it.
 - **Raise a line ceiling** — say why in the `policy` field. The ceiling is the project's main defence against becoming the thing it criticises.
 
+## 6. If you change the guard or the emit path
+
+The drift guard exists twice on purpose — `factory/lib/verify.mjs` for `vld verify` and `factory/templates/spec-check.mjs` for the copy shipped inside a packet, which may not import anything from this repository. Any change to anchor scanning, suppression or the exit-code contract must land in both, with a test that would fail if they diverge.
+
+Two invariants hold the packet together, and both have tests:
+
+- **A no-op recompile is byte-identical to a fresh compile.** If you add a field that depends on the previous packet, gate it on an actual change, or the "committed packet is in sync with the generator" CI check will fail for the wrong reason.
+- **Same profile, same bytes.** No clock, no randomness, no environment lookups. `generatedAt` is the single exception and is stripped by the sync check.
+
 ## Review checklist for a new primitive
 
 - [ ] The failure mode is stated concretely, with the cost of not doing it.

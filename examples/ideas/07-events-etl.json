@@ -1,0 +1,23 @@
+{
+  "name": "07-events-etl",
+  "idea": "A batch pipeline that ingests product analytics events from three sources (a web SDK, a mobile SDK and a partner S3 drop), validates and normalises them into a canonical event shape, deduplicates by event id, and writes partitioned Parquet to a warehouse table. Late events up to 72 hours are accepted; anything older goes to a quarantine table with a reason. Reruns of a partition must be idempotent. The pipeline publishes data-quality metrics per run, and a schema change in the partner drop must fail the run loudly rather than silently dropping columns. Contains user identifiers, so pseudonymisation happens before landing.",
+  "kind": "data-pipeline",
+  "stage": "production",
+  "users": {
+    "scale": "large"
+  },
+  "traits": [
+    "background-jobs",
+    "upload"
+  ],
+  "risks": {
+    "pii": true,
+    "integrations": true
+  },
+  "constraints": {
+    "team": 3,
+    "weeks": 12,
+    "stack": "python",
+    "mustUse": []
+  }
+}

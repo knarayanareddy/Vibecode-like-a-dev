@@ -24,7 +24,13 @@ const IGNORED_DIRS = new Set([
 const SOURCE_FILE = /\.(ts|tsx|js|jsx|mjs|cjs|py|go|rb|java|kt|cs|php|rs|sh|feature|exs)$/;
 const TEST_FILE = /(^|\/)(tests?|__tests__|specs?)\//;
 const TEST_NAME = /\.(test|spec)\.[a-z]+$|(^|\/)test_[^/]+\.py$|_test\.(py|go|rb)$/;
-const ANCHOR = /@req\s+(REQ-\d{3})/g;
+const ANCHOR_LINE = /@req\s+(REQ-\d{3})/;
+const SUPPRESSED = /@req-ignore/i;
+
+function globToRegExp(glob) {
+  const escaped = glob.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`^${escaped.replace(/\*\*/g, '\u0000').replace(/\*/g, '[^/]*').replace(/\u0000/g, '.*')}$`);
+}
 
 const rel = (root, file) => path.relative(root, file).split(path.sep).join('/');
 
@@ -51,10 +57,12 @@ function walk(dir, root, out = []) {
   return out;
 }
 
-export function scanAnchors(repoDir) {
+export function scanAnchors(repoDir, { exclude = [] } = {}) {
   const anchors = new Map();
   const stray = [];
   let scanned = 0;
+  let suppressed = 0;
+  const exclusionPatterns = exclude.map(globToRegExp);
 
   for (const file of walk(repoDir, repoDir)) {
     let source;
@@ -67,15 +75,25 @@ export function scanAnchors(repoDir) {
     scanned += 1;
 
     const relative = rel(repoDir, file);
+    if (exclusionPatterns.some((pattern) => pattern.test(relative))) continue;
+
     const isTest = TEST_FILE.test(relative) || TEST_NAME.test(relative);
-    for (const match of source.matchAll(ANCHOR)) {
+    for (const line of source.split('\n')) {
+      const match = line.match(ANCHOR_LINE);
+      if (!match) continue;
+      // A line that suppresses the marker is not an anchor: fixtures and examples
+      // quote @req deliberately, and pretending otherwise creates false failures.
+      if (SUPPRESSED.test(line)) {
+        suppressed += 1;
+        continue;
+      }
       const id = match[1];
       if (!anchors.has(id)) anchors.set(id, []);
       anchors.get(id).push({ id, file: relative, isTest });
     }
   }
 
-  return { anchors, stray, scanned };
+  return { anchors, stray, scanned, suppressed };
 }
 
 export function verifyPacket(packetDir, { repo = null, strict = false, policy = loadPolicy() } = {}) {
@@ -198,8 +216,9 @@ export function verifyPacket(packetDir, { repo = null, strict = false, policy = 
   // 6. anchors, when a repository is supplied
   let anchorStats = null;
   if (repo) {
-    const { anchors, scanned } = scanAnchors(repo);
-    anchorStats = { scanned, anchored: anchors.size };
+    const { anchors, scanned, suppressed } = scanAnchors(repo, { exclude: spec.anchors?.exclude ?? [] });
+    anchorStats = { scanned, anchored: anchors.size, suppressed };
+    if (suppressed > 0) info.push(`${suppressed} anchor(s) ignored by @req-ignore or anchors.exclude`);
 
     for (const [id, hits] of anchors) {
       if (!known.has(id)) {

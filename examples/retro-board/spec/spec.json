@@ -3,7 +3,7 @@
   "schemaVersion": 1,
   "generatedWith": {
     "tool": "vibecode-like-a-dev",
-    "version": "0.2.0"
+    "version": "0.3.0"
   },
   "project": {
     "name": "retro-board",
@@ -59,7 +59,7 @@
   },
   "anchorConvention": {
     "marker": "@req",
-    "syntax": "// @req REQ-001   (or \"# @req REQ-001\" in Python)",
+    "syntax": "// @req REQ-xxx   (or \"# @req REQ-xxx\" in Python)",
     "countedIn": [
       "tests/**"
     ],
@@ -216,8 +216,8 @@
       "id": "security.asvs-baseline",
       "title": "OWASP ASVS baseline",
       "path": "primitives/security/asvs-baseline/SKILL.md",
-      "why": "OWASP ASVS gives a numbered baseline so 'we did security' becomes checkable.",
-      "when": "tier gte 1",
+      "why": "OWASP ASVS gives a numbered baseline where there is a network surface or a credential; a local tool inherits supply-chain hygiene instead.",
+      "when": "tier gte 1 AND (kind in [\"web-app\",\"api\",\"mobile\"] OR risks.publicFacing eq true OR traits includes \"auth\")",
       "enforces": [
         "auth.identity",
         "auth.authorization"
@@ -607,6 +607,27 @@
       "verify": "automated",
       "anchor": "tests/security/ops-rate-limits.test.ts",
       "status": "todo"
+    },
+    {
+      "id": "REQ-014",
+      "key": "core.domain-invariants",
+      "area": "core",
+      "title": "The product's own rules are named and pinned",
+      "statement": "Every invariant listed in the domain model names a rule that makes this product itself, and each has at least one automated test whose failure mode is that rule being violated. An invariant with no test is a comment; a test that would pass with the rule inverted is not a test.",
+      "failurePath": "If a core rule is inverted by a refactor, a test fails and names the rule, rather than the change being discovered by a user or a reviewer.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given the invariants listed in the domain model, when the suite runs, then each invariant is covered by a test that fails if its rule is inverted."
+        },
+        {
+          "id": "AC-02",
+          "text": "Given an invariant added to the domain model, when it has no test, then the review checklist rejects the change."
+        }
+      ],
+      "verify": "automated",
+      "anchor": "tests/core/core-domain-invariants.test.ts",
+      "status": "todo"
     }
   ],
   "gates": [
@@ -666,9 +687,9 @@
   ],
   "stats": {
     "primitives": 22,
-    "requirements": 13,
-    "acceptanceCriteria": 22,
-    "automated": 9,
+    "requirements": 14,
+    "acceptanceCriteria": 24,
+    "automated": 10,
     "gates": 8,
     "deferred": 2,
     "skipped": 10

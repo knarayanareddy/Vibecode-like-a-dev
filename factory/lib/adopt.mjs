@@ -11,7 +11,7 @@
  *      user scale and team size become questions, never assertions.
  */
 
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { readJsonFile, scanRepo } from './scan.mjs';
 import { normalizeProfile, validateProfile } from './profile.mjs';
@@ -528,6 +528,7 @@ export function writeAdoptedProfile(report, outPath, { force = false } = {}) {
     throw error;
   }
 
+  mkdirSync(path.dirname(target), { recursive: true });
   writeFileSync(target, `${JSON.stringify(report.profile, null, 2)}\n`, 'utf8');
   return target;
 }

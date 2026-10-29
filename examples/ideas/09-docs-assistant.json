@@ -1,0 +1,25 @@
+{
+  "name": "09-docs-assistant",
+  "idea": "An internal assistant that answers questions about a company's engineering documentation. It ingests Markdown from a Git repository, chunks and embeds it, retrieves the top passages for a question, and answers with citations to the source file and heading. Every answer must cite at least one retrieved passage; when retrieval is weak it must say so instead of guessing. Documents are re-ingested when the repository changes. Access is restricted to employees, and the ingested content includes private design notes.",
+  "kind": "agent",
+  "stage": "internal-tool",
+  "users": {
+    "scale": "medium"
+  },
+  "traits": [
+    "ai",
+    "search",
+    "upload",
+    "auth"
+  ],
+  "risks": {
+    "pii": true,
+    "integrations": true
+  },
+  "constraints": {
+    "team": 2,
+    "weeks": 6,
+    "stack": "python",
+    "mustUse": []
+  }
+}

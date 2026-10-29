@@ -1,0 +1,23 @@
+{
+  "name": "03-standup-bot",
+  "idea": "A Slack bot that asks each engineer three questions in the morning and posts a summary of yesterday's blockers to a channel.",
+  "kind": "api",
+  "stage": "internal-tool",
+  "users": {
+    "scale": "small"
+  },
+  "traits": [
+    "webhooks",
+    "notifications",
+    "background-jobs"
+  ],
+  "risks": {
+    "integrations": true
+  },
+  "constraints": {
+    "team": 2,
+    "weeks": 3,
+    "stack": "python",
+    "mustUse": []
+  }
+}
