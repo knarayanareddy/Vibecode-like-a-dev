@@ -9,8 +9,10 @@
  *   vld verify <packet> [--repo .] check the packet, optionally against real code
  */
 
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { adoptRepo, writeAdoptedProfile } from './lib/adopt.mjs';
+import { CHANGE_TEMPLATE, applyChange, emitChange, planChange, verifyChange } from './lib/change.mjs';
 import { emitPacket } from './lib/emit/index.mjs';
 import { buildIndex, loadIndex, writeIndex } from './lib/indexer.mjs';
 import { buildPlan, loadPolicy } from './lib/planner.mjs';
@@ -32,21 +34,29 @@ const USAGE = `vibecode like a dev — from one paragraph to a spec an agent can
 
 Usage
   vld init <dir>                     write profile.json to fill in
+  vld adopt <repo> [-o <file>] [--force] [--json]
+                                     infer a profile from an existing repository
   vld plan <profile.json> [--json]   show selection and reasoning, write nothing
   vld compile <profile.json> -o <dir> [--force]
                                      render the specification packet
   vld verify <packet-dir> [--repo <path>] [--strict] [--json]
                                      check a packet, optionally against code
+  vld change <packet-dir> <change.json> -o <dir> [--apply] [--force] [--json]
+                                     render a delta spec for a brownfield change
+  vld change verify <change-dir>     validate a change proposal
+  vld change init <dir>              write change.json to fill in
+  vld mcp                            run the MCP server over stdio
   vld index [--check]                rebuild primitives/index.json
 
 Exit codes
   0 ok · 1 verification findings · 2 usage or input error
 
 Typical loop
-  1. vld init my-app && edit my-app/profile.json
-  2. vld plan my-app/profile.json          # does the reasoning match your intent?
-  3. vld compile my-app/profile.json -o specs --force
-  4. hand specs/ to your agent, or run: vld verify specs --repo .
+  new project       vld init my-app  →  plan  →  compile  →  hand specs/ to an agent
+  existing project  vld adopt .      →  plan  →  compile  →  vld change …
+  brownfield        vld change specs changes/add-export.json -o changes/add-export
+  no repo access    see prompts/bootstrap.md
+  agent integration vld mcp          (declare in your MCP client config)
 `;
 
 const PROFILE_TEMPLATE = {
@@ -80,6 +90,12 @@ const PROFILE_TEMPLATE = {
     mustUse: []
   }
 };
+
+/** Prefer a short relative path, but never a ../../.. chain. */
+function displayPath(target) {
+  const relative = path.relative(process.cwd(), target);
+  return relative && !relative.startsWith('..') ? relative : target;
+}
 
 function fail(message) {
   console.error(`\n✗ ${message}\n`);
@@ -189,6 +205,58 @@ Fill in name, idea, kind and stage. Then:
 `);
 }
 
+function runAdopt(repoPath) {
+  const repo = repoPath ?? '.';
+  if (!existsSync(repo)) fail(`No such repository: ${repo}`);
+
+  const report = adoptRepo(repo);
+
+  if (hasFlag('--json')) {
+    console.log(JSON.stringify(report, null, 2));
+    return;
+  }
+
+  const confidenceMark = { high: '●', medium: '◐', low: '○' };
+  console.log(`\nadopt · ${report.repo}\n`);
+  console.log(`  ${report.facts.filesScanned} files · ${report.facts.sourceFiles} source · ${report.facts.dependencies} dependencies` +
+    `${report.facts.truncated ? ' · scan truncated' : ''}`);
+  console.log('');
+  console.log('  inferred');
+  for (const entry of report.evidence) {
+    const value = Array.isArray(entry.value) ? (entry.value.length ? entry.value.join(', ') : 'none') : String(entry.value);
+    console.log(`  ${confidenceMark[entry.confidence] ?? '·'} ${entry.field.padEnd(24)} ${value}`);
+    const why = (entry.evidence ?? []).slice(0, 2).join('; ');
+    if (why) console.log(`  ${' '.padEnd(2)} ${' '.padEnd(24)} ${why}`);
+  }
+
+  if (report.observations.length > 0) {
+    console.log('');
+    console.log('  findings');
+    for (const observation of report.observations) console.log(`  ! ${observation}`);
+  }
+
+  console.log('');
+  console.log('  only you can answer');
+  report.questions.forEach((question, index) => console.log(`  ${index + 1}. ${question}`));
+
+  const out = option('-o', option('--out', path.join(report.repo, 'profile.json')));
+  let written;
+  try {
+    written = writeAdoptedProfile(report, out, { force: hasFlag('--force') });
+    console.log(`\n✓ wrote ${written}`);
+  } catch (error) {
+    console.log(`\n  ! profile not written: ${error.message}`);
+    return;
+  }
+
+  console.log(`
+Next
+  1. Answer the questions above inside ${displayPath(written)} — the draft idea is a placeholder.
+  2. vld plan ${displayPath(written)}      # check the tier before you trust it
+  3. vld compile ${displayPath(written)} -o specs
+`);
+}
+
 function runPlan(profilePath) {
   const plan = loadPlanOrFail(profilePath);
   if (hasFlag('--json')) {
@@ -269,6 +337,93 @@ function runVerify(packetDir) {
   process.exit(report.ok ? 0 : 1);
 }
 
+function runChange() {
+  const [first, second] = positional;
+
+  if (first === 'init') {
+    const dir = second ?? 'changes';
+    mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, 'change.json');
+    if (existsSync(file) && !hasFlag('--force')) fail(`${file} already exists; pass --force to replace it`);
+    writeFileSync(file, `${JSON.stringify(CHANGE_TEMPLATE, null, 2)}\n`, 'utf8');
+    console.log(`\n✓ wrote ${file}\n\nFill in id, title, why and at least one of add/modify/remove. Then:\n  vld change specs ${file} -o changes/<id>\n`);
+    return;
+  }
+
+  if (first === 'verify') {
+    if (!second) fail('Usage: vld change verify <change-dir>');
+    const report = verifyChange(second);
+    console.log(`\nchange verify · ${second}\n`);
+    for (const pass of report.passes) console.log(`  ✓ ${pass}`);
+    for (const warning of report.warnings) console.log(`  ! ${warning}`);
+    for (const error of report.errors) console.log(`  ✗ ${error}`);
+    console.log(`\n${report.ok ? 'PASS' : 'FAIL'} · ${report.errors.length} error(s) · ${report.warnings.length} warning(s)\n`);
+    process.exit(report.ok ? 0 : 1);
+  }
+
+  const packetDir = first;
+  const changePath = second;
+  if (!packetDir || !changePath) fail('Usage: vld change <packet-dir> <change.json> -o <dir> [--apply]');
+
+  let change;
+  try {
+    change = JSON.parse(readFileSync(changePath, 'utf8'));
+    delete change.$help;
+  } catch (error) {
+    fail(`could not read change at ${changePath}: ${error.message}`);
+  }
+
+  const plan = planChange({ packetDir, change });
+
+  if (hasFlag('--json')) {
+    console.log(JSON.stringify({ ...plan, afterSpec: undefined }, null, 2));
+    if (plan.errors.length > 0) process.exit(2);
+    return;
+  }
+
+  if (plan.errors.length > 0) {
+    console.error('\n✗ change is not valid:\n');
+    for (const error of plan.errors) console.error(`  - ${error}`);
+    console.error('');
+    process.exit(2);
+  }
+
+  const out = option('-o', option('--out', path.join(packetDir, 'changes', change.id)));
+  const result = emitChange(plan, out, { force: hasFlag('--force') });
+
+  console.log(`\n✓ ${change.id} · risk ${change.risk} · impact ${plan.impact}\n`);
+  console.log(`  +${plan.added.length} added · ~${plan.modified.length} modified · -${plan.removed.length} removed`);
+  console.log(`  areas: ${plan.blastRadius.areas.join(', ')}`);
+  for (const file of result.written) console.log(`  ${file.name.padEnd(18)} ${String(file.lines).padStart(4)} lines`);
+
+  if (plan.blastRadius.obligations.length > 0) {
+    console.log('\n  obligations');
+    for (const obligation of plan.blastRadius.obligations) console.log(`  - ${obligation}`);
+  }
+  for (const warning of plan.warnings) console.log(`  ! ${warning}`);
+
+  if (hasFlag('--apply')) {
+    const applied = applyChange(plan);
+    console.log(`\n✓ applied to ${applied.specPath} (backup at ${applied.backupPath})`);
+  } else {
+    console.log(`\n  spec.after.json is the resulting manifest. Review it, then apply with --apply or by copying it over spec.json.`);
+  }
+
+  console.log(`
+Next
+  1. Read ${displayPath(path.join(result.outDir, 'proposal.md'))} and reject it here if the blast radius is wrong.
+  2. Work through ${displayPath(path.join(result.outDir, 'tasks.md'))} in order.
+  3. After merging: vld change verify ${displayPath(result.outDir)}
+`);
+}
+
+function runMcp() {
+  import('./lib/mcp.mjs').then(({ serve, TOOLS }) => {
+    console.error(`vibecode-like-a-dev MCP server · ${TOOLS.length} tools · stdio`);
+    serve();
+  });
+}
+
 function runIndex() {
   const result = writeIndex({ check: hasFlag('--check') });
   if (!result.ok) {
@@ -288,8 +443,17 @@ switch (command) {
   case 'init':
     runInit(positional[0]);
     break;
+  case 'adopt':
+    runAdopt(positional[0]);
+    break;
   case 'plan':
     runPlan(positional[0]);
+    break;
+  case 'change':
+    runChange();
+    break;
+  case 'mcp':
+    runMcp();
     break;
   case 'compile':
     runCompile(positional[0]);

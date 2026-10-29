@@ -7,9 +7,21 @@ Not a prompt. Not a checklist. A packet with requirements, acceptance criteria, 
 ```bash
 git clone https://github.com/knarayanareddy/Vibecode-like-a-dev
 cd Vibecode-like-a-dev
-node factory/cli.mjs init my-app           # writes profile.json to fill in
+
+# new project
+node factory/cli.mjs init my-app                 # writes profile.json to fill in
 node factory/cli.mjs plan my-app/profile.json
 node factory/cli.mjs compile my-app/profile.json -o specs
+
+# existing project: infer the profile from the code you already have
+node factory/cli.mjs adopt .                     # evidence + the questions only you can answer
+node factory/cli.mjs compile profile.json -o specs
+
+# brownfield change: a delta spec with a blast radius, a probe and a rollback
+node factory/cli.mjs change specs changes/add-export.json -o changes/add-export
+
+# agent integration: 8 tools over MCP instead of 34 files in context
+node factory/cli.mjs mcp
 ```
 
 Then hand `specs/` to Claude Code, Codex, Cursor, Lovable, Replit, or a human. Start at `specs/AGENTS.md`.
@@ -52,6 +64,81 @@ Three consequences that make this different from a prompt template:
 - **The plan is deterministic and auditable.** No model is called. The same profile always produces a byte-identical packet, and every practice carries the predicate that selected it plus the reason it exists. You can diff intent between two versions of a project, and review a plan like code. The reasoning is in [`docs/adr/0001`](docs/adr/0001-deterministic-compiler-not-a-prompt.md).
 - **Rigor is computed, not requested.** A weekend prototype gets six practices and a single file. A payments service gets 31 practices, 21 gates and a mutation-score target. Ceremony has to be earned by risk.
 - **The spec is enforced.** Every automated requirement carries an `@req REQ-xxx` anchor in the test that proves it. A shipped checker fails CI when a requirement marked `done` loses its test, when an anchor points at a requirement that does not exist, or when an anchor lives outside a test file.
+
+## Four ways in
+
+| You have | Command | What you get |
+| --- | --- | --- |
+| An idea and nothing else | `vld init` → `plan` → `compile` | A greenfield packet |
+| A repository and no spec | `vld adopt <repo>` | A profile inferred from code, with evidence per field and the questions code cannot answer |
+| An existing packet and a change to make | `vld change <packet> <change.json>` | A delta spec: ADDED / MODIFIED / REMOVED, blast radius, probe, rollback, `spec.after.json` |
+| An agent that needs the library | `vld mcp` | 8 MCP tools so the agent queries selection instead of reading 34 files |
+
+### `vld adopt` — meet the repo where it is
+
+Adoption reads manifests (including nested ones in `backend/` and `frontend/`, and extras like `psycopg[binary]`), source file distribution, schema files, CI, deployment config and test tooling. It reports **every inference with the observation behind it and a confidence mark**, then asks only what code cannot answer.
+
+```
+  inferred
+  ● kind                     web-app
+                              dependency: react; dependency: react-dom
+  ● traits                   auth, persistence
+                              dependency: alembic
+  ◐ risks.pii                true
+                              backend/app/models.py: personal data column
+  ◐ stage                    production
+                              deployment config: deploy.yml
+
+  only you can answer
+  1. Is this domain regulated? Nothing in the code can establish that, and it changes the tier.
+```
+
+Two rules make it trustworthy: **runtime dependencies decide what the product is** (a dev-only `express` in a benchmark does not make an HTTP client an API server), and **nothing legal or organisational is inferred** — regulation, user scale and team size are always questions.
+
+### `vld change` — the real-world case
+
+A delta that only says what to add is a wish list. This one has four obligations:
+
+```json
+{
+  "id": "add-csv-export", "risk": "high",
+  "add":    [{ "key": "feature.export", "statement": "…", "failurePath": "…", "acceptance": ["…"] }],
+  "modify": [{ "key": "api.error-envelope", "addAcceptance": ["…"] }],
+  "remove": [{ "key": "ui.design-tokens", "why": "deferred until the component library is consolidated" }],
+  "probe":  ["Export a board with two participants and compare row counts."],
+  "rollback": "Remove the route; no schema change, so redeploying the previous image is enough."
+}
+```
+
+| Output | What it forces you to face |
+| --- | --- |
+| `proposal.md` | The argument, the before/after, and the **blast radius**: areas touched, practices that enforce them, gates in the way, tests that become stray anchors |
+| `tasks.md` | The work order: anchor first, then manifest, then gates, then probe |
+| `delta.json` | Machine-readable delta with base, impact and obligations |
+| `spec.after.json` | The resulting manifest, reviewable as a diff of intent before any code moves |
+
+Impact is classified (`patch` / `minor` / `major`), and removing a requirement that a practice enforces at your tier is flagged rather than silently allowed. Appended criteria keep their existing `AC-` identifiers, because anchors already cite them.
+
+### `vld mcp` — stop pasting 34 files
+
+An MCP server over stdio, zero dependencies, 8 tools:
+
+| Tool | Answers |
+| --- | --- |
+| `compute_rigor` | What tier, from which signals, with which ceilings |
+| `select_primitives` | Which practices apply, why, and what was deliberately skipped |
+| `search_primitives` | Keyword search with tier filtering |
+| `get_primitive` | One practice in full, read only when needed |
+| `get_requirements` | Requirement templates with criteria, failure paths and anchors |
+| `get_gates` | Cumulative definition of done for a tier |
+| `plan_project` | The whole plan, compactly |
+| `get_anchor_convention` | The `@req` ratchet and its commands |
+
+The selection comes from the same policy as the CLI, so an agent cannot invent its own tier logic and drift from the plan. Add it to any MCP client:
+
+```json
+{ "mcpServers": { "vibecode": { "command": "node", "args": ["/path/to/factory/cli.mjs", "mcp"] } } }
+```
 
 ## What you get
 
@@ -214,18 +301,20 @@ factory/
   routing.json         which practice applies when, and why
   catalog/
     requirements.json  ~24 requirement templates with acceptance criteria
-  lib/                 frontmatter, predicates, planner, emitter, verifier
+  lib/                 frontmatter, predicates, planner, emitter, verifier,
+                       scan + adopt, change (delta specs), mcp (server)
   templates/
     spec-check.mjs     the drift guard shipped into every packet
   schema/
     spec.schema.json   the manifest contract
-  test/                45 tests: data integrity, planning, reproducibility, end-to-end enforcement
+  test/                83 tests: data integrity, planning, reproducibility, adoption,
+                       delta specs, MCP protocol, end-to-end enforcement
 examples/retro-board/  a profile and its compiled packet
 docs/                  research notes, authoring guide, decision records
 ```
 
 ```bash
-npm test        # 45 tests
+npm test        # 83 tests
 npm run check   # index freshness + tests + verify the example packet
 ```
 
@@ -235,17 +324,20 @@ npm run check   # index freshness + tests + verify the example packet
 - **The drift guard needs honest statuses.** Nothing but discipline stops an agent marking a requirement `done` without writing the test. The ratchet makes that visible in the diff and `--strict` makes it fail late, but it is not self-enforcing. Automatic detection of *semantic* drift is an open research problem.
 - **No benchmark of this specific tool yet.** The evidence that specs raise agent success rates is real (spec completeness ≥6 correlates with ~92% merge rate in one 2026 benchmark); the evidence that *this packet* beats Kiro or Spec Kit on the same tickets does not exist. `docs/RESEARCH.md` proposes the evaluation.
 - **Chat-only builders do not follow the loop.** Lovable and Replit are given a paste-ready brief and per-tool guidance, but they will not run `spec-check.mjs`. Treat their output as a first draft that a code agent or a human finishes.
-- **Greenfield only, for now.** Brownfield change management (delta specs) is the obvious next step and is not implemented.
+- **Adoption infers, it does not understand.** A profile derived from code is a starting point with evidence, not a description of intent. Re-read the inferred fields before compiling; the questions it asks are the ones that matter.
+- **Delta specs are declarative.** `vld change` produces the proposal, the manifest diff and the verification rules, but it cannot apply a migration or prove the blast radius is complete for you.
+- **MCP tools select; they do not write.** The server answers "what applies and why". Composing the packet is still a compile (or a human/agent writing prose).
 - **The CLI path assumes the profile describes the project honestly.** If you say `mvp` about a regulated product, you get a light packet. The `risks` fields exist because intent cannot be inferred.
 - **Not published to npm yet.** Clone and use `node factory/cli.mjs`. The `bin` entry is ready.
 
 ## Roadmap
 
-1. **`vld adopt <repo>`** — reverse-engineer a profile from an existing codebase, so the packet describes what is there rather than what should be.
-2. **Delta specs** — `vld change` for brownfield work: ADDED / MODIFIED / REMOVED requirements, applied like OpenSpec, verified like a migration.
-3. **An MCP server over the primitive library** — so any agent can query `select_primitives(profile)` and `get_primitive(id)` instead of being handed 34 files.
-4. **An evaluation harness** — the same set of tickets built with no spec, a generic spec, and this packet, scored on merge rate, review defects, spec drift and cost. Until that exists, every claim here is a design argument.
-5. **Exports** — `spec-kit` and `kiro` formats from one source of truth, so the packet is portable rather than a new ecosystem.
+Shipped in v0.2: `vld adopt`, `vld change` (delta specs), `vld mcp`.
+
+1. **An evaluation harness** — the same set of tickets built with no spec, a generic spec, and this packet, scored on merge rate, review defects, spec drift and cost. Until that exists, every claim here is a design argument.
+2. **Exports** — `spec-kit` and `kiro` formats from one source of truth, so the packet is portable rather than a new ecosystem.
+3. **`vld change --quick`** — for one-line changes that do not deserve a delta: an explicit, labelled path with no probe, for teams that accept the trade.
+4. **Semantic drift detection** — anchors catch a requirement losing its test; they cannot catch a test proving the wrong thing. The honest answer today is a second reader, human or model.
 
 ## Prior art and reading
 

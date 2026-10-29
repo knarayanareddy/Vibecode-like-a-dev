@@ -16,6 +16,8 @@ Use this when you cannot run the CLI — for example inside a chat-only builder,
 > - Declared kind (web-app, api, cli, library, data-pipeline, mobile, agent, automation): `<kind>`
 > - Stage (prototype, mvp, internal-tool, production): `<stage>`
 >
+> **If you have MCP support**, prefer the server: `node factory/cli.mjs mcp` exposes `compute_rigor`, `select_primitives`, `get_primitive`, `get_requirements` and `get_gates`. That path is cheaper and cannot drift from the policy. Everything below is the manual equivalent.
+>
 > **Step 1 — Read the rules, not the whole library.**
 > Read, in this order:
 > 1. `factory/policy.json` — tier thresholds, risk weights, stage caps, gates, size ceilings.

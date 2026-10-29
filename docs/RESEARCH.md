@@ -72,7 +72,7 @@ The uncomfortable synthesis: **a spec only helps if somebody reads it, and only 
 - **From Spec Kit:** artifacts in git, agent-agnostic markdown, the repository "constitution" as the top-level contract.
 - **From Kiro:** three-file lightness as a default for small work (our tier 0 is one file), and requirements phrased as observable behaviour. We deliberately did *not* adopt EARS notation verbatim — it optimises for specifiers in regulated contexts, and at small scale it is noise.
 - **From BMAD:** adversarial review as a separate role with a separate objective, and scale-adaptive planning. We implemented adaptivity as a computed tier rather than a roster of personas, and review as a paste-ready prompt rather than an agent.
-- **From OpenSpec:** the insight that brownfield change is the real problem. Delta specs are on our roadmap and not yet implemented; claiming otherwise would be dishonest.
+- **From OpenSpec:** the insight that brownfield change is the real problem, and the delta shape (ADDED / MODIFIED / REMOVED). `vld change` adopts that vocabulary and adds what OpenSpec leaves to review: a computed blast radius, orphaned-anchor detection, a required probe and a rollback, and a resulting `spec.after.json` you can diff before touching code.
 - **From the Agent Skills ecosystem:** `SKILL.md` frontmatter, one-line trigger descriptions, progressive disclosure, references one hop deep, and "keep the body under 500 lines" as a hard authoring rule.
 
 ## What we deliberately rejected
@@ -86,9 +86,9 @@ The uncomfortable synthesis: **a spec only helps if somebody reads it, and only 
 ## Open problems
 
 1. **Semantic drift.** Anchors catch a requirement losing its test; they cannot catch a test that proves the wrong thing, or a requirement quietly reinterpreted. Detecting that needs either executable specifications or a second model reading both — both are unresolved.
-2. **Selection accuracy.** Predicates encode judgement. A project that mis-describes itself gets the wrong rigor, and the failure is silent.
+2. **Selection accuracy.** Predicates encode judgement. A project that mis-describes itself gets the wrong rigor, and the failure is silent. `vld adopt` reduces the guesswork by inferring from code, but an inference with evidence is still an inference.
 3. **Agent non-compliance.** Instructions in a document are advisory to a model. The mechanical gates are not. This is why the packet puts its weight on CI rather than on prose.
-4. **Small-change ergonomics.** A one-line change does not deserve a packet. Delta specs and a `--quick` path are the obvious answers; neither is built.
+4. **Small-change ergonomics.** A one-line change does not deserve a packet. `vld change` now handles changes that are worth a delta, with a probe and a rollback obligation; a `--quick` path for genuinely trivial edits is still missing.
 5. **No shared benchmark.** Every tool in this space argues from design intuition. The field needs a public task set with merge rate, defect and drift metrics. Proposal below.
 
 ## How to evaluate this properly

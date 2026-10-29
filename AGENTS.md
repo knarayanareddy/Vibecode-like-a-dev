@@ -12,8 +12,12 @@ node factory/cli.mjs index --check      # fail if the index is stale
 node factory/cli.mjs plan examples/retro-board/profile.json
 node factory/cli.mjs compile examples/retro-board/profile.json -o examples/retro-board/spec --force
 node factory/cli.mjs verify examples/retro-board/spec
-npm test                                # integrity, planning, end-to-end enforcement
-npm run check                           # all of the above
+node factory/cli.mjs adopt <repo> -o <profile.json>   # infer a profile from code, with evidence
+node factory/cli.mjs change <packet> <change.json> -o <dir>
+node factory/cli.mjs change verify <dir>
+node factory/cli.mjs mcp                # MCP server over stdio (8 tools)
+npm test                                # 83 tests: integrity, planning, adoption, deltas, MCP, enforcement
+npm run check                           # index freshness + tests + verify the example packet
 ```
 
 No dependencies, no build step, Node 22+. If a change requires a dependency, stop and explain why in an ADR under `docs/` before adding it.
@@ -27,7 +31,7 @@ No dependencies, no build step, Node 22+. If a change requires a dependency, sto
 | `factory/policy.json` | Tiers, risk weights, caps, gates, line ceilings. |
 | `factory/routing.json` | Which practice applies when, and why. |
 | `factory/catalog/requirements.json` | Requirement templates with acceptance criteria. |
-| `factory/lib/` | `frontmatter`, `predicate`, `indexer`, `planner`, `verify`, `emit/`. |
+| `factory/lib/` | `frontmatter`, `predicate`, `indexer`, `planner`, `verify`, `emit/`, `scan`, `adopt`, `change`, `mcp`. |
 | `factory/templates/spec-check.mjs` | Copied verbatim into every packet. Must stay dependency-free and standalone. |
 | `factory/test/` | Node's test runner. Tests are the specification. |
 | `examples/` | A profile and its compiled packet. Regenerate, do not hand-edit. |
@@ -42,6 +46,10 @@ No dependencies, no build step, Node 22+. If a change requires a dependency, sto
 6. **Test first when behaviour changes.** Predicate semantics, planning, emission and verification all have tests. A change to `docs.mjs` prose needs a regenerated example and a passing `npm run check`.
 7. **Do not weaken a test to make a check pass.** If the test is wrong, say why in the commit and fix the behaviour it describes.
 8. **Gates accumulate, never repeat.** A tier-2 gate list must not restate a tier-1 obligation.
+9. **Adoption infers, and says so.** Every value `adopt` produces carries the observation and a confidence. Never add an inference without evidence, and never infer regulation, team size or user scale from code.
+10. **Runtime dependencies decide the kind; dev dependencies only inform tooling.** A dev-only `express` must not turn a library into an API server. This is covered by a test; keep it that way.
+11. **A delta declares four things:** what changes, its blast radius, a probe, and a rollback. High risk without a probe and a rollback is invalid, not merely discouraged.
+12. **The MCP server must not drift from the CLI.** Both call `buildPlan`. If you add a tool, it returns policy-derived data, never a second implementation of the selection rules.
 
 ## Definition of done
 
