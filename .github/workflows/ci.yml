@@ -1,0 +1,56 @@
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # No install step: the CLI and the shipped spec checker have no dependencies.
+      - name: Index is up to date
+        run: node factory/cli.mjs index --check
+
+      - name: Tests
+        run: npm test
+
+      - name: Committed example packet verifies
+        run: node factory/cli.mjs verify examples/retro-board/spec
+
+      - name: Adoption runs against this repository
+        run: node factory/cli.mjs adopt . -o /tmp/self-profile.json --force
+
+      - name: MCP server answers tools/list
+        run: |
+          printf '%s\n' \
+            '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+            '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+            | node factory/cli.mjs mcp 2>/dev/null \
+            | node -e 'let b="";process.stdin.on("data",d=>b+=d).on("end",()=>{const lines=b.trim().split("\n").map(JSON.parse);const tools=lines.find(l=>l.id===2);if(tools.result.tools.length!==8)process.exit(1);console.log("8 MCP tools advertised")})'
+
+      - name: Delta spec round trip
+        run: |
+          node factory/cli.mjs change init /tmp/change > /dev/null
+          node -e 'const fs=require("fs");const c=JSON.parse(fs.readFileSync("/tmp/change/change.json"));delete c.$help;fs.writeFileSync("/tmp/change/change.json",JSON.stringify(c,null,2))'
+          node factory/cli.mjs change examples/retro-board/spec /tmp/change/change.json -o /tmp/change/out
+          node factory/cli.mjs change verify /tmp/change/out
+
+      - name: Generated packet is in sync with the generator
+        run: |
+          node factory/cli.mjs compile examples/retro-board/profile.json -o /tmp/spec
+          for f in /tmp/spec/*.md /tmp/spec/spec.json /tmp/spec/AGENTS.md /tmp/spec/spec-check.mjs; do
+            name=$(basename "$f")
+            if ! diff -q "$f" "examples/retro-board/spec/$name" > /dev/null; then
+              echo "::error::examples/retro-board/spec/$name is stale. Run: node factory/cli.mjs compile examples/retro-board/profile.json -o examples/retro-board/spec --force"
+              exit 1
+            fi
+          done
+          echo "example packet is in sync"

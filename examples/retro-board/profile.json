@@ -1,0 +1,24 @@
+{
+  "$comment": "Example profile. Run: node factory/cli.mjs plan examples/retro-board/profile.json",
+  "name": "retro-board",
+  "idea": "A retrospective board for small engineering teams. A facilitator creates a board per sprint, teammates add anonymous cards into Start / Stop / Continue columns, then everyone votes and the team leaves with three agreed actions. Today teams do this in a shared doc that nobody can vote on and that loses its history.",
+  "kind": "web-app",
+  "stage": "mvp",
+  "users": { "scale": "small" },
+  "traits": ["auth", "persistence", "realtime"],
+  "risks": {
+    "pii": true,
+    "payments": false,
+    "regulated": false,
+    "multiTenant": false,
+    "destructiveWrites": false,
+    "publicFacing": true,
+    "integrations": false
+  },
+  "constraints": {
+    "team": 2,
+    "weeks": 4,
+    "stack": "typescript",
+    "mustUse": ["postgres"]
+  }
+}

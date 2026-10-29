@@ -1,0 +1,465 @@
+{
+  "version": 1,
+  "comment": "Requirements are selected by the same declarative predicates as primitives. Each is written so that two independent implementers would build something a shared test suite accepts. Failure paths are mandatory: a requirement without a failure path is a demo script.",
+  "requirements": [
+    {
+      "key": "core.runnable",
+      "when": {
+        "always": true
+      },
+      "render": "core",
+      "title": "Runnable from a clean clone",
+      "statement": "A new contributor can install dependencies, start the project and run its tests from a clean clone using only the documented commands, with no manual database seeding, no hidden local state and no undocumented environment variables.",
+      "failurePath": "A missing environment variable produces a single actionable error naming the variable, not a stack trace deep in a startup path.",
+      "acceptance": [
+        "Given a fresh clone and an empty environment file, when the documented setup command runs, then it either succeeds or lists every missing required variable by name."
+      ],
+      "verify": "gate"
+    },
+    {
+      "key": "core.primary-journey",
+      "when": {
+        "always": true
+      },
+      "render": "core",
+      "title": "The primary journey works end to end",
+      "statement": "The single journey described in the product brief works from first step to last, through the real interface, persisting whatever it must persist, and produces the outcome the brief promises. It is exercised by one end-to-end test, not by unit tests of its parts.",
+      "failurePath": "If any step of the journey fails, the user is left in a state they can retry from, with no partially written data and an explanation that names what failed.",
+      "acceptance": [
+        "Given a new user and empty storage, when they complete the primary journey using only the documented interface, then the outcome named in the brief exists and is readable on a second visit.",
+        "Given the same journey, when a dependency it relies on is unavailable, then the user sees an actionable message and no partial record is created."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "core.non-goals",
+      "when": {
+        "field": "tier",
+        "gte": 1
+      },
+      "render": "core",
+      "title": "Explicit non-goals",
+      "statement": "The product brief lists at least three things this version deliberately does not do, and the codebase contains no partially built version of them.",
+      "failurePath": "Out-of-scope work arrives as a failing review comment referencing a non-goal, rather than as silent extra code.",
+      "acceptance": [
+        "Given the brief, when a reviewer reads the change, then every capability in the diff maps to an in-scope requirement or is rejected."
+      ],
+      "verify": "manual"
+    },
+    {
+      "key": "data.persistence",
+      "when": {
+        "any": [
+          {
+            "field": "kind",
+            "in": [
+              "api",
+              "web-app",
+              "data-pipeline",
+              "mobile"
+            ]
+          },
+          {
+            "field": "traits",
+            "includes": "persistence"
+          }
+        ]
+      },
+      "render": "data",
+      "title": "Durable state with forward-only migrations",
+      "statement": "Persistent state is defined by a schema kept in version control. Every schema change ships as a forward-only migration that can run on a non-empty database without data loss.",
+      "failurePath": "A migration that fails halfway leaves the database in a known state, and the documented restore step returns it to the pre-migration snapshot.",
+      "acceptance": [
+        "Given a database at the previous schema version with representative rows, when the migration runs, then all rows remain readable and no column required by the new code is null.",
+        "Given the same database, when the migration is re-run, then it is a no-op rather than an error."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "data.lifecycle",
+      "when": {
+        "any": [
+          {
+            "field": "risks.regulated",
+            "eq": true
+          },
+          {
+            "all": [
+              {
+                "field": "risks.pii",
+                "eq": true
+              },
+              {
+                "field": "tier",
+                "gte": 2
+              }
+            ]
+          }
+        ]
+      },
+      "render": "data",
+      "title": "Data lifecycle: retention, export and deletion",
+      "statement": "Every personal data field has a documented purpose, retention period and deletion path. A single operation removes all data belonging to one subject, including derived rows and cached copies.",
+      "failurePath": "A deletion request for an unknown subject returns success without inventing records, and leaves no orphan rows.",
+      "acceptance": [
+        "Given a subject with records in every table, when deletion runs, then a query for that subject across all tables returns zero rows.",
+        "Given a deletion request, when the audit log is inspected, then the request is recorded without storing the deleted personal data."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "auth.identity",
+      "when": {
+        "field": "traits",
+        "includes": "auth"
+      },
+      "render": "security",
+      "title": "Authentication with explicit session lifecycle",
+      "statement": "Users authenticate through a named mechanism. Sessions expire, can be revoked, and never rely on client-held claims that the server cannot verify.",
+      "failurePath": "An expired or revoked session receives an unauthenticated response and performs no state change.",
+      "acceptance": [
+        "Given valid credentials, when the user signs in, then a session is issued and the identifier is not placed in a URL.",
+        "Given a revoked session, when any protected endpoint is called, then the response is 401 and no data is written.",
+        "Given a sign-out-everywhere request, when any previously issued session is used, then all are rejected except the current one."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "auth.authorization",
+      "when": {
+        "any": [
+          {
+            "field": "traits",
+            "includes": "auth"
+          },
+          {
+            "field": "traits",
+            "includes": "admin"
+          },
+          {
+            "field": "risks.multiTenant",
+            "eq": true
+          }
+        ]
+      },
+      "render": "security",
+      "title": "Server-side authorization with deny-by-default",
+      "statement": "Every state-changing operation and every read of another subject's data checks permission on the server, keyed to a named role or policy, with deny as the default.",
+      "failurePath": "A forbidden request returns 403 or 404 as documented, writes nothing, and emits an authorization-denied log line without leaking the resource's contents.",
+      "acceptance": [
+        "Given a user without the required role, when the operation is attempted directly against the API, then it is refused even if the UI hides the control.",
+        "Given a resource owned by another subject, when it is requested by identifier, then the response does not reveal existence."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "auth.tenant-isolation",
+      "when": {
+        "field": "risks.multiTenant",
+        "eq": true
+      },
+      "render": "security",
+      "title": "Tenant isolation",
+      "statement": "Every row that belongs to a tenant carries a tenant key that is applied by the data access layer, not by individual call sites.",
+      "failurePath": "A query constructed without a tenant filter fails closed (returns no rows or raises), rather than returning all tenants.",
+      "acceptance": [
+        "Given two tenants with records, when tenant A lists records, then no tenant B identifier appears.",
+        "Given a request with a forged tenant identifier, when it is processed, then it is rejected before any read."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "ui.accessibility",
+      "when": {
+        "field": "kind",
+        "in": [
+          "web-app",
+          "mobile"
+        ]
+      },
+      "render": "frontend",
+      "title": "Accessible primary journey",
+      "statement": "The primary journey is completable with a keyboard only and with a screen reader, with visible focus, labelled controls and no colour-only status encoding.",
+      "failurePath": "Validation errors are announced and focus moves to the first invalid field, rather than the form silently failing.",
+      "acceptance": [
+        "Given the primary journey, when it is driven by keyboard only, then every control is reachable and the outcome is completed.",
+        "Given a form submission with an invalid field, when it fails, then an error message is programmatically associated with that field and announced."
+      ],
+      "verify": "manual"
+    },
+    {
+      "key": "ui.states",
+      "when": {
+        "field": "kind",
+        "in": [
+          "web-app",
+          "mobile"
+        ]
+      },
+      "render": "frontend",
+      "title": "Every screen has loading, empty, error and success states",
+      "statement": "Each data-driven screen defines four states before it is considered done, and the empty state tells the user the next action.",
+      "failurePath": "A failed request shows a retry affordance and preserves the user's input rather than discarding the form.",
+      "acceptance": [
+        "Given a slow response, when the screen loads, then a loading state appears within 200ms and does not shift layout.",
+        "Given zero records, when the screen loads, then an empty state with a single next action is shown.",
+        "Given a server error, when the request fails, then an error state with a working retry is shown."
+      ],
+      "verify": "manual"
+    },
+    {
+      "key": "ui.design-tokens",
+      "when": {
+        "field": "kind",
+        "in": [
+          "web-app",
+          "mobile"
+        ]
+      },
+      "render": "frontend",
+      "title": "One design token source",
+      "statement": "Colour, spacing, typography and radius come from a single token source. No component hard-codes a hex colour, pixel spacing value or font family.",
+      "failurePath": "A component using a raw value fails the design-token fitness check in CI.",
+      "acceptance": [
+        "Given the component directory, when the token check runs, then no raw colour or spacing literal is reported."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "ux.error-taxonomy",
+      "when": {
+        "field": "kind",
+        "in": [
+          "web-app",
+          "mobile"
+        ]
+      },
+      "render": "frontend",
+      "title": "Errors are classified before they are rendered",
+      "statement": "Errors are classified as user-correctable, retryable or unexpected, and each class has one documented presentation and logging rule.",
+      "failurePath": "Unexpected errors never render internal messages, stack traces or identifiers to the user, and are logged with a correlation ID that is shown as a short support code.",
+      "acceptance": [
+        "Given a forced internal failure, when it is displayed, then the user sees a generic message plus a support code and the server log contains the matching correlation ID."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "api.contract",
+      "when": {
+        "field": "kind",
+        "in": [
+          "api",
+          "web-app"
+        ]
+      },
+      "render": "api",
+      "title": "Versioned machine-readable interface contract",
+      "statement": "Every exposed or consumed interface is described in a machine-readable contract kept in the repository, and breaking changes are detected before merge.",
+      "failurePath": "An incompatible change fails the contract check and names the field and the consumer affected.",
+      "acceptance": [
+        "Given the contract and the implementation, when the contract check runs, then they agree on paths, methods, status codes and error shape.",
+        "Given a removed response field, when the check runs, then it fails as a breaking change."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "api.error-envelope",
+      "when": {
+        "field": "kind",
+        "in": [
+          "api",
+          "web-app"
+        ]
+      },
+      "render": "api",
+      "title": "One error envelope and one identifier scheme",
+      "statement": "All errors share one envelope containing a stable machine code, a human message, a correlation ID and optional field details. Identifiers are opaque and are never sequential integers in public interfaces.",
+      "failurePath": "An unknown route and a failed validation return the same envelope shape with distinguishable machine codes.",
+      "acceptance": [
+        "Given an invalid payload, when the response is inspected, then its shape matches the documented envelope and the machine code is stable across releases."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "integration.retries",
+      "when": {
+        "any": [
+          {
+            "field": "risks.integrations",
+            "eq": true
+          },
+          {
+            "field": "traits",
+            "includes": "webhooks"
+          }
+        ]
+      },
+      "render": "reliability",
+      "title": "Idempotent handling of retried work",
+      "statement": "Every inbound webhook and every outbound retry is idempotent: replaying the same event produces the same end state and no duplicate side effect.",
+      "failurePath": "A duplicate event is acknowledged without reprocessing, and a retry storm does not create duplicate records or double-charge.",
+      "acceptance": [
+        "Given the same event delivered twice, when both are processed, then exactly one record exists and one side effect occurred.",
+        "Given a client error from the upstream service (400/401/403), when the call fails, then it is not retried.",
+        "Given a 5xx or timeout, when the call fails, then it is retried with exponential backoff and jitter up to a documented cap."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "payments.correctness",
+      "when": {
+        "field": "risks.payments",
+        "eq": true
+      },
+      "render": "reliability",
+      "title": "Money movement is correct under retries and partial failure",
+      "statement": "Amounts are stored in integer minor units with an explicit currency. Every charge, refund and transfer is idempotent, recorded in an append-only ledger, and reconciled against the provider.",
+      "failurePath": "A webhook arriving before the checkout response, or twice, results in exactly one entitlement and one ledger entry.",
+      "acceptance": [
+        "Given a payment intent confirmed twice with the same idempotency key, when both requests are handled, then one charge exists.",
+        "Given a provider timeout after a successful capture, when reconciliation runs, then the local ledger converges to the provider's state without creating a second charge.",
+        "Given any ledger entry, when the totals are recomputed, then sums reconcile to zero across debits and credits for settled transactions."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "ai.guardrails",
+      "when": {
+        "field": "traits",
+        "includes": "ai"
+      },
+      "render": "ai",
+      "title": "Model calls are bounded, observable and evaluated",
+      "statement": "Every model call has a declared input contract, an output validator, a timeout, a per-user rate limit and a cost ceiling. A versioned evaluation set exists for the prompts that matter.",
+      "failurePath": "A malformed model response is rejected and the user sees a retryable message; it is never rendered as trusted markup.",
+      "acceptance": [
+        "Given a model returning text outside the expected schema, when the response is processed, then it is rejected, logged and not shown to the user verbatim.",
+        "Given a session exceeding its token budget, when another call is attempted, then it is refused with a user-visible explanation.",
+        "Given the evaluation set, when a prompt changes, then the run reports pass rate before and after."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "ops.observability",
+      "when": {
+        "field": "tier",
+        "gte": 2
+      },
+      "render": "reliability",
+      "title": "Observable behaviour under failure",
+      "statement": "Every inbound request has a correlation ID propagated through logs and outbound calls. Errors, latency and queue depth are recorded in a form that can be alerted on.",
+      "failurePath": "A failing dependency produces log lines carrying the correlation ID and an alertable error-rate increase, not a silent retry loop.",
+      "acceptance": [
+        "Given a failing dependency, when a request is traced, then its log lines share one correlation ID and include the dependency name and outcome."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "ops.rate-limits",
+      "when": {
+        "all": [
+          {
+            "field": "risks.publicFacing",
+            "eq": true
+          },
+          {
+            "field": "tier",
+            "gte": 1
+          }
+        ]
+      },
+      "render": "security",
+      "title": "Abuse limits on public entry points",
+      "statement": "Public write and authentication endpoints are rate limited per identity and per IP, with a documented response that includes a retry hint.",
+      "failurePath": "Exceeding the limit returns 429 with a retry hint and performs no work; the limiter fails closed for authentication endpoints.",
+      "acceptance": [
+        "Given N+1 requests within the window, when the last is made, then it is refused with 429 and no state change occurred."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "delivery.audit-trail",
+      "when": {
+        "any": [
+          {
+            "field": "risks.regulated",
+            "eq": true
+          },
+          {
+            "field": "tier",
+            "gte": 3
+          }
+        ]
+      },
+      "render": "security",
+      "title": "Append-only audit trail for privileged actions",
+      "statement": "Privileged and destructive actions append an immutable record of actor, action, target, time and outcome. Records are never updated or deleted by application code.",
+      "failurePath": "A failed privileged action is still recorded, with its failure reason and without sensitive payloads.",
+      "acceptance": [
+        "Given a privileged action, when it completes or fails, then exactly one audit record exists and the application user has no update or delete grant on that table."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "pipeline.idempotency",
+      "when": {
+        "field": "kind",
+        "eq": "data-pipeline"
+      },
+      "render": "data",
+      "title": "Reprocessable pipeline stages",
+      "statement": "Each stage is deterministic given its inputs, records its watermark, and can be replayed for a time window without duplicating output.",
+      "failurePath": "Replaying a window produces identical output and leaves row counts unchanged.",
+      "acceptance": [
+        "Given a completed run, when the same window is replayed, then the output partition is byte-identical and row counts are unchanged."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "library.api-stability",
+      "when": {
+        "field": "kind",
+        "eq": "library"
+      },
+      "render": "api",
+      "title": "Stable public surface with semantic versioning",
+      "statement": "The public export surface is enumerated and tested, so an accidental breaking change fails CI. Versions follow semantic versioning.",
+      "failurePath": "Removing or changing a public export fails the surface test and requires a major version bump.",
+      "acceptance": [
+        "Given the recorded export surface, when the package is rebuilt, then the surface matches or the build fails."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "cli.ergonomics",
+      "when": {
+        "field": "kind",
+        "eq": "cli"
+      },
+      "render": "api",
+      "title": "Predictable command-line behaviour",
+      "statement": "Commands follow a documented grammar, write data to stdout and diagnostics to stderr, support --help and --version, and exit non-zero on failure.",
+      "failurePath": "An invalid flag prints usage to stderr and exits 2; a partial failure exits non-zero and leaves no half-written output file.",
+      "acceptance": [
+        "Given an invalid flag, when the command runs, then usage goes to stderr, stdout is empty and the exit code is non-zero."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "spec.drift-guard",
+      "when": {
+        "field": "tier",
+        "gte": 2
+      },
+      "render": "core",
+      "title": "Spec drift is detected mechanically",
+      "statement": "Requirements marked automated carry an @req anchor in the test that proves them. CI fails when an anchored requirement has no test, when a test cites an unknown requirement, or when a primitive referenced by the spec disappears.",
+      "failurePath": "Deleting a test that proves an automated requirement fails CI with the requirement identifier and the missing anchor.",
+      "acceptance": [
+        "Given a requirement anchored to a deleted test, when CI runs, then it fails and names the requirement.",
+        "Given an @req anchor for an identifier absent from the spec, when CI runs, then it fails as unknown."
+      ],
+      "verify": "automated"
+    }
+  ]
+}

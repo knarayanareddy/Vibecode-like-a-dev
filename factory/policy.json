@@ -1,0 +1,231 @@
+{
+  "version": 1,
+  "comment": "Rigor is earned, not assumed. Tier is computed from risk and stage, then deliberately capped for prototypes so the toolkit does not become the ceremony it criticises.",
+  "signals": [
+    {
+      "field": "risks.payments",
+      "weight": 3,
+      "label": "handles money"
+    },
+    {
+      "field": "risks.regulated",
+      "weight": 3,
+      "label": "regulated data or domain"
+    },
+    {
+      "field": "risks.pii",
+      "weight": 1,
+      "label": "stores personal data"
+    },
+    {
+      "field": "risks.multiTenant",
+      "weight": 2,
+      "label": "multi-tenant isolation"
+    },
+    {
+      "field": "risks.destructiveWrites",
+      "weight": 1,
+      "label": "destructive writes"
+    },
+    {
+      "field": "risks.publicFacing",
+      "weight": 1,
+      "label": "publicly reachable"
+    },
+    {
+      "field": "risks.integrations",
+      "weight": 1,
+      "label": "third-party integrations"
+    },
+    {
+      "field": "stage",
+      "eq": "production",
+      "weight": 1,
+      "label": "production target"
+    },
+    {
+      "field": "users.scale",
+      "eq": "medium",
+      "weight": 1,
+      "label": "medium user scale"
+    },
+    {
+      "field": "users.scale",
+      "eq": "large",
+      "weight": 2,
+      "label": "large user scale"
+    }
+  ],
+  "tiers": [
+    {
+      "tier": 0,
+      "label": "sketch",
+      "minScore": 0,
+      "maxPrimitives": 6,
+      "packet": "single-file"
+    },
+    {
+      "tier": 1,
+      "label": "standard",
+      "minScore": 1,
+      "maxPrimitives": 22,
+      "packet": "full"
+    },
+    {
+      "tier": 2,
+      "label": "production",
+      "minScore": 4,
+      "maxPrimitives": 28,
+      "packet": "full"
+    },
+    {
+      "tier": 3,
+      "label": "critical",
+      "minScore": 7,
+      "maxPrimitives": 34,
+      "packet": "full"
+    }
+  ],
+  "caps": {
+    "comment": "A throwaway prototype is allowed to be a throwaway. The per-tier practice cap exists to stop 34-item checklists, not to rank relevance: raise it in policy.json if a project needs more, and read the deferred list rather than assuming an omission.",
+    "prototype": 0,
+    "mvp": 1,
+    "internal-tool": 1,
+    "production": 3,
+    "exemptWhen": [
+      {
+        "field": "risks.payments",
+        "eq": true
+      },
+      {
+        "field": "risks.regulated",
+        "eq": true
+      }
+    ]
+  },
+  "gates": {
+    "0": [
+      {
+        "id": "G0-RUN",
+        "statement": "The project starts from a clean clone with one documented command."
+      },
+      {
+        "id": "G0-CHECK",
+        "statement": "Lint or typecheck runs in CI on every pull request."
+      },
+      {
+        "id": "G0-SMOKE",
+        "statement": "One happy-path smoke test exercises the primary user journey."
+      }
+    ],
+    "1": [
+      {
+        "id": "G1-CI",
+        "statement": "The full test suite runs in CI on every pull request and is required to merge."
+      },
+      {
+        "id": "G1-DOMAIN-TESTS",
+        "statement": "Every rule in the domain model has at least one automated test."
+      },
+      {
+        "id": "G1-AC-TRACE",
+        "statement": "Every requirement marked automated maps to a named test through an @req anchor."
+      },
+      {
+        "id": "G1-RUNBOOK",
+        "statement": "README documents how to run, test and deploy, plus known limitations."
+      },
+      {
+        "id": "G1-SECRETS",
+        "statement": "No secret is committed; configuration comes from the environment and is validated at startup."
+      }
+    ],
+    "2": [
+      {
+        "id": "G2-AUTHZ",
+        "statement": "Authorization is enforced server-side and covered by denial-path tests."
+      },
+      {
+        "id": "G2-THREAT",
+        "statement": "A threat model exists and each accepted mitigation maps to a control or a test."
+      },
+      {
+        "id": "G2-CONTRACTS",
+        "statement": "Every consumed or exposed interface has a versioned contract and a breaking-change check."
+      },
+      {
+        "id": "G2-OBSERVABILITY",
+        "statement": "Requests, errors and latency are observable with correlation IDs."
+      },
+      {
+        "id": "G2-MIGRATIONS",
+        "statement": "Schema changes ship as forward-only migrations with a tested rollback or restore path."
+      },
+      {
+        "id": "G2-ADR",
+        "statement": "Significant decisions are recorded as ADRs with context, decision and consequence."
+      },
+      {
+        "id": "G2-DRIFT",
+        "statement": "CI fails when a requirement loses its test anchor or the spec references a missing primitive."
+      }
+    ],
+    "3": [
+      {
+        "id": "G3-MUTATION",
+        "statement": "Domain-layer mutation score is at or above the target recorded in the spec."
+      },
+      {
+        "id": "G3-PROPERTY",
+        "statement": "Core invariants are covered by property-based or generative tests."
+      },
+      {
+        "id": "G3-SLO",
+        "statement": "Service level objectives and an error budget are documented and alerted on."
+      },
+      {
+        "id": "G3-RESTORE",
+        "statement": "A restore drill has been performed and its date recorded."
+      },
+      {
+        "id": "G3-SECURITY",
+        "statement": "Threat model is reviewed each release; a security regression suite exists."
+      },
+      {
+        "id": "G3-ROLLBACK",
+        "statement": "Every deploy has a tested rollback or a feature-flag kill switch."
+      }
+    ]
+  },
+  "requiredDocs": {
+    "single-file": [
+      "spec.md",
+      "spec.json",
+      "AGENTS.md",
+      "spec-check.mjs"
+    ],
+    "full": [
+      "00-constitution.md",
+      "01-product-brief.md",
+      "02-domain-model.md",
+      "03-architecture.md",
+      "04-contracts.md",
+      "05-verification.md",
+      "06-delivery-plan.md",
+      "07-agent-handoff.md",
+      "spec.json",
+      "AGENTS.md",
+      "spec-check.mjs"
+    ]
+  },
+  "budgets": {
+    "comment": "Hard ceilings per tier. A packet that exceeds its ceiling is a bug in the packet, not a virtue: the category's main criticism is that specs are too long to review.",
+    "maxLinesByTier": {
+      "0": 140,
+      "1": 900,
+      "2": 1000,
+      "3": 1100
+    },
+    "policy": "Trim prose or demote primitives by priority. Do not trim acceptance criteria or gates."
+  }
+}

@@ -1,0 +1,34 @@
+# dependencies
+node_modules/
+.pnp.*
+.yarn/
+
+# build and test output
+dist/
+build/
+out/
+coverage/
+*.tsbuildinfo
+.vitest/
+.playwright/
+
+# environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# editor and OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# local scratch
+tmp/
+.tmp/
+*.log
+
+# adopted profiles are per-developer artefacts
+/profile.json
