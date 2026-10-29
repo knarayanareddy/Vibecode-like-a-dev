@@ -125,7 +125,8 @@
       "why": "Invariants are the properties mutation and property-based tests verify.",
       "when": "always",
       "enforces": [
-        "payments.correctness"
+        "payments.correctness",
+        "core.domain-invariants"
       ]
     },
     {
@@ -160,7 +161,9 @@
       "path": "primitives/product/user-journeys/SKILL.md",
       "why": "Journeys turn a paragraph of intent into testable slices.",
       "when": "always",
-      "enforces": []
+      "enforces": [
+        "core.primary-journey"
+      ]
     },
     {
       "id": "domain.bounded-contexts",

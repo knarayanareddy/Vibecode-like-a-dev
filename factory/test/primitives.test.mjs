@@ -58,6 +58,38 @@ test('primitives only enforce requirement keys that exist in the catalog', () =>
   }
 });
 
+test('every practice has a consequence, or says in writing that it cannot have one', () => {
+  const withoutConsequence = index.primitives.filter(
+    (primitive) => (primitive.enforces ?? []).length === 0 && (primitive.gates ?? []).length === 0 && primitive.advisory !== true
+  );
+  assert.deepEqual(
+    withoutConsequence.map((primitive) => primitive.id),
+    [],
+    'a practice that enforces nothing and names no gate must be marked advisory: true with an advisory_reason'
+  );
+
+  for (const primitive of index.primitives.filter((entry) => entry.advisory === true)) {
+    assert.ok(primitive.advisory_reason.length >= 30, `${primitive.id} is advisory without a usable reason`);
+  }
+});
+
+test('practice gates are gates the policy actually defines', () => {
+  const known = new Set(Object.values(policy.gates).flat().map((gate) => gate.id));
+  for (const primitive of index.primitives) {
+    for (const gate of primitive.gates ?? []) {
+      assert.ok(known.has(gate), `${primitive.id} binds unknown gate \"${gate}\"`);
+    }
+  }
+});
+
+test('every practice states what it obliges in the product, through a product slot', () => {
+  const slot = /\{(primary|aPrimary|primaryPlural|secondary|aSecondary|secondaryPlural|project|db)\}/;
+  for (const primitive of index.primitives) {
+    assert.ok(primitive.obligation && primitive.obligation.length > 20, `${primitive.id} has no obligation sentence`);
+    assert.match(primitive.obligation, slot, `${primitive.id}'s obligation cannot adapt to a product`);
+  }
+});
+
 test('catalog requirement keys are unique and every requirement is implementable', () => {
   const seen = new Set();
   for (const requirement of catalog.requirements) {

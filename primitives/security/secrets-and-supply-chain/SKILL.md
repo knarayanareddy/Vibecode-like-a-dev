@@ -3,12 +3,14 @@ id: security.secrets-and-supply-chain
 title: Secrets and supply chain hygiene
 module: security
 summary: Keep credentials out of the repository and make the dependency graph small, pinned and auditable.
+obligation: "In {project}, no credential is in the repository, and every dependency that reaches {aPrimary} is pinned, installed from a lockfile and audited in CI."
 tier_min: 1
 cost: low
 priority: 2
 tags: [secrets, dependencies, supply-chain, sbom, pinning]
 triggers: [api key, env file, secret, dependency, lockfile, supply chain, audit]
 enforces: []
+gates: [G1-SECRETS]
 artifacts: [03-architecture.md, 05-verification.md]
 ---
 
@@ -17,6 +19,14 @@ artifacts: [03-architecture.md, 05-verification.md]
 Two things are almost guaranteed in a generated project: a `.env` file with real keys in the first commit, and a dependency tree of 900 packages, half of which arrived transitively and none of which are pinned.
 
 Both are cheap to prevent on day one and unpleasant to fix after an incident.
+
+## In this product
+
+Generated per product from the profile — the braces are slots the packet fills:
+
+> In {project}, no credential is in the repository, and every dependency that reaches {aPrimary} is pinned, installed from a lockfile and audited in CI.
+
+That sentence is generated from the profile, so it names this product's own nouns. If it would read the same for any product of this kind, the idea behind the profile is too thin to bind the practice — fix the idea, not the sentence.
 
 ## When this applies
 
@@ -51,6 +61,28 @@ Always, from the first commit.
 - [ ] Lockfile committed; CI installs from it.
 - [ ] Dependency audit runs in CI with a documented response time.
 - [ ] Runtime version pinned in the repository.
+
+## Red flags
+
+These are the observable signals that the practice is being skipped. Each one is something a reviewer can point at in a diff, rather than a belief about what the author intended.
+
+- A `.env` anywhere in git history.
+- Secrets stored in repository settings rather than CI.
+- No runtime version pinned in the repository.
+- An audit disabled with no replacement.
+- A dependency added with no version pin and no ADR.
+
+## Anti-rationalization
+
+The excuse on the left is what a competent person says when they skip this. The middle column is why it does not survive the first real change; the right column is the smallest thing that satisfies the practice anyway.
+
+| Excuse | What is actually true | What to do instead |
+| --- | --- | --- |
+| The repository is private. | Private repositories leak too. | Secrets in CI configuration only. |
+| We will rotate the key later. | Later is after the incident. | Rotate the moment it is committed. |
+| The `.env` is gitignored, so we are safe. | Gitignore does not untrack history. | Purge the history and rotate. |
+| The dependency audit fails on transitive noise. | Then document a response time instead of disabling it. | Triaged, dated exceptions. |
+| Lockfiles are for libraries. | Every application is reproducible or it is not deployable. | Commit it and install from it. |
 
 ## Anti-patterns
 

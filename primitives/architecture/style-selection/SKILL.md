@@ -3,12 +3,14 @@ id: architecture.style-selection
 title: Architecture style selection
 module: architecture
 summary: Default to a modular monolith, and make distributed complexity justify itself against a measured constraint.
+obligation: "In {project}, one deployable holds all {primary} rules until a measured constraint — not a forecast — says otherwise."
 tier_min: 0
 cost: low
 priority: 2
 tags: [architecture, monolith, microservices, style, modules]
 triggers: [architecture, monolith, microservices, structure, folder layout]
 enforces: []
+gates: [G2-ADR]
 artifacts: [03-architecture.md]
 ---
 
@@ -17,6 +19,14 @@ artifacts: [03-architecture.md]
 Agents produce the architecture of their training data. Ask for a todo app and there is a reasonable chance you get a service layer, a repository layer, a domain layer, an event bus and a Docker Compose file with four containers. It runs. It is also four times the operational surface of the product, and every future change has to cross it.
 
 The right question is not "which architecture is best". It is "what is the smallest structure that keeps the rules findable and the boundaries changeable at this stage".
+
+## In this product
+
+Generated per product from the profile — the braces are slots the packet fills:
+
+> In {project}, one deployable holds all {primary} rules until a measured constraint — not a forecast — says otherwise.
+
+That sentence is generated from the profile, so it names this product's own nouns. If it would read the same for any product of this kind, the idea behind the profile is too thin to bind the practice — fix the idea, not the sentence.
 
 ## When this applies
 
@@ -50,6 +60,28 @@ None of those is "it feels more scalable". If you cannot name the measurement, y
 - [ ] There is exactly one deployable in v1, or a written reason why not.
 - [ ] The folder structure names domains, not framework layers.
 - [ ] The document states what would trigger a change of style.
+
+## Red flags
+
+These are the observable signals that the practice is being skipped. Each one is something a reviewer can point at in a diff, rather than a belief about what the author intended.
+
+- Several deployables in v1 with no written reason.
+- Folder names that mirror the framework.
+- A style document with no rejected alternatives.
+- The style changed without an ADR.
+- The "when should this change" section is empty.
+
+## Anti-rationalization
+
+The excuse on the left is what a competent person says when they skip this. The middle column is why it does not survive the first real change; the right column is the smallest thing that satisfies the practice anyway.
+
+| Excuse | What is actually true | What to do instead |
+| --- | --- | --- |
+| Microservices are the professional choice. | They multiply failure modes before you have one product. | One deployable until a measured constraint says otherwise. |
+| We might need to scale independently. | "Might" is a forecast; measure it first. | Write the trigger that would justify the split. |
+| Folders by layer are the standard. | Controllers, services and repositories hide the domain. | Folders by domain. |
+| Boundaries are a team agreement. | Agreements do not fail builds. | Encode the boundary in an import rule. |
+| We will document the style later. | The style is already in the folder tree. | Write it in the first commit. |
 
 ## Anti-patterns
 

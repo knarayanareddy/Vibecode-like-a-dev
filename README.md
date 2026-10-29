@@ -330,7 +330,7 @@ They solved the first half — making the spec a real artifact. What follows is 
 
 ## The primitive library
 
-34 practices, each a self-contained `SKILL.md` with a trigger-shaped summary, the failure mode it prevents, a checklist, anti-patterns and its cost. Agents read `primitives/index.json` and open only what they need.
+34 practices, each a self-contained `SKILL.md` with a trigger-shaped summary, the failure mode it prevents, a checklist, the red flags that say it is being skipped, a table of the excuses people make while skipping it, anti-patterns, and an `obligation:` line the compiler fills with this product's own nouns. Agents read `primitives/index.json` and open only what they need.
 
 | Module | Primitives |
 | --- | --- |
@@ -405,7 +405,7 @@ npm run check   # index freshness + tests + example packet + own drift guard + s
 - **MCP tools select; they do not write.** The server answers "what applies and why". Composing the packet is still a compile (or a human/agent writing prose).
 - **The CLI path assumes the profile describes the project honestly.** If you say `mvp` about a regulated product, you get a light packet. The `risks` fields exist because intent cannot be inferred.
 - **The catalog knows classes, not businesses.** Measured over ten ideas, 50% of the idea's distinctive vocabulary reaches the requirements or the domain model — up from 21%, because the domain model now leads with the idea's own nouns and its own stated rules. The other half is genuinely absent: a log shipper's packet now lists `position`, `shipper` and `dead-letter` as terms (the vocabulary comes from the idea), but no requirement covers redaction or acknowledged-after-acceptance, because no catalog obligation says "log shipper". Naming a thing is not specifying it. Payments, tenancy, pipelines and public libraries are well covered because they are heavily conventional; a log shipper or a standup bot is a scaffold plus a checklist of the author's own rules. The packet says so out loud rather than pretending otherwise.
-- **Tier 1 has very little headroom.** The tightest packet in the stress set sits at 885 of 900 lines. The ceiling is deliberate — length is this category's main failure — but it means a new tier-1 obligation requires trimming prose first.
+- **Tier 1 has very little headroom.** The tightest packet in the stress set sits at 872 of 900 lines. The ceiling is deliberate — length is this category's main failure — but it means a new tier-1 obligation requires trimming prose first.
 - **Self-consistency is not effectiveness.** This repository passes its own guard, which shows the pipeline is coherent, not that the resulting software is better. The packet also describes a tool whose requirements are unusually easy to anchor because the tool is tested; other products will find that step harder, and nothing here measures that difficulty.
 - **Not published to npm yet.** Clone and use `node factory/cli.mjs`. The `bin` entry is ready.
 

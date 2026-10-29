@@ -3,12 +3,13 @@ id: domain.aggregates-and-invariants
 title: Aggregates and invariants
 module: domain
 summary: Name the consistency boundary, list what must always be true, and turn each invariant into a test.
+obligation: "In {project}, each rule that makes {aPrimary} valid names its consistency boundary and has one test that fails when the rule is broken."
 tier_min: 0
 cost: medium
 priority: 2
 tags: [ddd, aggregate, invariants, consistency, transactions]
 triggers: [aggregate, invariant, transaction boundary, consistency, state machine]
-enforces: [payments.correctness]
+enforces: [payments.correctness, core.domain-invariants]
 artifacts: [02-domain-model.md]
 ---
 
@@ -17,6 +18,14 @@ artifacts: [02-domain-model.md]
 Most "data corruption" bugs are not corruption. They are two writes that should have been one decision, and an invariant nobody wrote down. Code that looks fine produces impossible states: a refund larger than its charge, a session that is both revoked and active, a tenant whose rows belong to another tenant.
 
 An aggregate is a cluster of objects that must be consistent together. An invariant is a statement that must hold after every operation on it. Together they tell you where transactions belong and what to test.
+
+## In this product
+
+Generated per product from the profile — the braces are slots the packet fills:
+
+> In {project}, each rule that makes {aPrimary} valid names its consistency boundary and has one test that fails when the rule is broken.
+
+That sentence is generated from the profile, so it names this product's own nouns. If it would read the same for any product of this kind, the idea behind the profile is too thin to bind the practice — fix the idea, not the sentence.
 
 ## When this applies
 
@@ -41,6 +50,29 @@ Always. Even a small product has at least one invariant, and it is usually the t
 - [ ] Money is integer minor units plus currency. Time is an injected clock.
 - [ ] Concurrency: either version-checked writes (optimistic) or a documented serialisation point.
 - [ ] No aggregate spans two services or two database transactions.
+- [ ] Each invariant that spans two objects is either inside one aggregate or explicitly made eventual.
+
+## Red flags
+
+These are the observable signals that the practice is being skipped. Each one is something a reviewer can point at in a diff, rather than a belief about what the author intended.
+
+- An invariant with no failing test.
+- An aggregate reaching into another context's table.
+- A state machine that lists no illegal transitions.
+- Time read from the environment inside the domain.
+- One transaction spanning two aggregates that must agree immediately.
+
+## Anti-rationalization
+
+The excuse on the left is what a competent person says when they skip this. The middle column is why it does not survive the first real change; the right column is the smallest thing that satisfies the practice anyway.
+
+| Excuse | What is actually true | What to do instead |
+| --- | --- | --- |
+| The database enforces it. | It enforces constraints, not the two-step rule. | Test the invariant in the domain. |
+| An invariant test is a unit test of the setter. | That tests the mechanism, not the rule. | Assert the rule as a sentence. |
+| Concurrency is an edge case. | It is the default as soon as two people act on the same record. | Version-checked writes or a documented serialisation point. |
+| The aggregate can span the parent and the child. | Then you have two boundaries pretending to be one. | Split and make the change eventual. |
+| Money as a float is fine for now. | It is not fine at any time. | Integer minor units plus currency. |
 
 ## Anti-patterns
 

@@ -3,6 +3,7 @@ id: architecture.ports-and-adapters
 title: Ports and adapters (hexagonal)
 module: architecture
 summary: Keep the domain free of frameworks and vendors so the expensive parts stay replaceable.
+obligation: "In {project}, {primary} rules run in tests with no {db} and no network, because every external call sits behind a port the use case owns."
 tier_min: 0
 cost: medium
 priority: 5
@@ -17,6 +18,14 @@ artifacts: [03-architecture.md]
 The first thing generated code does with a rule is wrap it in a framework call. Business logic appears inside a request handler, a React component, a queue consumer and a cron job, and then it exists in four places with four subtly different behaviours.
 
 Ports and adapters put the rule in one place: the domain defines the interfaces it needs, and everything external implements them.
+
+## In this product
+
+Generated per product from the profile — the braces are slots the packet fills:
+
+> In {project}, {primary} rules run in tests with no {db} and no network, because every external call sits behind a port the use case owns.
+
+That sentence is generated from the profile, so it names this product's own nouns. If it would read the same for any product of this kind, the idea behind the profile is too thin to bind the practice — fix the idea, not the sentence.
 
 ## When this applies
 
@@ -50,6 +59,28 @@ Two small ports that pay for themselves immediately: `Clock` (so time-dependent 
 - [ ] Tests for the domain run with no database, no network and no fake timers where a fake clock will do.
 - [ ] At most one adapter per dependency; a second adapter is a real requirement, not a preference.
 - [ ] Interfaces are named after the domain, not the technology (`Ledger`, not `PostgresLedgerRepository`).
+
+## Red flags
+
+These are the observable signals that the practice is being skipped. Each one is something a reviewer can point at in a diff, rather than a belief about what the author intended.
+
+- A domain file importing the framework, the driver or an SDK.
+- Domain tests that need a database or a container.
+- Port methods named after SQL operations.
+- A hand-written fake per test instead of one shared fake.
+- An adapter that contains business rules.
+
+## Anti-rationalization
+
+The excuse on the left is what a competent person says when they skip this. The middle column is why it does not survive the first real change; the right column is the smallest thing that satisfies the practice anyway.
+
+| Excuse | What is actually true | What to do instead |
+| --- | --- | --- |
+| A repository interface for one database is over-engineering. | The interface is what makes the rule testable without the database. | Port at the use-case boundary, not per table. |
+| The ORM entities are the domain model. | Then the framework owns your invariants. | Keep persistence models at the edge. |
+| The domain needs framework annotations. | Then the domain cannot be tested in milliseconds. | Configure at the edge instead. |
+| Naming it `PostgresLedgerRepository` is clearer. | It names the part you wanted replaceable. | Name ports after the domain. |
+| Two adapters is a real requirement. | It is usually a preference. | One adapter until a second consumer exists. |
 
 ## Anti-patterns
 

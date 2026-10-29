@@ -6,16 +6,16 @@ The ideas were chosen to span the axes the tool claims to handle: a one-line pro
 
 | # | Idea | Kind | Stack | Tier | Req | Crit | Gates | Lines | Idea vocabulary | Unmapped |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 01 | Rename photos by EXIF date (one line) | cli | TS | 0 | 4 | 6 | 3 | 134 | 0% | 0 |
-| 02 | Vintage bicycle marketplace (one line) | web-app | TS | 2 | 18 | 32 | 15 | 945 | 22% | 0 |
-| 03 | Slack standup bot (one line) | api | Python | 1 | 9 | 15 | 8 | 849 | 10% | 0 |
-| 04 | Physiotherapy clinic bookings (paragraph) | api | Python | 3 | 14 | 25 | 21 | 935 | 17% | 1 |
-| 05 | Double-entry payout ledger (paragraph) | api | Python | 3 | 16 | 30 | 21 | 965 | 38% | 0 |
-| 06 | Offline-first habit tracker (paragraph) | mobile | TS | 1 | 12 | 22 | 8 | 885 | 41% | 0 |
-| 07 | Analytics event pipeline (paragraph) | data-pipeline | Python | 2 | 11 | 19 | 15 | 893 | 33% | 1 |
-| 08 | Feature-flag SDK (structured) | library | TS | 2 | 8 | 12 | 15 | 858 | 22% | 2 |
-| 09 | Docs assistant with citations (structured) | agent | Python | 1 | 9 | 19 | 8 | 881 | 19% | 2 |
-| 10 | Go log shipper (structured) | cli | Go | 1 | 6 | 8 | 8 | 822 | 3% | 1 |
+| 01 | Rename photos by EXIF date (one line) | cli | TS | 0 | 4 | 6 | 3 | 139 | 25% | 0 |
+| 02 | Vintage bicycle marketplace (one line) | web-app | TS | 2 | 18 | 32 | 15 | 919 | 44% | 0 |
+| 03 | Slack standup bot (one line) | api | Python | 1 | 9 | 15 | 8 | 795 | 40% | 0 |
+| 04 | Physiotherapy clinic bookings (paragraph) | api | Python | 3 | 14 | 25 | 21 | 897 | 51% | 1 |
+| 05 | Double-entry payout ledger (paragraph) | api | Python | 3 | 16 | 30 | 21 | 927 | 68% | 0 |
+| 06 | Offline-first habit tracker (paragraph) | mobile | TS | 1 | 12 | 22 | 8 | 872 | 55% | 0 |
+| 07 | Analytics event pipeline (paragraph) | data-pipeline | Python | 2 | 11 | 19 | 15 | 863 | 60% | 1 |
+| 08 | Feature-flag SDK (structured) | library | TS | 2 | 8 | 12 | 15 | 804 | 65% | 2 |
+| 09 | Docs assistant with citations (structured) | agent | Python | 1 | 9 | 19 | 8 | 857 | 42% | 2 |
+| 10 | Go log shipper (structured) | cli | Go | 1 | 6 | 8 | 8 | 766 | 53% | 1 |
 
 Two definitions, because the whole report depends on them:
 
@@ -129,6 +129,6 @@ What is **not** claimed: that the packet alone is a sufficient specification. Fo
 ## Other limits worth stating
 
 - **The unmapped-obligation heuristic only sees normative sentences.** "It redacts configured patterns" is a real requirement in the shipper idea and is invisible to a `must`/`never` matcher. The list is a floor, not a ceiling.
-- **Budgets are the real constraint.** Tier 1 sits at 885 of 900 lines for the habit tracker, and the adversarial payments case only fitted after the rigor signal moved it to tier 2 — which is the correct outcome, but it shows that a *legitimate* tier-1 packet has almost no headroom. The next tier-1 obligation requires trimming prose, by design.
+- **Budgets are the real constraint.** Tier 1 sits at 872 of 900 lines for the habit tracker, and the adversarial payments case only fitted after the rigor signal moved it to tier 2 — which is the correct outcome, but it shows that a *legitimate* tier-1 packet has almost no headroom. The next tier-1 obligation requires trimming prose, by design.
 - **English only.** Packets are generated in English regardless of the language of the idea, and the vocabulary metric is ASCII-only, so non-English ideas score 0% by construction. That is a limitation to state, not a number to optimise.
 - **Ten ideas is not a benchmark.** These are hand-written profiles, not real users' first drafts, and the tool has not been compared against a person writing the same spec. That remains roadmap item #1.

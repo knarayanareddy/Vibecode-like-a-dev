@@ -495,10 +495,16 @@ export const AREA_DOCUMENT = {
  * things the idea actually names. `spec.json` keeps the canonical title, so ids and
  * anchors stay stable while the documents talk like the product.
  */
-export function phrasesFor(plan, words) {
+/**
+ * The one place a `{slot}` template becomes a sentence about *this* product. The
+ * catalog uses it for requirement definitions, the library uses it for each
+ * practice's obligation, and both must fill the same slots the same way or the two
+ * halves of a packet start describing different products.
+ */
+export function templateFiller(plan) {
   const vocab = vocabularyFor(plan.profile);
   const project = titleize(plan.profile.name).replace(/^\d+\s*/, '');
-  const fill = (template) =>
+  return (template) =>
     String(template)
       .replace(/\{project\}/g, project)
       .replace(/\{aPrimary\}/g, vocab.aPrimary)
@@ -508,6 +514,10 @@ export function phrasesFor(plan, words) {
       .replace(/\{secondaryPlural\}/g, vocab.secondaryPlural)
       .replace(/\{secondary\}/g, vocab.secondary)
       .replace(/\{db\}/g, dbLabel(plan.profile));
+}
+
+export function phrasesFor(plan, words) {
+  const fill = templateFiller(plan);
 
   const capitalise = (text) => String(text).replace(/^./, (char) => char.toUpperCase());
   return new Map(
@@ -670,32 +680,45 @@ export function practiceCards(plan, phrases = new Map()) {
       .map((requirement) => requirement.id);
   };
 
+  const fill = templateFiller(plan);
+
   return plan.primitives.map((primitive) => {
     const enforces = (primitive.enforces ?? [])
       .map((key) => plan.requirements.find((requirement) => requirement.key === key))
       .filter(Boolean);
+    const gates = (primitive.gates ?? []).map((gate) => (typeof gate === 'string' ? gate : gate?.id)).filter(Boolean);
 
     let bindTo;
     if (enforces.length > 0) {
       const [first, ...rest] = enforces;
       bindTo = `${first.id} ${phrases.get(first.key) ?? first.title}${rest.length > 0 ? ` (and ${rest.length} more)` : ''}`;
+    } else if (gates.length > 0) {
+      bindTo = `gate ${gates.join(', ')}`;
+    } else if (primitive.advisory) {
+      // Said out loud, because an unenforceable practice listed beside enforced ones
+      // otherwise reads as a requirement.
+      bindTo = 'advisory — no gate can check it';
     } else if (primitive.artifacts?.length) {
       const doc = primitive.artifacts[0];
       const ids = inDoc(doc);
-      const gates = (primitive.gates ?? []).map((gate) => gate.id).filter(Boolean);
       bindTo = ids.length > 0
         ? `\`${doc}\` — ${ids.slice(0, 3).join(', ')}${ids.length > 3 ? `, +${ids.length - 3}` : ''}`
-        : gates.length > 0
-          ? `\`${doc}\` — ${gates.join(', ')}`
-          : `\`${doc}\``;
+        : `\`${doc}\``;
     } else {
       bindTo = 'the whole packet';
     }
+    // A practice can be bound to a requirement *and* make a gate real; both are the
+    // consequence, so both are shown when they exist.
+    if (enforces.length > 0 && gates.length > 0) bindTo = `${bindTo} · gate ${gates.join(', ')}`;
 
     return {
       id: primitive.id,
       title: primitive.title,
       bindTo,
+      // What this practice obliges *here*, in this product's nouns. The library
+      // sentence is the same for everyone; this one is not.
+      obligation: primitive.obligation ? fill(primitive.obligation) : '',
+      gates,
       because: primitive.why
     };
   });

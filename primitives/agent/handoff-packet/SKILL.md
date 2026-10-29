@@ -3,12 +3,15 @@ id: agent.handoff-packet
 title: Agent handoff packet
 module: agent
 summary: A short body of context that makes the spec usable by any agent, without a chat history.
+obligation: "In {project}, a new session can start on the first {primary} requirement from the repository alone, without the chat that produced it."
 tier_min: 0
 cost: low
 priority: 1
 tags: [handoff, agents, prompt, brief, agnostic]
 triggers: [handoff, prompt, handoff brief, hand to agent, lovable, replit, claude code]
 enforces: []
+advisory_reason: "The compiler emits the handoff for every packet, and whether an agent follows it is not visible in the repository, so no gate can fail on it."
+advisory: true
 artifacts: [07-agent-handoff.md, AGENTS.md]
 ---
 
@@ -17,6 +20,14 @@ artifacts: [07-agent-handoff.md, AGENTS.md]
 A specification that requires a conversation to interpret is not a specification. The test is simple: can a capable agent, with no memory of how the spec was written, open the repository and produce work that a reviewer accepts?
 
 Most spec-driven tooling fails here. It generates an impressive pile of markdown and a human still has to explain what to do first, in a chat, every session.
+
+## In this product
+
+Generated per product from the profile — the braces are slots the packet fills:
+
+> In {project}, a new session can start on the first {primary} requirement from the repository alone, without the chat that produced it.
+
+That sentence is generated from the profile, so it names this product's own nouns. If it would read the same for any product of this kind, the idea behind the profile is too thin to bind the practice — fix the idea, not the sentence.
 
 ## When this applies
 
@@ -47,6 +58,28 @@ Rules for the writing:
 - [ ] Stop-and-report instruction is explicit.
 - [ ] Protocol names what the agent must not do.
 - [ ] A new session can start from the repository alone.
+
+## Red flags
+
+These are the observable signals that the practice is being skipped. Each one is something a reviewer can point at in a diff, rather than a belief about what the author intended.
+
+- The brief names a command that does not exist in the repository.
+- Requirements are summarised ("build the booking flow") instead of cited by id.
+- There is no stop-and-report instruction, or it says "continue until done".
+- The entry document restates `05-verification.md` instead of pointing at it.
+- It was last edited before the last behaviour change.
+
+## Anti-rationalization
+
+The excuse on the left is what a competent person says when they skip this. The middle column is why it does not survive the first real change; the right column is the smallest thing that satisfies the practice anyway.
+
+| Excuse | What is actually true | What to do instead |
+| --- | --- | --- |
+| The agent has the whole repository, it can work it out. | It starts cold; what it cannot find in ten minutes it invents. | Name the entry file and the three commands it needs. |
+| A longer brief is more helpful. | Past 450 words the model reads the first and last paragraph. | Cut to what changes behaviour and link the rest. |
+| I will update the handoff at the end. | By then the protocol describes code you no longer have. | Change it in the same commit as the behaviour. |
+| The decisions are in the chat history. | The next agent gets the repository, not your transcript. | Decisions belong in `03-architecture.md`, not in a message. |
+| `spec.json` has the anchors, that is enough. | An agent that never opens it trusts your summary instead. | Put the current requirement and its anchor in the brief. |
 
 ## Anti-patterns
 

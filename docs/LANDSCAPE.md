@@ -101,26 +101,28 @@ Run `node scripts/eval-library.mjs`, `node scripts/eval-specificity.mjs` and the
 
 | Metric | Value | Verdict |
 | --- | --- | --- |
-| Practices | 34, 2,187 lines, median 64 | Thin against 25 skills × richer anatomy |
-| Checklist items | 198 (5.8 per practice) | Adequate, but no anti-rationalization or red flags |
-| Practices declaring `enforces` | 21 of 34 | 13 practices advise behaviour no requirement or gate covers |
-| Catalog requirements | 27; **21** enforced by a practice | 6 requirements (`core.primary-journey`, `core.domain-invariants`, `ai.guardrails`, `delivery.audit-trail`, `data.uploads`, `mobile.offline`) have no teaching practice |
+| Practices | 34, 3,293 lines, median 98 | Each practice is a page an agent can act on, not a paragraph |
+| Checklist items | 203 (6 per practice), **170 red flags**, **170 anti-rationalization rows** | The anatomy that was missing is now the largest section of every skill |
+| Practices with a consequence | **34 of 34**: 22 declare `enforces`, 8 bind a policy gate, 4 are `advisory: true` with a written reason | `eval-library` fails on a practice with no consequence and no reason |
+| Catalog requirements | 27, **all 27** enforced by a practice | The 6 orphans (`core.primary-journey`, `core.domain-invariants`, `ai.guardrails`, `delivery.audit-trail`, `data.uploads`, `mobile.offline`) were assigned to the practices that actually teach them |
+| Per-practice obligations | **821 of 821** selected practice/state pairs carry a filled, product-specific sentence inside the compiled packet | Checked by compiling every profile, not by reading the library |
 | Routing rules | 34, of which 12 are `always: true` | The packet skeleton is unconditional; the rest discriminate |
 | Library discoverability | **self-recall@1 100%** (34/34 practices rank first for their own title via the real MCP search) | Works |
 | Trigger collisions | **8 → 0** after this pass | Two practices claiming "rollback" or "coverage" is a routing bug, now fixed |
 | Dead weight | 0 practices never selected across 36 profiles | Works |
-| **Packet specificity** | **32% mean shared prose** across 31 full packets and 157 same-tier pairs; worst pair 50%; 4 documents under 26%. Was **84%** → **53%** → **32%**. Target was 35% | **Target met on the mean**, worst pair still above it |
+| **Packet specificity** | **31% mean shared prose** across 31 full packets and 157 same-tier pairs; worst pair 47%; 3 documents under 26%. Was **84%** → **53%** → **32%** → **31%**. Target was 35% | **Target met on the mean and on the worst pair**, which is now under the old 50% floor |
 
 That last row was the whole argument in one number: a physiotherapy booking service and an insurance claims API used to receive the same 847 lines, and the 94 that differed carried only the requirement set, the gates and the stack.
 
-**How the number moved, in three passes.**
+**How the number moved, in five passes.**
 
 1. **Split constitution from specification** (84% → 53%). Each document gained a generated "what this law obliges here" reading, and vocabulary, surfaces, ADRs and gate readings were derived from the profile instead of written once.
 2. **Product-language requirement definitions** (53% → 53% on the old metric, but it fixed correctness). Every one of the 27 catalog requirements now carries a `definition` template with product slots (`{primary}`, `{aSecondary}`, `{db}`, `{project}`), so *how* a requirement is phrased belongs to the catalog and *which* requirement exists belongs to the planner. `eval-library` now fails if a requirement has no definition or one that never names the product.
 3. **A vocabulary that is actually grammatical** (the reason the metric was not previously trustworthy). The old extractor picked the longest frequent word, which produced packets saying *"a change to how a yesterday behaves"* and *"a engineering"*. `factory/lib/emit/vocabulary.mjs` scores candidates by syntax (a determiner in front of a word is evidence; a participle or an adjective is a veto), collapses plurals across English and German, and has three explicit confidence levels — `idea`, `weak`, `kind` — so a one-word idea falls back to the noun its kind implies rather than inventing one. Six tests in `factory/test/vocabulary.test.mjs` pin the failure modes.
-4. **Counting prose, not structure.** The metric now separates what a packet *says about a product* (sentences, bullets, table data rows) from what is identical on purpose (headings, table header rows, fenced examples, the shipped guard). Structure is measured and reported alongside, so the exemption cannot hide growth.
+4. **Per-practice obligations, from the library into the packet** (32% → 31%, worst pair 50% → 47%). Every `SKILL.md` now carries an `obligation:` line with product slots, filled by the same filler the catalog definitions use, and printed in the constitution's practice table and in every single-file packet. A practice no longer arrives as a title and a filename; it arrives as a sentence about this product.
+5. **Counting prose, not structure.** The metric now separates what a packet *says about a product* (sentences, bullets, table data rows) from what is identical on purpose (headings, table header rows, fenced examples, the shipped guard). Structure is measured and reported alongside, so the exemption cannot hide growth.
 
-**What the residual 32% is.** Kind-level agreement, and it is defensible: two data pipelines with the same trait fingerprint really should share their pipeline invariants, their stage state machine and their architecture style. The worst pair today is two tier-1 web apps with identical traits (50%) sharing their gate checklist and their practice bindings. Getting below that means either finer catalog granularity than 27 requirements, or deriving gate wording from the requirement set — both a different project from "stop the packet being a form letter", which is done.
+**What the residual 31% is.** Kind-level agreement, and it is defensible: two data pipelines with the same trait fingerprint really should share their pipeline invariants, their stage state machine and their architecture style. The worst pair today is two tier-1 web apps with identical traits (47%) sharing their gate checklist and their practice bindings. Getting below that means either finer catalog granularity than 27 requirements, or deriving gate wording from the requirement set — both a different project from "stop the packet being a form letter", which is done.
 
 Two consequences followed from the original 90%, and both still hold as design constraints:
 
@@ -146,13 +148,13 @@ Ordered by value per unit of work. Each has an acceptance test, because that is 
 ### Tier 1 — makes the existing design honest (weeks, not months)
 
 1. **Split constitution from specification.** ✅ *first pass, 2026-10-30.* The stable layer (laws, DoD, gates) stays law; every document now carries a generated "what this obliges here" reading, and requirement phrasing, vocabulary, surfaces, ADRs and gate readings are derived per product.  
-   *Acceptance:* two unrelated tier-3 packets share <35% of lines, and `verify` still passes for both. **Status: met on the mean — 33% across unrelated tier-3 pairs, 32% overall, `verify` green.** The worst single pair is 50% (two tier-1 web apps with identical traits sharing their gate checklist); see §6 for why that remainder is kind-level rather than prose-level.
-2. **Per-practice specificity obligations.** Every practice states what it would change *in this product* — derived from the profile's idea, not a generic paragraph.  
-   *Acceptance:* a packet contains at least one product-specific sentence per selected practice, checked mechanically.
-3. **Anti-rationalization and red flags in all 34 practices.** The two sections that make skills stick.  
-   *Acceptance:* every `SKILL.md` has both; the eval checks for them.
-4. **Close the enforcement gap.** A practice that enforces nothing either gains a requirement/gate or is marked advisory.  
-   *Acceptance:* `eval-library` reports 0 practices with no consequence, or an explicit `advisory: true` with a reason.
+   *Acceptance:* two unrelated tier-3 packets share <35% of lines, and `verify` still passes for both. **Status: met on the mean and on the worst pair — 31% overall, worst pair 47%, `verify` green.** The worst pair remains two tier-1 web apps with identical traits sharing their gate checklist; see §6 for why that remainder is kind-level rather than prose-level.
+2. **Per-practice specificity obligations.** ✅ *done, 2026-10-30.* Every `SKILL.md` carries an `obligation:` template with product slots (`{project}`, `{primary}`, `{aSecondary}`, `{db}`); `derive.templateFiller` fills it once per packet, and it appears in the constitution's practice table and in the practices section of every single-file packet.  
+   *Acceptance:* a packet contains at least one product-specific sentence per selected practice, checked mechanically. **Met: `eval-library` compiles all 36 profiles and asserts 821 of 821 selected practice/packet pairs contain the filled sentence, with no unfilled slot.**
+3. **Anti-rationalization and red flags in all 34 practices.** ✅ *done, 2026-10-30.* Every practice now has `## In this product` (the filled obligation), `## Red flags` (5 observable signals) and `## Anti-rationalization` (5 excuses × what is actually true × what to do instead): 170 red flags and 170 rows in total, median skill length 64 → 98 lines.  
+   *Acceptance:* every `SKILL.md` has both; the eval checks for them. **Met: `validatePrimitives` fails on a missing section or fewer than three entries, and `eval-library` reports a per-practice `skill depth` count.**
+4. **Close the enforcement gap.** ✅ *done, 2026-10-30.* Six orphan requirements were assigned to the practices that teach them; eight practices that only advised now bind the policy gate they make real; four that cannot be machine-checked declare `advisory: true` with a reason. Finding a typo in a gate id is now a failing test, and a nested YAML block (which the flat parser used to drop silently, hiding a declared gate) is a validation error.  
+   *Acceptance:* `eval-library` reports 0 practices with no consequence, or an explicit `advisory: true` with a reason. **Met: 34/34 have a consequence — 22 `enforces`, 8 gates, 4 advisory — and the four advisory reasons are printed in the eval output.**
 
 ### Tier 2 — makes the library a system rather than a list
 
@@ -185,7 +187,7 @@ Ordered by value per unit of work. Each has an acceptance test, because that is 
 
 **"Thin and boilerplate": correct about the artefacts, wrong about the mechanism.**
 
-- Thin: yes — 34 practices at ~64 lines against 25-skill libraries that ship evals, anti-rationalization tables and review personas; no presets, no archive, no executable gates, no EARS, no outcome harness.
+- Thin, though no longer the same way: the 34 practices now carry the anatomy that was missing (median 98 lines, an obligation per practice, 170 red flags, 170 anti-rationalization rows, a consequence for all 34), but there are still no presets, no archive, no executable gates, no EARS and no outcome harness.
 - Boilerplate: measurably yes — 90% of a packet is identical across unrelated products, and the evidence says that specific property (bulk generic context) is neutral-to-harmful for agent success.
 - Wrong: the selection-with-reasons, risk-derived rigor, skip/defer accounting, stable ids, anchor enforcement and the shipped guard are not boilerplate, are not in any surveyed tool together, and are backed by the one study that measured the thing we claim (specification completeness → 88.6% vs 55.8%).
 

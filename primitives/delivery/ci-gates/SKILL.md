@@ -3,6 +3,7 @@ id: delivery.ci-gates
 title: CI gates from the first commit
 module: delivery
 summary: Make the definition of done run without a human, on the first day, before there is anything to break.
+obligation: "In {project}, the checks that guard {aPrimary} run on every pull request before the first {primary} handler exists, and none of them is optional."
 tier_min: 1
 cost: low
 priority: 2
@@ -17,6 +18,14 @@ artifacts: [06-delivery-plan.md, 05-verification.md]
 A gate that lives in a document is a suggestion. A gate that lives in CI is a fact.
 
 The failure pattern is predictable: CI is added "once the code settles", the first two weeks of commits are unverified, and by the time CI exists the suite is red and everyone has learned to ignore it. Adding the pipeline to an empty repository takes twenty minutes and prevents all of that.
+
+## In this product
+
+Generated per product from the profile — the braces are slots the packet fills:
+
+> In {project}, the checks that guard {aPrimary} run on every pull request before the first {primary} handler exists, and none of them is optional.
+
+That sentence is generated from the profile, so it names this product's own nouns. If it would read the same for any product of this kind, the idea behind the profile is too thin to bind the practice — fix the idea, not the sentence.
 
 ## When this applies
 
@@ -46,6 +55,28 @@ Rules that keep it useful: keep the whole thing under ten minutes for a fast fee
 - [ ] Time to green under ten minutes, or the slow parts are split out.
 - [ ] Caching configured for dependencies, keyed on the lockfile.
 - [ ] Secrets come from CI configuration, never from the repository.
+
+## Red flags
+
+These are the observable signals that the practice is being skipped. Each one is something a reviewer can point at in a diff, rather than a belief about what the author intended.
+
+- A required check that has never failed.
+- The test command in CI differs from the one in the README.
+- Secrets referenced from the repository instead of CI configuration.
+- Pipeline over ten minutes at tier 0 or 1.
+- A green build on a branch with no tests.
+
+## Anti-rationalization
+
+The excuse on the left is what a competent person says when they skip this. The middle column is why it does not survive the first real change; the right column is the smallest thing that satisfies the practice anyway.
+
+| Excuse | What is actually true | What to do instead |
+| --- | --- | --- |
+| We will add CI once there is something to test. | The first feature is where the suite shape is set. | Pipeline before the first feature commit. |
+| Local tests are enough. | Local means on this machine, when someone remembers. | Required checks on the default branch. |
+| The suite is flaky, so it cannot be required. | Then nothing is required. | Fix it, or quarantine it with a deadline. |
+| Caching can wait. | A ten-minute pipeline gets bypassed. | Cache on the lockfile from day one. |
+| The spec check runs nightly. | By then the drift is merged. | Run it per pull request. |
 
 ## Anti-patterns
 

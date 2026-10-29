@@ -3,6 +3,7 @@ id: testing.property-based-testing
 title: Property-based testing for invariants
 module: testing
 summary: Generate thousands of inputs to check invariants your example tests only sampled.
+obligation: "In {project}, the invariants that must hold for every {primary} — not just the examples in the brief — are checked with generated inputs, and a failing seed is replayed in the suite."
 tier_min: 3
 cost: high
 priority: 7
@@ -17,6 +18,14 @@ artifacts: [05-verification.md]
 Example tests check the cases you thought of. In money, permission and scheduling logic, the bugs live in the cases you did not think of: the negative amount, the empty list, the duplicate identifier, the date at the DST boundary.
 
 Property-based testing generates those cases from a description of valid input, then shrinks a failure to the smallest input that reproduces it.
+
+## In this product
+
+Generated per product from the profile — the braces are slots the packet fills:
+
+> In {project}, the invariants that must hold for every {primary} — not just the examples in the brief — are checked with generated inputs, and a failing seed is replayed in the suite.
+
+That sentence is generated from the profile, so it names this product's own nouns. If it would read the same for any product of this kind, the idea behind the profile is too thin to bind the practice — fix the idea, not the sentence.
 
 ## When this applies
 
@@ -41,6 +50,28 @@ Tier 3, and any tier where money, permissions or state machines are involved. No
 - [ ] Failing seeds are recorded and replayed in the suite.
 - [ ] Properties assert a relationship, not a fixed expected output.
 - [ ] Runtime is bounded; slow generators are narrowed.
+
+## Red flags
+
+These are the observable signals that the practice is being skipped. Each one is something a reviewer can point at in a diff, rather than a belief about what the author intended.
+
+- A property asserting a hard-coded output.
+- Generators that produce invalid values.
+- No seed replay for a found failure.
+- A property with no example test beside it.
+- A disabled property with no note.
+
+## Anti-rationalization
+
+The excuse on the left is what a competent person says when they skip this. The middle column is why it does not survive the first real change; the right column is the smallest thing that satisfies the practice anyway.
+
+| Excuse | What is actually true | What to do instead |
+| --- | --- | --- |
+| The examples cover the invariant. | They cover the examples you thought of. | Generate inputs instead. |
+| Generators should produce anything. | Then you test the validator, not the rule. | Generate valid domain values. |
+| Fixing the failing case is enough. | It will regress. | Record the seed and replay it. |
+| Properties can assert the same values as the examples. | Then they are examples with extra steps. | Assert a relationship, not a constant. |
+| Slow generators are acceptable. | Then the suite gets skipped. | Narrow them. |
 
 ## Anti-patterns
 

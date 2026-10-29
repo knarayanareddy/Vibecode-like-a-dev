@@ -3,12 +3,13 @@ id: reliability.idempotency-and-retries
 title: Idempotency and retry policy
 module: reliability
 summary: Assume every message arrives twice; make replay safe and retry only what can succeed.
+obligation: "In {project}, a retried {primary} request produces the same outcome as the first — one record, one effect — because the uniqueness is a {db} constraint, not an application check."
 tier_min: 2
 cost: medium
 priority: 5
 tags: [idempotency, retries, webhooks, queues, distributed]
 triggers: [webhook, retry, duplicate, idempotency, queue, at-least-once, double charge]
-enforces: [integration.retries, pipeline.idempotency]
+enforces: [integration.retries, pipeline.idempotency, mobile.offline]
 artifacts: [04-contracts.md, 02-domain-model.md]
 ---
 
@@ -17,6 +18,14 @@ artifacts: [04-contracts.md, 02-domain-model.md]
 Every network boundary has three outcomes, not two: success, failure, and *unknown*. The unknown one is where duplicate charges, double emails and phantom jobs come from.
 
 If a message can arrive twice — and with webhooks, queues and client retries it will — then every handler is a potential duplicate. Idempotency is the property that makes reprocessing safe; retry policy is the decision about which failures are worth repeating.
+
+## In this product
+
+Generated per product from the profile — the braces are slots the packet fills:
+
+> In {project}, a retried {primary} request produces the same outcome as the first — one record, one effect — because the uniqueness is a {db} constraint, not an application check.
+
+That sentence is generated from the profile, so it names this product's own nouns. If it would read the same for any product of this kind, the idea behind the profile is too thin to bind the practice — fix the idea, not the sentence.
 
 ## When this applies
 
@@ -51,6 +60,29 @@ Also: cap total attempts, record attempt counts, and move poisoned messages to a
 - [ ] Retries have backoff, jitter, a cap and a dead-letter path.
 - [ ] Webhook signatures are verified before processing, and replays are rejected.
 - [ ] A test sends the same event twice and asserts one effect.
+- [ ] A write queued while offline carries a client-generated id, so replay after reconnect collides with the first attempt instead of duplicating it.
+
+## Red flags
+
+These are the observable signals that the practice is being skipped. Each one is something a reviewer can point at in a diff, rather than a belief about what the author intended.
+
+- A mutating endpoint with no idempotency key.
+- Uniqueness enforced only in application code.
+- A retry loop with no cap.
+- A dead-letter path nobody reads.
+- A duplicate-event test that sends two different payloads.
+
+## Anti-rationalization
+
+The excuse on the left is what a competent person says when they skip this. The middle column is why it does not survive the first real change; the right column is the smallest thing that satisfies the practice anyway.
+
+| Excuse | What is actually true | What to do instead |
+| --- | --- | --- |
+| Retries are the client's problem. | Retries happen whether or not you planned them. | Accept an idempotency key on every mutating endpoint. |
+| The uniqueness check in code is enough. | Two concurrent requests both pass it. | Enforce it in the database. |
+| Retrying a 400 is harmless. | It burns the budget and hides the bug. | Retry only transient failures. |
+| Backoff is over-thinking. | It is the difference between a blip and an outage. | Backoff, jitter, a cap and a dead-letter path. |
+| We verify webhooks somewhere. | "Somewhere" is usually after processing. | Verify the signature first, then deduplicate by event id. |
 
 ## Anti-patterns
 
