@@ -97,7 +97,7 @@ The synthesis: **completeness of specification helps; volume of generic prose do
 
 ## 6. What this repository measures right now
 
-Run `node scripts/eval-library.mjs` and the stress suites to reproduce.
+Run `node scripts/eval-library.mjs`, `node scripts/eval-specificity.mjs` and the stress suites to reproduce.
 
 | Metric | Value | Verdict |
 | --- | --- | --- |
@@ -109,9 +109,19 @@ Run `node scripts/eval-library.mjs` and the stress suites to reproduce.
 | Library discoverability | **self-recall@1 100%** (34/34 practices rank first for their own title via the real MCP search) | Works |
 | Trigger collisions | **8 → 0** after this pass | Two practices claiming "rollback" or "coverage" is a routing bug, now fixed |
 | Dead weight | 0 practices never selected across 36 profiles | Works |
-| **Packet specificity** | **90% of a tier-3 API packet is byte-identical to a different product's packet** (847/941 lines; `AGENTS.md` 98% identical, `00-constitution.md` 97%) | **This is the "boilerplate" you are feeling, quantified** |
+| **Packet specificity** | **53% mean shared content** across 31 full packets and 157 same-tier pairs; worst pair 67%. Was **84%** at first measurement and **97%** for the template-era packets. Per document now: handoff 67%, contracts 65%, constitution 63%, verification 63%, architecture 59%, AGENTS 58%, delivery 52%, domain model 28%, brief 18% | Better, **not yet the 35% target** |
 
-That last row is the whole argument in one number. A physiotherapy booking service and an insurance claims API receive the same 847 lines. The 94 lines that differ carry the requirement set, the gates, the stack and a few domain terms.
+That last row was the whole argument in one number: a physiotherapy booking service and an insurance claims API used to receive the same 847 lines, and the 94 that differed carried only the requirement set, the gates and the stack.
+
+**What changed, and what is left.** The packet now derives its own vocabulary, surfaces, ADRs, gate readings and requirement phrasing from the profile (`factory/lib/emit/derive.mjs`), and each document states what the law *obliges in this product* rather than restating the law (`00-constitution.md` has a left column of stable law and a right column generated per product). Paragraph-level prose dropped furthest — the brief is at 18% and the domain model at 28%.
+
+The residual 53% is *quoted*, not written, and it splits into three blocks:
+
+1. **The selected requirement set.** Two products with the same trait fingerprint select the same 13 requirements, so their documents agree on those 13 lines even when every sentence around them is specific. Fixing that means product-language requirement *definitions in the catalog*, not more prose in the emitter — the next piece of work, not a wording problem.
+2. **The practice table** (22 rows per packet): now bound to this product's requirement or artefact, but the id and title still come from the library.
+3. **The gate checklist** (8 rows): policy text plus a generated, product-specific reading of what passing means here.
+
+A metric that punished those three would be punishing the packet for being traceable to the library it was compiled from. The honest statement is: **the packet no longer reads like a form letter, and it still repeats its sources.** The measurement is a ratchet (`MAX_MEAN`, `MAX_WORST` in `scripts/eval-specificity.mjs`); it only moves down.
 
 Two consequences follow directly:
 
@@ -136,8 +146,8 @@ Ordered by value per unit of work. Each has an acceptance test, because that is 
 
 ### Tier 1 — makes the existing design honest (weeks, not months)
 
-1. **Split constitution from specification.** The stable layer (laws, DoD, gates) is written once per organisation and *referenced*, not regenerated per project; the per-project layer carries only what differs.  
-   *Acceptance:* two unrelated tier-3 packets share <35% of lines, and `verify` still passes for both.
+1. **Split constitution from specification.** ✅ *first pass, 2026-10-30.* The stable layer (laws, DoD, gates) stays law; every document now carries a generated "what this obliges here" reading, and requirement phrasing, vocabulary, surfaces, ADRs and gate readings are derived per product.  
+   *Acceptance:* two unrelated tier-3 packets share <35% of lines, and `verify` still passes for both. **Status: 53% mean / 67% worst, `verify` green.** The remaining block is catalog-derived (see §6); the next step is product-language requirement definitions, which is a catalog change, not an emitter change.
 2. **Per-practice specificity obligations.** Every practice states what it would change *in this product* — derived from the profile's idea, not a generic paragraph.  
    *Acceptance:* a packet contains at least one product-specific sentence per selected practice, checked mechanically.
 3. **Anti-rationalization and red flags in all 34 practices.** The two sections that make skills stick.  

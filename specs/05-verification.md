@@ -17,21 +17,19 @@
 
 ## 2. Anchors: how a requirement stays bound to a test
 
-Every automated requirement carries one anchor line in the test that proves it. The anchor is the mechanism; without it, this packet is just a longer prompt.
+Every automated requirement carries one anchor line in the test that proves it. The example below is REQ-001, so it is the one you will write first.
 
 ```ts
-// @req REQ-004  // @req-ignore: example inside a spec document
-test('erasing a subject removes every owned row (AC-01)', async () => {
-  // given a subject with rows in every table
-  // when the deletion sweep runs
-  // then a query across all tables returns zero rows
+// @req REQ-001  // @req-ignore: example inside a spec document
+test('runnable from a clean clone (AC-01)', async () => {
+  // Given a fresh clone and an empty environment file, when the documented setup command runs, then it either succeeds or lists every missing required var
+  // assert the outcome, not the absence of a throw
 });
 ```
 
-- One anchor per requirement is enough; more than one is fine and counted.
-- An anchor in a `tests/` file counts as proof. An anchor in production code does not.
-- Renaming or deleting the test fails the spec check, which is the intended behaviour.
-- Placeholder tests with no assertion do not satisfy an anchor: the mutation check and review catch those.
+- An anchor in a test file in `tests/core/` counts as proof; an anchor in production code does not.
+- More than one anchor on a requirement is fine and counted; zero is a failure.
+- Renaming or deleting the anchored test fails the spec check — that is the point.
 
 ## 3. Traceability
 
@@ -39,28 +37,28 @@ Anchor column: suggested path, followed by `?` until the file exists. Toggle the
 
 | Req | Criteria | Verified by | Anchor |
 | --- | --- | --- | --- |
-| REQ-001 | AC-01 | gate | manual script | ☐ |
-| REQ-002 | AC-01, AC-02 | automated | `tests/core/core-primary-journey.test.ts?` | ☐ |
-| REQ-003 | AC-01 | manual | manual script | ☐ |
-| REQ-004 | AC-01 | automated | `tests/api/cli-ergonomics.test.ts?` | ☐ |
-| REQ-005 | AC-01, AC-02 | automated | `tests/core/core-domain-invariants.test.ts?` | ☐ |
+| REQ-001 | A clean clone of Vibecode Like A Dev runs with one documented command, and a missing setting is named rather than guessed. | gate | manual script | ☐ |
+| REQ-002 | One engineering goes from creation to completion end to end, through the documented interface only. | automated | `tests/core/core-primary-journey.test.ts?` | ☐ |
+| REQ-003 | The three things Vibecode Like A Dev will not do are written down and reviewed before the first sprint. | manual | manual script | ☐ |
+| REQ-004 | Every command that touches a engineering has documented flags, exit codes and a dry run. | automated | `tests/api/cli-ergonomics.test.ts?` | ☐ |
+| REQ-005 | The rules that make a engineering valid are written down, and each one has a test that would fail if it broke. | automated | `tests/core/core-domain-invariants.test.ts?` | ☐ |
 
 ## 4. Gates for tier 1
 
-These are the definition of done for the project, checked mechanically where possible.
+8 gates, derived from tier 1 and the traits of Vibecode Like A Dev. A gate that cannot be checked is rewritten, not waived.
 
-- [ ] **G0-RUN** — The project starts from a clean clone with one documented command.
+- [ ] **G0-RUN** — The project starts from a clean clone with one documented command. _Here: for Vibecode Like A Dev: one command, and a missing variable is named._
 - [ ] **G0-CHECK** — Lint or typecheck runs in CI on every pull request.
-- [ ] **G0-SMOKE** — One happy-path smoke test exercises the primary user journey.
+- [ ] **G0-SMOKE** — One happy-path smoke test exercises the primary user journey. _Here: one engineering taken from creation to done through the documented interface._
 - [ ] **G1-CI** — The full test suite runs in CI on every pull request and is required to merge.
-- [ ] **G1-DOMAIN-TESTS** — Every rule in the domain model has at least one automated test.
-- [ ] **G1-AC-TRACE** — Every requirement marked automated maps to a named test through an @req anchor.
+- [ ] **G1-DOMAIN-TESTS** — Every rule in the domain model has at least one automated test. _Here: 4 core requirements, each with a test on the engineering rules._
+- [ ] **G1-AC-TRACE** — Every requirement marked automated maps to a named test through an @req anchor. _Here: 3 automated requirements, 1 manual — anchor in the test file, not the doc._
 - [ ] **G1-RUNBOOK** — README documents how to run, test and deploy, plus known limitations.
 - [ ] **G1-SECRETS** — No secret is committed; configuration comes from the environment and is validated at startup.
 
 ## 5. Spec check in CI
 
-The packet ships a dependency-free checker. Put it in CI on the first day, before any feature code exists.
+The packet ships a dependency-free checker. Put it in CI before the first engineering handler exists, so the anchors are enforced from commit one.
 
 ```yaml
 name: spec
@@ -77,7 +75,7 @@ jobs:
 
 Run it locally with `node specs/spec-check.mjs --repo .`; add `--strict` in release CI so pending requirements cannot ship silently.
 
-What it fails on: a missing document, an automated requirement with no anchor, an anchor that points at an unknown requirement, a requirement with no acceptance criteria, and a primitive reference that has disappeared.
+What it fails on: a missing document, one of the 3 automated requirements without an anchor, an anchor naming a requirement that does not exist, a requirement with no criteria, and a practice reference that has disappeared.
 
 
 ## 6. Manual checks
@@ -86,13 +84,9 @@ What it fails on: a missing document, an automated requirement with no anchor, a
 
 ## 7. Review checklist
 
-- [ ] The diff implements a listed requirement; nothing else was added.
-- [ ] Failure paths from the requirement exist in code and in a test.
-- [ ] New dependency? ADR present, removable in a day, pinned.
-- [ ] Authorization on every new read of another actor's data.
-- [ ] Error messages do not leak internals; correlation ID present.
+- [ ] The diff implements one of `spec.json`'s requirements and nothing beyond it.
+- [ ] The failure path of the engineering change exists in code and in a test.
 - [ ] No test was weakened, skipped or deleted to make CI pass.
-- [ ] Traceability row updated, anchor present and green.
-- [ ] Domain files import nothing from transport or adapters.
+- [ ] The traceability row is updated and its anchor is green.
 
-Deliberately absent: a coverage percentage target (it rewards executing code, not checking it), mocks of the domain to test the domain, tests of framework behaviour, and whole-page snapshots. See `testing.test-budget` in the factory repository for the reasoning.
+Deliberately absent: a coverage percentage target (it rewards executing code, not checking it), mocks of the domain to test the domain, and tests of framework behaviour. Reasoning: `testing.test-budget` in the library.

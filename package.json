@@ -24,7 +24,7 @@
     "check": "npm run index -- --check && npm test && npm run verify && node specs/spec-check.mjs --repo . --strict && npm run eval && npm run stress",
     "dogfood": "node factory/cli.mjs compile profile.json -o specs --force && node specs/spec-check.mjs --repo . --strict",
     "stress": "node scripts/stress-test.mjs && node scripts/stress-adversarial.mjs",
-    "eval": "node scripts/eval-library.mjs"
+    "eval": "node scripts/eval-library.mjs && node scripts/eval-specificity.mjs"
   },
   "engines": {
     "node": ">=20"

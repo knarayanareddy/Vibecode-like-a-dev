@@ -8,47 +8,45 @@
 
 ## Problem and primary user
 
-Write this in one paragraph each, from the user's side. The prompt is deliberately harder than the code.
+Answer from the engineering side, in the user's words. These four answers are what an agent will otherwise invent.
 
-| Question | Answer |
+| Question | Answer for Vibecode Like A Dev |
 | --- | --- |
-| Who exactly is the user? | _confirm_ |
-| What do they do today instead? | _confirm_ |
-| What does the product remove from their day? | _confirm_ |
-| What makes them stop using it? | _confirm_ |
+| Who handles the engineering today? | _confirm_ |
+| What do they do instead — a spreadsheet, a chat thread, a agent in another tool? | _confirm_ |
+| What does Vibecode Like A Dev remove from that day? | _confirm_ |
+| What makes them abandon it after one use? | _confirm_ |
 
 ## In scope for v1
 
-Derived from the selected requirements. Every capability below exists in `spec.json` with acceptance criteria.
+5 requirements, each with acceptance criteria in `spec.json`. They were selected by what the idea asks for, not by what a template ships.
 
 **Foundation**
 
-- `REQ-001` Runnable from a clean clone
-- `REQ-002` The primary journey works end to end
-- `REQ-003` Explicit non-goals
-- `REQ-005` The product's own rules are named and pinned
+- `REQ-001` A clean clone of Vibecode Like A Dev runs with one documented command, and a missing setting is named rather than guessed. _(runnable from a clean clone)_
+- `REQ-002` One engineering goes from creation to completion end to end, through the documented interface only. _(the primary journey works end to end)_
+- `REQ-003` The three things Vibecode Like A Dev will not do are written down and reviewed before the first sprint. _(explicit non-goals)_
+- `REQ-005` The rules that make a engineering valid are written down, and each one has a test that would fail if it broke. _(the product's own rules are named and pinned)_
 
 **Interface & contracts**
 
-- `REQ-004` Predictable command-line behaviour
+- `REQ-004` Every command that touches a engineering has documented flags, exit codes and a dry run. _(predictable command-line behaviour)_
 
 ## Out of scope
 
-A starter set, confirmed or replaced before Phase 2. The value is in writing it down, not in the specific items.
+Written for Vibecode Like A Dev specifically. Confirm or replace before Phase 2 — the list is worth more than any single line on it.
 
-- Anything not listed under "In scope" in the product brief. When in doubt, it is out of scope.
-- A general-purpose platform, plugin system or public extension API. v1 ships one product.
-- Multi-region deployment and horizontal scale-out beyond the stated user scale.
-- A native mobile client or desktop wrapper unless "mobile" is the declared kind.
-- Single sign-on, SCIM provisioning and enterprise procurement features.
-- A migration path from an existing system. v1 starts clean and imports nothing.
-- Realtime collaboration, presence and live cursors.
-- Model-backed features, chat interfaces and semantic search.
-- Email, push and digest notification delivery.
+- Any engineering capability the idea does not name. When in doubt, it is out of scope and gets its own version.
+- Importing engineering data from an existing system: v1 starts empty and the first agent enters it by hand.
+- Live collaboration on the same engineering, presence and cursors.
+- Any generated or summarised engineering content. Every word in v1 is written by a agent.
+- Notifying agent outside the product: no email, no push, no digest.
+- A native client for the engineering. If agent need it offline, that is a v2 decision with its own sync contract.
+- Custom reporting and exports over engineering data beyond what one screen shows.
 
 ## Success measures
 
-If a measure cannot be observed, it is a wish. One instrumented measure beats five untracked ones.
+Every measure below must be observable from PostgreSQL + Drizzle (forward-only SQL migrations) or the logs without a new tool. One instrumented measure beats five wishes.
 
 | Measure | Target for v1 | Observed how |
 | --- | --- | --- |
@@ -68,10 +66,10 @@ Assumptions: the idea paragraph is a complete statement of intent, tier 1 matche
 
 ## Open questions
 
-Unanswered questions do not block Phase 0. They block the slice they belong to. Answering them in the spec is cheaper than discovering the answer in production.
+These do not block Phase 0; they block the engineering slice they belong to. An answered question here is a decision you do not discover in production.
 
-1. Who is the single primary user of v1, and what do they do today instead of using this?
-2. What is the one action that must never fail, and what does failure cost the user?
-3. Which in-scope capability could be removed without destroying the core value?
-4. What is the expected order of magnitude of data — rows, events per day, concurrent users?
-5. Who notices first when this breaks, and through which channel?
+1. Who creates the first engineering, and what do they use today instead?
+2. What must never happen to a engineering — and what does it cost when it does?
+3. Which part of the engineering workflow could be dropped without losing the reason agent open it?
+4. How many engineering records exist in year one, and how many agent touch them at once?
+5. Who notices first when a engineering is wrong, and how do they find out?

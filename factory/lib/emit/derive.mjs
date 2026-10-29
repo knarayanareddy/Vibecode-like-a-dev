@@ -193,31 +193,32 @@ export function anchorPath(profile, requirement) {
 
 // ---------- non-goals and questions ----------
 
-export function nonGoalsFor(profile) {
+export function nonGoalsFor(profile, words = []) {
+  const primary = words[0] ?? 'the primary object';
+  const secondary = words[1] ?? 'the people who use it';
   const goals = [
-    'Anything not listed under "In scope" in the product brief. When in doubt, it is out of scope.',
-    'A general-purpose platform, plugin system or public extension API. v1 ships one product.',
-    'Multi-region deployment and horizontal scale-out beyond the stated user scale.',
-    'A native mobile client or desktop wrapper unless "mobile" is the declared kind.',
-    'Single sign-on, SCIM provisioning and enterprise procurement features.',
-    'A migration path from an existing system. v1 starts clean and imports nothing.'
+    `Any ${primary} capability the idea does not name. When in doubt, it is out of scope and gets its own version.`,
+    `Importing ${primary} data from an existing system: v1 starts empty and the first ${secondary} enters it by hand.`
   ];
 
-  if (!profile.traits.includes('realtime')) goals.push('Realtime collaboration, presence and live cursors.');
-  if (!profile.traits.includes('ai')) goals.push('Model-backed features, chat interfaces and semantic search.');
-  if (!profile.traits.includes('notifications')) goals.push('Email, push and digest notification delivery.');
-  if (profile.kind === 'web-app' || profile.kind === 'api') goals.push('A public API for third parties, SDKs and published integrations.');
-
+  if (!profile.traits.includes('realtime')) goals.push('Live collaboration on the same ' + primary + ', presence and cursors.');
+  if (!profile.traits.includes('ai')) goals.push(`Any generated or summarised ${primary} content. Every word in v1 is written by a ${secondary.replace(/s$/, '')}.`);
+  if (!profile.traits.includes('notifications')) goals.push(`Notifying ${secondary} outside the product: no email, no push, no digest.`);
+  if (profile.kind === 'web-app' || profile.kind === 'api') goals.push(`A public ${primary} API for third parties, SDKs and published integrations.`);
+  if (profile.kind !== 'mobile') goals.push(`A native client for the ${primary}. If ${secondary} need it offline, that is a v2 decision with its own sync contract.`);
+  goals.push(`Custom reporting and exports over ${primary} data beyond what one screen shows.`);
   return goals;
 }
 
-export function openQuestionsFor(profile, rigor) {
+export function openQuestionsFor(profile, rigor, words = []) {
+  const primary = words[0] ?? 'the primary object';
+  const secondary = words[1] ?? 'users';
   const questions = [
-    'Who is the single primary user of v1, and what do they do today instead of using this?',
-    'What is the one action that must never fail, and what does failure cost the user?',
-    'Which in-scope capability could be removed without destroying the core value?',
-    'What is the expected order of magnitude of data — rows, events per day, concurrent users?',
-    'Who notices first when this breaks, and through which channel?'
+    `Who creates the first ${primary}, and what do they use today instead?`,
+    `What must never happen to a ${primary} — and what does it cost when it does?`,
+    `Which part of the ${primary} workflow could be dropped without losing the reason ${secondary} open it?`,
+    `How many ${primary} records exist in year one, and how many ${secondary} touch them at once?`,
+    `Who notices first when a ${primary} is wrong, and how do they find out?`
   ];
 
   if (profile.risks.pii) questions.push('Which fields are personal data, and what is the retention period and lawful basis for each?');
@@ -233,7 +234,7 @@ export function openQuestionsFor(profile, rigor) {
 
 // ---------- delivery ----------
 
-export function buildPhases(plan) {
+export function buildPhases(plan, phrases) {
   const { profile, requirements, primitives } = plan;
   const groups = groupRequirements(requirements);
   const weeks = profile.constraints.weeks;
@@ -243,18 +244,22 @@ export function buildPhases(plan) {
   const hasTokens = primitives.some((primitive) => primitive.id === 'frontend.design-system-tokens');
 
   const reqList = (render) => (groups.find((group) => group.render === render)?.items ?? []);
+  const words = ideaNouns(profile).map((entry) => entry.word);
+  const primary = words[0] ?? 'record';
+  const secondary = (words[1] ?? 'user').replace(/s$/, '');
+  const db = String(stackFor(profile).stack.db).split(/[(+]/)[0].trim();
 
   const phases = [
     {
       name: 'Phase 0 — Skeleton and guardrails',
       goal: 'A running, tested, documented empty box. Nothing built on a broken foundation.',
       tasks: [
-        'Initialise the repository with the chosen stack; commit the lockfile.',
-        'Add the CI workflow with lint, typecheck and test jobs. Make it required on the default branch.',
-        'Add environment validation that names every missing variable at startup.',
-        'Write the README runbook: install, run, test, deploy, known limitations.',
+        `Initialise the repository with ${stackFor(profile).stack.language} and ${db}; commit the lockfile.`,
+        'Add the CI workflow with lint, typecheck and test jobs, and make it required on the default branch.',
+        `Add configuration validation that names every missing variable before the first ${primary} is created.`,
+        `Write the runbook: install, run, test, deploy, and what ${secondary}s see when the ${primary} service is down.`,
         'Copy the specification packet into specs/ and wire the spec check into CI.',
-        `Resolve open questions that block in-scope work (see product brief). Unresolved questions block only their area.`
+        `Answer the open questions that block the ${primary} slice; the rest can wait for their phase.`
       ],
       exit: 'A new contributor can clone, run and test with the documented commands. CI is green on an empty suite.'
     },
@@ -262,11 +267,11 @@ export function buildPhases(plan) {
       name: 'Phase 1 — Domain core',
       goal: 'The rules of the product, expressed in code, before any framework is chosen for them.',
       tasks: [
-        'Fill the ubiquitous language table: one term, one meaning, no synonyms.',
-        'Write failing tests for each invariant in the domain model.',
-        'Implement the aggregates as pure code with no framework, network or database imports.',
-        'Define typed domain errors; no exception control flow across module boundaries.',
-        hasMutation ? 'Run the mutation check on the domain layer and record the baseline score.' : 'Review assertion quality manually; every test must fail if the rule is inverted.'
+        `Fill the language table around a ${primary}: one term, one meaning, no synonyms.`,
+        `Write failing tests for each rule a ${primary} must satisfy, including the ones the idea states in its own words.`,
+        `Implement the ${primary} aggregates as pure code with no framework, network or database imports.`,
+        `Define typed errors for the ways a ${primary} can be rejected; no exception control flow across module boundaries.`,
+        hasMutation ? `Run the mutation check on the ${primary} domain and record the baseline score.` : `Review assertion quality by hand: every ${primary} test must fail if its rule is inverted.`
       ],
       exit: 'Domain tests pass and the domain layer imports nothing from infrastructure.'
     },
@@ -274,20 +279,22 @@ export function buildPhases(plan) {
       name: 'Phase 2 — Contracts before implementation',
       goal: 'Every boundary is fixed while changing it is still free.',
       tasks: [
-        `Finalise each interface shape in the contract inventory: ${reqList('api').map((r) => r.id).join(', ') || 'internal module interfaces'}.`,
-        'Write acceptance tests that encode the criteria in the verification plan. They must fail.',
-        'Write contract tests for external dependencies, or record the stub and the reason.',
-        'Record an ADR for each chosen library that could plausibly be replaced.'
+        `Fix each shape in the contract inventory: ${reqList('api').map((r) => r.id).join(', ') || 'internal module interfaces behind the ' + primary + ' use case'}.`,
+        `Write the acceptance tests for a ${primary} first; they must fail for missing behaviour, not missing setup.`,
+        'Record a real response for every external dependency, or write down the stub and why.',
+        `Record an ADR for each library that a reviewer could plausibly want removed.`
       ],
       exit: 'Acceptance tests exist and fail for the right reason (missing behaviour, not missing setup).'
     },
     {
       name: 'Phase 3 — Vertical slices',
-      goal: 'Working software end to end, one requirement at a time.',
+      goal: `Working ${primary} behaviour end to end, one requirement at a time.`,
       tasks: groups
         .filter((group) => group.render !== 'core' && group.render !== 'frontend')
         .flatMap((group) =>
-          group.items.map((requirement) => `${requirement.id} ${requirement.title} — test, implement, trace, repeat.`)
+          group.items.map(
+            (requirement) => `${requirement.id} ${phrases?.get(requirement.key) ?? requirement.title} Test first, then implement, then trace.`
+          )
         ),
       exit: 'Each requirement is traceable from criterion to test, and its anchor is green in CI.'
     },
@@ -295,7 +302,7 @@ export function buildPhases(plan) {
       name: 'Phase 4 — Interface and hardening',
       goal: 'The product feels finished and fails predictably.',
       tasks: [
-        ...reqList('frontend').map((requirement) => `${requirement.id} ${requirement.title}.`),
+        ...reqList('frontend').map((requirement) => `${requirement.id} ${phrases?.get(requirement.key) ?? requirement.title}`),
         hasTokens ? 'Bind every component to design tokens; remove raw values.' : null,
         hasThreat ? 'Walk the threat model; each accepted mitigation becomes a control or a test.' : null,
         hasObservability ? 'Add correlation IDs and one alert on error rate.' : null,
@@ -308,9 +315,9 @@ export function buildPhases(plan) {
       name: 'Phase 5 — Release and first observation',
       goal: 'Ship with a way back.',
       tasks: [
-        'Write the release checklist and the rollback procedure.',
-        'Deploy to a staging environment and run the primary journey there.',
-        'Observe for one window: error rate, latency, and one real user journey.',
+        `Write the release checklist and the rollback procedure for a ${db} migration.`,
+        `Deploy to staging and take one ${primary} through the primary journey there.`,
+        `Observe for one window: error rate, latency, and one ${primary} created by a real ${secondary}.`,
         'Record what changed in the spec as a result, then archive the changed requirements.'
       ],
       exit: 'A release has been observed and a rollback has been rehearsed or explicitly accepted as untested.'
@@ -425,6 +432,287 @@ export function unmappedObligations(profile, requirements, domainText = '') {
     .map((entry) => entry.sentence);
 }
 
+
+// ---------- product-specific derivation ----------
+//
+// A packet that reads the same for every product is a form letter. These helpers
+// derive content from *this* profile: its nouns, its surfaces, its decisions and
+// the requirement an agent should start with.
+
+/** The architecture style this kind of product implies. */
+export function styleFor(profile) {
+  const styles = {
+    'data-pipeline': {
+      name: 'Staged pipeline with explicit contracts',
+      why: 'Each stage has one job, a declared input and output, and a watermark that makes replay possible. A monolith here would hide the data dependencies that cause most pipeline incidents.'
+    },
+    cli: {
+      name: 'Hexagonal single artifact',
+      why: 'A CLI is a thin adapter over a pure core. Keeping IO at the edges is what makes the commands testable without spawning processes.'
+    },
+    library: {
+      name: 'Stable core with a narrow surface',
+      why: 'The public surface is the product. Everything behind it must be replaceable without a major version.'
+    },
+    agent: {
+      name: 'Hexagonal task runner',
+      why: 'Model calls, tools and storage are adapters. The decision logic must be testable with recorded inputs and no network.'
+    },
+    automation: {
+      name: 'Hexagonal single artifact with explicit steps',
+      why: 'Automation fails on the second run, not the first. Steps need their own state and their own tests.'
+    }
+  };
+  return (
+    styles[profile.kind] ?? {
+      name: 'Modular monolith with enforced boundaries',
+      why: 'One deployable, several modules, boundaries checked mechanically. Microservices multiply failure modes before a product has found its shape; the seams here are the ones that survive the split if it ever comes.'
+    }
+  );
+}
+
+/** The document that covers a requirement's area. Used to point, not to repeat. */
+export const AREA_DOCUMENT = {
+  core: '01-product-brief.md',
+  data: '04-contracts.md',
+  security: '04-contracts.md',
+  api: '04-contracts.md',
+  frontend: '04-contracts.md',
+  reliability: '03-architecture.md',
+  ai: '03-architecture.md',
+  delivery: '06-delivery-plan.md'
+};
+
+/**
+ * Requirement titles are written for every product at once, so a packet that only
+ * quotes them reads like the catalog it came from. This phrases each selected
+ * requirement in *this* product's vocabulary: the same obligation, said about the
+ * things the idea actually names. `spec.json` keeps the canonical title, so ids and
+ * anchors stay stable while the documents talk like the product.
+ */
+export function phrasesFor(plan, words) {
+  const singular = (word) => (word && word.endsWith('s') && !word.endsWith('ss') ? word.slice(0, -1) : word);
+  const primaryPlural = words[0] ?? 'records';
+  const primary = singular(primaryPlural);
+  const secondary = words[1] ?? 'users';
+  const db = String(stackFor(plan.profile).stack.db).split(/[(+]/)[0].trim();
+  const project = titleize(plan.profile.name).replace(/^\d+\s*/, '');
+
+  const templates = {
+    'core.runnable': `A clean clone of ${project} runs with one documented command, and a missing setting is named rather than guessed.`,
+    'core.primary-journey': `One ${primary} goes from creation to completion end to end, through the documented interface only.`,
+    'core.non-goals': `The three things ${project} will not do are written down and reviewed before the first sprint.`,
+    'data.persistence': `${primaryPlural} survive a restart in ${db}, and every schema change is a forward-only migration.`,
+    'data.lifecycle': `A ${singular(secondary)}'s ${primary} data has a stated retention period, an export and a deletion path.`,
+    'auth.identity': `A ${singular(secondary)} signs in and out, and a revoked session stops working server-side.`,
+    'auth.authorization': `Reading or changing someone else's ${primary} is refused by the server, not hidden by the client.`,
+    'auth.tenant-isolation': `Two ${secondary}s' ${primary} data cannot be mixed by any query or handler.`,
+    'ui.accessibility': `The main ${primary} journey is completable with a keyboard and a screen reader.`,
+    'ui.states': `Every ${primary} screen has loading, empty, error and success states — not only success.`,
+    'ui.design-tokens': `Colour and spacing come from one token source, so rebranding the ${primary} view is one file.`,
+    'ux.error-taxonomy': `A ${primary} error is classified before it is rendered, so the message tells ${secondary} what to do next.`,
+    'api.contract': `The ${primary} interface has a versioned, machine-readable contract that a test enforces.`,
+    'api.error-envelope': `Every failure on the ${primary} interface returns the same envelope, and every id in it is opaque.`,
+    'integration.retries': `A retried ${primary} request produces the same outcome, not two records.`,
+    'payments.correctness': `Money attached to a ${primary} stays correct under retries and partial failure.`,
+    'ai.guardrails': `Model calls that touch ${primary} content are bounded, observable and evaluated against a fixture.`,
+    'ops.observability': `A failed ${primary} operation is visible in a log with a correlation id, without a debugger.`,
+    'ops.rate-limits': `Public entry points that create or change ${primaryPlural} are limited per identity and per address.`,
+    'delivery.audit-trail': `Privileged changes to a ${primary} are append-only and attributable to an actor.`,
+    'pipeline.idempotency': `Re-running a window of ${primary} data replaces its output instead of duplicating it.`,
+    'library.api-stability': `The public surface measured in ${primary} terms is versioned; a breaking change needs a major version.`,
+    'cli.ergonomics': `Every command that touches a ${primary} has documented flags, exit codes and a dry run.`,
+    'spec.drift-guard': `A test that loses its ${primary} requirement anchor fails the build.`,
+    'core.domain-invariants': `The rules that make a ${primary} valid are written down, and each one has a test that would fail if it broke.`,
+    'data.uploads': `A file attached to a ${primary} is type-checked, size-capped and stripped before it is stored.`,
+    'mobile.offline': `A ${primary} change made offline replays exactly once, even after the app is killed.`
+  };
+
+  const capitalise = (text) => String(text).replace(/^./, (char) => char.toUpperCase());
+  return new Map(
+    plan.requirements.map((requirement) => [requirement.key, capitalise(templates[requirement.key] ?? requirement.title)])
+  );
+}
+
+/** Where an agent should start: the first unfinished requirement, preferred order. */
+export function firstOpenRequirement(plan) {
+  const open = plan.requirements.filter((requirement) => requirement.verify !== 'manual');
+  const byPreference = ['core.runnable', 'core.primary-journey', 'core.domain-invariants'];
+  for (const key of byPreference) {
+    const match = open.find((requirement) => requirement.key === key);
+    if (match) return match;
+  }
+  return open[0] ?? plan.requirements[0];
+}
+
+const NOUN_STOP = new Set([
+  'must', 'never', 'always', 'that', 'this', 'with', 'from', 'they', 'them', 'their', 'there', 'these',
+  'those', 'when', 'then', 'than', 'which', 'while', 'where', 'what', 'have', 'been', 'will', 'would',
+  'should', 'could', 'each', 'every', 'some', 'such', 'only', 'also', 'must', 'into', 'over', 'under',
+  'about', 'because', 'between', 'within', 'without', 'after', 'before', 'during', 'through', 'using',
+  'used', 'make', 'makes', 'made', 'take', 'takes', 'give', 'gives', 'show', 'shows', 'keep', 'keeps',
+  'work', 'works', 'need', 'needs', 'want', 'wants', 'like', 'said', 'says', 'goes', 'going', 'gets',
+  'every', 'other', 'another', 'people', 'person', 'thing', 'things', 'something', 'anything',
+  'which', 'whose', 'while', 'still', 'even', 'just', 'very', 'much', 'many', 'more', 'most', 'less',
+  'first', 'second', 'third', 'next', 'last', 'same', 'different', 'possible', 'available', 'required',
+  'users', 'user', 'application', 'service', 'system', 'product', 'records', 'record', 'data', 'app',
+  'tool', 'thing', 'stuff', 'able', 'allow', 'allows', 'allowed', 'ensure', 'ensures', 'provide',
+  'provides', 'support', 'supports', 'including', 'includes', 'based', 'across', 'where', 'whose'
+]);
+
+/**
+ * Candidate nouns for the ubiquitous language, taken from the idea itself.
+ * These are candidates, not conclusions: the document says so.
+ */
+export function ideaNouns(profile, limit = 6) {
+  const counts = new Map();
+  for (const word of String(profile.idea ?? '').toLowerCase().split(/[^a-z0-9-]+/)) {
+    if (word.length < 5 || NOUN_STOP.has(word)) continue;
+    if (/^\d+$/.test(word)) continue;
+    counts.set(word, (counts.get(word) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || b[0].length - a[0].length)
+    .slice(0, limit)
+    .map(([word, count]) => ({ word, count }));
+}
+
+/**
+ * The interfaces this product implies, from its kind and traits. A packet that
+ * lists "an HTTP surface" for a library has not read the profile.
+ */
+/**
+ * Rules the idea states in its own words: "must", "never", "only", "cannot".
+ * These are the product's invariants, as opposed to the catalog's generic ones,
+ * and they are the part an agent must not paraphrase away.
+ */
+export function ownRulesFor(profile) {
+  const idea = String(profile.idea ?? '');
+  const sentences = idea
+    .split(/(?<=[.!?;])\s+|\n+/)
+    .map((sentence) => sentence.trim().replace(/^[-*\d.\s]+/, ''))
+    .filter((sentence) => sentence.length > 20 && /\b(must|never|only|cannot|can ?not|always|at most|at least|no more than)\b/i.test(sentence));
+  return [...new Set(sentences)].slice(0, 6);
+}
+
+export function surfacesFor(plan) {
+  const { profile } = plan;
+  const rows = [];
+  const add = (surface, why, version = 'v1') => rows.push([surface, why, version]);
+
+  if (['web-app', 'api', 'agent'].includes(profile.kind)) {
+    add('HTTP API', `the ${profile.kind} surface described in the brief`);
+  }
+  if (profile.kind === 'cli') add('Command line', 'one command per user-facing operation, documented grammar');
+  if (profile.kind === 'library') add('Public module surface', 'everything a consumer may import, versioned');
+  if (profile.kind === 'data-pipeline') add('Stage inputs/outputs', 'declared schema per stage, with a watermark');
+  if (profile.kind === 'mobile') add('On-device store + sync API', 'local writes and the replay contract');
+  if (profile.kind === 'automation') add('Trigger + step runner', 'schedule or event, each step idempotent');
+
+  if (profile.traits.includes('auth')) add('Session / token', 'authenticate, refresh, revoke');
+  if (profile.traits.includes('upload')) add('Upload', 'validated, contained, metadata-stripped');
+  if (profile.traits.includes('payments')) add('Payment intent + webhook', 'money movement and provider callbacks');
+  if (profile.traits.includes('webhooks')) add('Inbound webhook', 'signature-verified, idempotent by event id');
+  if (profile.traits.includes('search')) add('Query', 'ranked results with a stable pagination contract');
+  if (profile.traits.includes('notifications')) add('Notification dispatch', 'per-channel, deduplicated, user preferences respected');
+  if (profile.traits.includes('ai')) add('Model call', 'declared input contract, validated output, timeout and cost ceiling');
+  if (profile.traits.includes('realtime')) add('Realtime channel', 'ordering and reconnect semantics stated explicitly');
+  if (profile.traits.includes('background-jobs')) add('Job payload', 'idempotent handler, at-least-once delivery acknowledged');
+  if (profile.risks.multiTenant) add('Tenant scope', 'resolved from the authenticated context, never from the payload');
+
+  return rows;
+}
+
+/**
+ * Decisions this product actually has to make. A generic list of four ADRs is
+ * boilerplate; a list that only contains what this profile triggers is not.
+ */
+export function decisionsFor(plan, stack, style) {
+  const { profile } = plan;
+  const rows = [];
+  const add = (id, decision, why, implies) => rows.push([id, decision, why, implies]);
+
+  add('ADR-001', `Architecture: ${style.name}`, style.why, 'Boundaries are checked by an import rule in CI, not by review.');
+
+  if (['web-app', 'api', 'agent', 'mobile', 'data-pipeline'].includes(profile.kind)) {
+    add('ADR-002', `Persistence: ${stack.stack.db}`, 'Invariants that must hold across rows belong in the database, not only in code.', `Migration for ${profile.kind === 'data-pipeline' ? 'each stage output' : 'every schema change'} is forward-only with a restore step.`);
+  }
+  if (profile.traits.includes('auth') || profile.traits.includes('admin')) {
+    add('ADR-003', 'Authorization: policy checked server-side, deny by default', 'Client-side checks are hints, not controls; the server is the only caller that cannot be edited.', 'Every read and write takes an actor, and the policy test is written before the handler.');
+  }
+  if (profile.traits.includes('payments') || profile.risks.payments) {
+    add('ADR-004', 'Money: integer minor units, immutable ledger entries', 'Floating point rounding and edited history are the two ways payment systems lose money.', 'Corrections are compensating entries; the balance is derived, never stored.');
+  }
+  if (profile.risks.multiTenant) {
+    add('ADR-005', 'Tenancy: tenant key resolved server-side and applied in the data layer', 'A tenant filter applied at call sites is forgotten exactly once, and that once is an incident.', 'Every query goes through the scoped repository; a forged tenant id is rejected before any read.');
+  }
+  if (profile.traits.includes('realtime')) {
+    add('ADR-006', 'Realtime transport: one ordering guarantee, stated', 'Realtime failures are ordering failures far more often than delivery failures.', 'Every event carries a sequence; the client reconciles on reconnect rather than assuming.');
+  }
+  if (profile.traits.includes('upload')) {
+    add('ADR-007', 'Uploads: generated names, allowlisted types, metadata stripped', 'Public upload is the most common way a small product gets compromised.', 'Storage sits outside anything the web server executes; serving goes through signed URLs.');
+  }
+  if (profile.traits.includes('offline')) {
+    add('ADR-008', 'Offline writes: local-first queue, exactly-once replay', 'A write the interface confirmed must not vanish, and must not apply twice.', 'Each queued write carries a client id used for de-duplication on replay.');
+  }
+  if (profile.traits.includes('ai') || profile.kind === 'agent') {
+    add('ADR-009', 'Model calls: contract in, validated out, budgeted', 'A model call is an untrusted dependency that can be slow, wrong and expensive at once.', 'Every call has a timeout, a schema check on the response, and a per-task cost cap.');
+  }
+  if (profile.kind === 'data-pipeline') {
+    add('ADR-010', 'Replay semantics: watermark per stage, idempotent output', 'A pipeline you cannot safely re-run is a pipeline you cannot fix.', 'Rerunning a window replaces its output rather than appending to it.');
+  }
+  return rows;
+}
+
+/**
+ * One line per selected practice saying what it means *here*. The predicate
+ * explains why the practice applies at all; this explains what it changes in this
+ * product, which is the part an agent can act on.
+ */
+/**
+ * A gate is policy, so its statement is the same for every project at a tier. What is
+ * *not* the same is what passing it means here: how many requirements, which database,
+ * which journey. That concrete reading is what the checklist shows.
+ */
+export function gateReading(gate, plan, words) {
+  const primary = words[0] ?? 'record';
+  const db = String(stackFor(plan.profile).stack.db).split(/[(+]/)[0].trim();
+  const automated = plan.requirements.filter((requirement) => requirement.verify === 'automated').length;
+  const manual = plan.requirements.filter((requirement) => requirement.verify === 'manual').length;
+  return {
+    'G0-RUN': `for ${titleize(plan.profile.name).replace(/^\d+\s*/, '')}: one command, and a missing variable is named`,
+    'G0-SMOKE': `one ${primary} taken from creation to done through the documented interface`,
+    'G1-DOMAIN-TESTS': `${plan.requirements.filter((requirement) => requirement.render === 'core').length} core requirements, each with a test on the ${primary} rules`,
+    'G1-AC-TRACE': `${automated} automated requirements, ${manual} manual — anchor in the test file, not the doc`,
+    'G2-CONTRACTS': `${plan.requirements.filter((requirement) => ['api', 'data'].includes(requirement.render)).length} interface requirements, shapes fixed in 04-contracts.md`,
+    'G2-MIGRATIONS': `forward-only ${db} migration plus the restore step you actually ran`,
+    'G3-MUTATION': `score recorded against the ${primary} domain layer, ratcheted in CI`,
+    'G3-PROPERTY': `the ${primary} invariants, generated inputs rather than hand-picked examples`
+  }[gate.id];
+}
+
+export function practiceCards(plan, phrases = new Map()) {
+  return plan.primitives.map((primitive) => {
+    const enforces = (primitive.enforces ?? [])
+      .map((key) => plan.requirements.find((requirement) => requirement.key === key))
+      .filter(Boolean);
+    // A practice is bound either to a requirement it enforces, or to the artefact it
+    // produces. Both are specific to this packet; the practice's own prose is not.
+    const target =
+      enforces.length > 0
+        ? `${enforces[0].id} ${phrases.get(enforces[0].key) ?? enforces[0].title}`
+        : primitive.artifacts?.length
+          ? `\`${primitive.artifacts[0]}\``
+          : 'the whole packet';
+    return {
+      id: primitive.id,
+      title: primitive.title,
+      bindTo: target,
+      because: primitive.why
+    };
+  });
+}
+
 // ---------- whole-packet derivation ----------
 
 export function derive(plan) {
@@ -435,18 +723,34 @@ export function derive(plan) {
   const domainText = aggregates
     .map((aggregate) => `${aggregate.name} ${(aggregate.invariants ?? []).join(' ')}`)
     .join(' ');
+  const nouns = ideaNouns(plan.profile);
+  const phrases = phrasesFor(plan, nouns.map((entry) => (typeof entry === 'string' ? entry : entry.word)));
+  const words = nouns.map((entry) => (typeof entry === 'string' ? entry : entry.word));
   return {
     project: titleize(plan.profile.name),
+    // The product's own vocabulary, so a document can name the thing it is talking
+    // about instead of saying "the record".
+    words,
+    primary: words[0] ?? plan.profile.name,
+    secondary: words[1] ?? words[0] ?? plan.profile.name,
     contexts,
     terms: termsFor(plan.requirements),
     aggregates,
     groups: groupRequirements(plan.requirements),
-    nonGoals: nonGoalsFor(plan.profile),
-    questions: openQuestionsFor(plan.profile, plan.rigor),
+    nonGoals: nonGoalsFor(plan.profile, words),
+    questions: openQuestionsFor(plan.profile, plan.rigor, words),
     stack: stackFor(plan.profile),
     commands: commandsFor(plan.profile),
-    phases: buildPhases(plan),
+    phases: buildPhases(plan, phrases),
     brief: copyBrief(plan),
+    style: styleFor(plan.profile),
+    nouns,
+    surfaces: surfacesFor(plan),
+    ownRules: ownRulesFor(plan.profile),
+    decisions: decisionsFor(plan, stackFor(plan.profile), styleFor(plan.profile)),
+    cards: practiceCards(plan, phrases),
+    phrases,
+    start: firstOpenRequirement(plan),
     unmapped: unmappedObligations(plan.profile, plan.requirements, domainText),
     anchors: new Map(plan.requirements.map((requirement) => [requirement.id, anchorPath(plan.profile, requirement)]))
   };

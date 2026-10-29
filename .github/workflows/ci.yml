@@ -45,6 +45,9 @@ jobs:
       - name: Library eval (discoverability, collisions, discrimination)
         run: node scripts/eval-library.mjs
 
+      - name: Specificity eval (a packet should not read like a form letter)
+        run: node scripts/eval-specificity.mjs
+
       - name: Ten ideas survive the pipeline
         run: node scripts/stress-test.mjs
 
