@@ -43,9 +43,9 @@ const VERBOSE = process.argv.includes('--verbose');
  * inconsistent packet. They are measured and reported separately so the exemption
  * cannot hide growth.
  */
-const MAX_WORST = 0.55;
+const MAX_WORST = 0.5;
 /** The mean across all pairs, ratcheted the same way. */
-const MAX_MEAN = 0.34;
+const MAX_MEAN = 0.33;
 /** A single document may not be a form letter either: 50% is the target, 55% the ratchet. */
 const MAX_SHARED_DOC = 0.55;
 /** Where this metric is trying to get to, reported so the gap is visible rather than lost. */

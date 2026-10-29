@@ -236,6 +236,10 @@ const HANDLERS = {
         why: primitive.why,
         when: primitive.when,
         enforces: primitive.enforces,
+        gates: primitive.gates ?? [],
+        // The template, not a filled sentence: filling needs a profile, and this call
+        // is about *which* practices apply. The packet is where it reads like the product.
+        obligation: primitive.obligation ?? '',
         path: primitive.path
       })),
       deferred: plan.deferred,
@@ -284,6 +288,9 @@ const HANDLERS = {
       priority: primitive.priority,
       enforces: primitive.enforces,
       gates: primitive.gates ?? [],
+      advisory: primitive.advisory === true,
+      advisory_reason: primitive.advisory_reason || '',
+      obligation: primitive.obligation ?? '',
       path: primitive.path,
       body
     };

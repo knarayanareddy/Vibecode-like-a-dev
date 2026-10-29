@@ -22,19 +22,26 @@ import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildIndex } from '../factory/lib/indexer.mjs';
+import { derive } from '../factory/lib/emit/derive.mjs';
+import { renderPacket } from '../factory/lib/emit/index.mjs';
 import { handleMessage } from '../factory/lib/mcp.mjs';
-import { buildPlan, loadCatalog, loadRouting } from '../factory/lib/planner.mjs';
+import { buildPlan, loadCatalog, loadPolicy, loadRouting } from '../factory/lib/planner.mjs';
 import { normalizeProfile } from '../factory/lib/profile.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const JSON_OUT = process.argv.includes('--json');
 const index = buildIndex();
+const policy = loadPolicy();
 
 const THRESHOLDS = {
   selfRecallAtOne: 0.9, // a practice must be the top hit for its own title
   maxCollisions: 0, // two practices must not claim the same trigger phrase
   maxUnselected: 0, // a practice no profile ever selects is dead weight
-  minDiscriminating: 0.95 // no practice may apply to nearly every profile
+  minDiscriminating: 0.95, // no practice may apply to nearly every profile
+  minRedFlags: 3, // a pattern, not an anecdote
+  minExcuses: 3, // the three things a competent person says while skipping it
+  maxWithoutConsequence: 0, // every practice enforces something, or says it cannot
+  maxMissingObligation: 0 // every selected practice must state what it obliges here
 };
 
 /** Call the MCP server exactly as an agent would. */
@@ -96,12 +103,33 @@ const selectionCount = new Map(primitives.map((primitive) => [primitive.id, 0]))
 const deferredCount = new Map(primitives.map((primitive) => [primitive.id, 0]));
 let profilesRun = 0;
 
+// Tier-1 item #2, checked the only way that counts: compile the packet and look for
+// the sentence. Every selected practice must contribute at least one sentence in the
+// product's own nouns, and the sentence must already be filled.
+const obligationMisses = [];
+const unfilledObligations = [];
+let obligationChecks = 0;
+
 for (const entry of profileFiles) {
   const raw = typeof entry === 'string' ? JSON.parse(readFileSync(entry, 'utf8')) : entry.inline;
-  const plan = buildPlan(normalizeProfile(raw), { index });
+  const profile = normalizeProfile(raw);
+  const plan = buildPlan(profile, { index });
   profilesRun += 1;
   for (const practice of plan.primitives) selectionCount.set(practice.id, (selectionCount.get(practice.id) ?? 0) + 1);
   for (const practice of plan.deferred) deferredCount.set(practice.id, (deferredCount.get(practice.id) ?? 0) + 1);
+
+  const cards = derive(plan).cards;
+  const { files } = renderPacket(plan);
+  const packet = [...files.values()].join('\n');
+  for (const card of cards) {
+    obligationChecks += 1;
+    if (!card.obligation || card.obligation.trim() === '') {
+      obligationMisses.push(`${profile.name || plan.profile.name}: ${card.id} has no obligation`);
+      continue;
+    }
+    if (/\{[a-zA-Z]+\}/.test(card.obligation)) unfilledObligations.push(`${card.id}: "${card.obligation}"`);
+    if (!packet.includes(card.obligation)) obligationMisses.push(`${profile.name || plan.profile.name}: ${card.id} obligation is not in the packet`);
+  }
 }
 
 const never = [...selectionCount.entries()].filter(([, count]) => count === 0).map(([id]) => id);
@@ -124,7 +152,40 @@ const universal = [...selectionCount.entries()]
 const catalog = loadCatalog().requirements;
 const enforced = new Set(primitives.flatMap((primitive) => primitive.enforces ?? []));
 const unenforced = catalog.map((requirement) => requirement.key).filter((key) => !enforced.has(key));
+
+// Tier-1 item #4: a practice that enforces nothing is advice. It either names the
+// requirement or the policy gate it makes real, or it admits in writing that no gate
+// can check it. Silence is no longer an option.
 const unbound = primitives.filter((primitive) => (primitive.enforces ?? []).length === 0).map((primitive) => primitive.id);
+const withoutConsequence = primitives
+  .filter((primitive) => (primitive.enforces ?? []).length === 0 && (primitive.gates ?? []).length === 0 && primitive.advisory !== true)
+  .map((primitive) => primitive.id);
+const advisory = primitives.filter((primitive) => primitive.advisory === true);
+const advisoryWithoutReason = advisory.filter((primitive) => !primitive.advisory_reason || primitive.advisory_reason.trim().length < 30).map((primitive) => primitive.id);
+const knownGates = new Set(Object.values(policy.gates).flat().map((gate) => gate.id));
+const unknownGates = primitives.flatMap((primitive) =>
+  (primitive.gates ?? []).filter((gate) => !knownGates.has(gate)).map((gate) => `${primitive.id} → ${gate}`)
+);
+
+// Tier-1 item #3: the two sections that make a skill stick. Counted per practice, not
+// in aggregate, so one richly documented practice cannot cover for a bare one.
+const thinSkills = primitives
+  .map((primitive) => {
+    const source = readFileSync(path.join(ROOT, primitive.path), 'utf8');
+    const section = (name) => {
+      const start = source.indexOf(`\n## ${name}`);
+      if (start === -1) return '';
+      const rest = source.slice(start + 1);
+      const next = rest.indexOf('\n## ', 1);
+      return next === -1 ? rest : rest.slice(0, next);
+    };
+    const redFlags = (section('Red flags').match(/^\s*[-*]\s+\S/gm) ?? []).length;
+    const excuses = (section('Anti-rationalization').match(/^\|[^|]/gm) ?? []).length;
+    const rows = Math.max(0, excuses - 2); // header and separator are not rows
+    return { id: primitive.id, redFlags, excuses: rows, inProduct: section('In this product').trim().length > 0 };
+  })
+  .filter((entry) => entry.redFlags < THRESHOLDS.minRedFlags || entry.excuses < THRESHOLDS.minExcuses || !entry.inProduct);
+const thinCount = thinSkills.length;
 
 // A requirement whose text cannot be said in the product's own words is a
 // requirement that will be copied verbatim into every packet. The `definition`
@@ -158,6 +219,32 @@ if (genericDefinition.length > 0) {
     detail: `no product slot in: ${genericDefinition.join(', ')}`
   });
 }
+if (withoutConsequence.length > THRESHOLDS.maxWithoutConsequence) {
+  findings.push({
+    id: 'practice-without-consequence',
+    detail: `no requirement, no gate and no advisory reason: ${withoutConsequence.join(', ')}`
+  });
+}
+if (advisoryWithoutReason.length > 0) {
+  findings.push({ id: 'advisory-without-reason', detail: advisoryWithoutReason.join(', ') });
+}
+if (unknownGates.length > 0) {
+  findings.push({ id: 'unknown-gate', detail: unknownGates.join(', ') });
+}
+if (thinSkills.length > 0) {
+  findings.push({
+    id: 'thin-skill',
+    detail: thinSkills
+      .map((entry) => `${entry.id} (${entry.redFlags} red flags, ${entry.excuses} excuses${entry.inProduct ? '' : ', no obligation section'})`)
+      .join('; ')
+  });
+}
+if (obligationMisses.length > THRESHOLDS.maxMissingObligation) {
+  findings.push({ id: 'obligation-not-in-packet', detail: obligationMisses.slice(0, 6).join('; ') + (obligationMisses.length > 6 ? `; +${obligationMisses.length - 6} more` : '') });
+}
+if (unfilledObligations.length > 0) {
+  findings.push({ id: 'obligation-not-filled', detail: unfilledObligations.join('; ') });
+}
 if (universal.length > 0) {
   findings.push({
     id: 'non-discriminating',
@@ -178,6 +265,13 @@ const report = {
   declaredAlways: [...declaredAlways],
   unenforced,
   unbound,
+  withoutConsequence,
+  advisory: advisory.map((primitive) => ({ id: primitive.id, reason: primitive.advisory_reason })),
+  unknownGates,
+  thinSkills,
+  obligationChecks,
+  obligationMisses,
+  unfilledObligations,
   missingDefinition,
   genericDefinition,
   selectionCount: Object.fromEntries([...selectionCount.entries()].sort((a, b) => b[1] - a[1])),
@@ -207,7 +301,24 @@ if (JSON_OUT) {
   if (missingDefinition.length > 0) console.log(`  no definition: ${missingDefinition.join(', ')}`);
   if (genericDefinition.length > 0) console.log(`  definition never names the product: ${genericDefinition.join(', ')}`);
   if (unenforced.length > 0) console.log(`  no practice enforces: ${unenforced.join(', ')}`);
-  if (unbound.length > 0) console.log(`  practices that enforce nothing: ${unbound.length} (${unbound.slice(0, 6).join(', ')}${unbound.length > 6 ? ', …' : ''})`);
+  if (unbound.length > 0) {
+    console.log(`  practices with no requirement: ${unbound.length} (${unbound.slice(0, 6).join(', ')}${unbound.length > 6 ? ', …' : ''}), of which ${unbound.length - withoutConsequence.length} are bound to a gate or declared advisory`);
+  }
+  console.log(
+    `consequences      ${primitives.length - withoutConsequence.length}/${primitives.length} practices have one ` +
+      `(${primitives.length - unbound.length} enforce a requirement, ${primitives.filter((p) => (p.gates ?? []).length > 0).length} make a gate real, ${advisory.length} declared advisory)`
+  );
+  if (withoutConsequence.length > 0) console.log(`  no consequence and not advisory: ${withoutConsequence.join(', ')}`);
+  for (const entry of advisory) console.log(`  advisory ${entry.id}: ${entry.advisory_reason}`);
+  if (unknownGates.length > 0) console.log(`  gate ids not in policy: ${unknownGates.join(', ')}`);
+  console.log(
+    `skill depth       ${primitives.length - thinCount}/${primitives.length} have an obligation, ` +
+      `${THRESHOLDS.minRedFlags}+ red flags and ${THRESHOLDS.minExcuses}+ anti-rationalization rows`
+  );
+  if (thinCount > 0) {
+    for (const entry of thinSkills) console.log(`  ✗ ${entry.id}: ${entry.redFlags} red flags, ${entry.excuses} excuses, obligation section ${entry.inProduct ? 'present' : 'missing'}`);
+  }
+  console.log(`obligations       ${obligationChecks - obligationMisses.length}/${obligationChecks} selected practice/state pairs state what they oblige, filled, inside the packet`);
 
   if (findings.length === 0) {
     console.log('\nPASS · no library-level finding');

@@ -15,6 +15,10 @@
       "cost": "low",
       "priority": 1,
       "enforces": [],
+      "gates": [],
+      "advisory": true,
+      "advisory_reason": "The compiler emits the handoff for every packet, and whether an agent follows it is not visible in the repository, so no gate can fail on it.",
+      "obligation": "In {project}, a new session can start on the first {primary} requirement from the repository alone, without the chat that produced it.",
       "artifacts": [
         "07-agent-handoff.md",
         "AGENTS.md"
@@ -47,6 +51,10 @@
       "cost": "low",
       "priority": 4,
       "enforces": [],
+      "gates": [],
+      "advisory": true,
+      "advisory_reason": "An independent review is a session habit; CI sees the diff, not who read it or with what memory.",
+      "obligation": "In {project}, every change to a {primary} rule is reviewed by a session that did not write it, against `spec.json` rather than against the diff.",
       "artifacts": [
         "07-agent-handoff.md"
       ],
@@ -78,6 +86,10 @@
       "enforces": [
         "spec.drift-guard"
       ],
+      "gates": [],
+      "advisory": false,
+      "advisory_reason": "",
+      "obligation": "In {project}, a {primary} requirement that loses its test anchor fails the build instead of quietly becoming documentation.",
       "artifacts": [
         "05-verification.md",
         "spec-check.mjs"
@@ -108,6 +120,12 @@
       "cost": "low",
       "priority": 5,
       "enforces": [],
+      "gates": [
+        "G2-ADR"
+      ],
+      "advisory": false,
+      "advisory_reason": "",
+      "obligation": "In {project}, the decisions that are expensive to reverse — persistence in {db}, the auth model, and every dependency worth a day — carry an ADR with a consequence.",
       "artifacts": [
         "03-architecture.md"
       ],
@@ -139,6 +157,10 @@
         "api.contract",
         "api.error-envelope"
       ],
+      "gates": [],
+      "advisory": false,
+      "advisory_reason": "",
+      "obligation": "In {project}, the shapes that carry {aPrimary} — its identifiers, error envelope and version — are fixed before the first handler is written.",
       "artifacts": [
         "04-contracts.md"
       ],
@@ -171,6 +193,12 @@
       "cost": "low",
       "priority": 5,
       "enforces": [],
+      "gates": [
+        "G2-ADR"
+      ],
+      "advisory": false,
+      "advisory_reason": "",
+      "obligation": "In {project}, everything around {aPrimary} that is commodity — auth, mail, payments, queues — is bought and wrapped in a port, and only the {primary} rules are written by hand.",
       "artifacts": [
         "03-architecture.md"
       ],
@@ -203,6 +231,10 @@
       "enforces": [
         "ui.design-tokens"
       ],
+      "gates": [],
+      "advisory": false,
+      "advisory_reason": "",
+      "obligation": "In {project}, the claim that {primary} rules stay free of {db} and framework code is a check that fails the build, not a sentence in a document.",
       "artifacts": [
         "03-architecture.md",
         "05-verification.md"
@@ -236,6 +268,10 @@
         "library.api-stability",
         "cli.ergonomics"
       ],
+      "gates": [],
+      "advisory": false,
+      "advisory_reason": "",
+      "obligation": "In {project}, {primary} rules run in tests with no {db} and no network, because every external call sits behind a port the use case owns.",
       "artifacts": [
         "03-architecture.md"
       ],
@@ -265,6 +301,12 @@
       "cost": "low",
       "priority": 2,
       "enforces": [],
+      "gates": [
+        "G2-ADR"
+      ],
+      "advisory": false,
+      "advisory_reason": "",
+      "obligation": "In {project}, one deployable holds all {primary} rules until a measured constraint — not a forecast — says otherwise.",
       "artifacts": [
         "03-architecture.md"
       ],
@@ -296,6 +338,10 @@
       "enforces": [
         "data.lifecycle"
       ],
+      "gates": [],
+      "advisory": false,
+      "advisory_reason": "",
+      "obligation": "In {project}, every personal field of {aPrimary} has a stated purpose and retention period, and deleting {aSecondary} removes it from every copy, not just the table.",
       "artifacts": [
         "04-contracts.md",
         "02-domain-model.md"
@@ -330,6 +376,10 @@
       "enforces": [
         "data.persistence"
       ],
+      "gates": [],
+      "advisory": false,
+      "advisory_reason": "",
+      "obligation": "In {project}, any change to how {primary} is stored ships as an immutable migration on {db} with a restore step that has been executed once.",
       "artifacts": [
         "04-contracts.md"
       ],
@@ -361,6 +411,10 @@
       "enforces": [
         "core.runnable"
       ],
+      "gates": [],
+      "advisory": false,
+      "advisory_reason": "",
+      "obligation": "In {project}, the checks that guard {aPrimary} run on every pull request before the first {primary} handler exists, and none of them is optional.",
       "artifacts": [
         "06-delivery-plan.md",
         "05-verification.md"
@@ -391,6 +445,12 @@
       "cost": "medium",
       "priority": 6,
       "enforces": [],
+      "gates": [
+        "G3-ROLLBACK"
+      ],
+      "advisory": false,
+      "advisory_reason": "",
+      "obligation": "In {project}, a change to {aPrimary} ships behind a switch with a rollback that has been executed once, because the {db} migration cannot be undone by redeploying.",
       "artifacts": [
         "06-delivery-plan.md"
       ],
@@ -422,8 +482,13 @@
       "cost": "medium",
       "priority": 2,
       "enforces": [
-        "payments.correctness"
+        "payments.correctness",
+        "core.domain-invariants"
       ],
+      "gates": [],
+      "advisory": false,
+      "advisory_reason": "",
+      "obligation": "In {project}, each rule that makes {aPrimary} valid names its consistency boundary and has one test that fails when the rule is broken.",
       "artifacts": [
         "02-domain-model.md"
       ],
@@ -455,6 +520,10 @@
       "enforces": [
         "auth.tenant-isolation"
       ],
+      "gates": [],
+      "advisory": false,
+      "advisory_reason": "",
+      "obligation": "In {project}, the reading and the writing side of the {primary} model are separate contexts, and no query joins them: the seam is a call or an event.",
       "artifacts": [
         "02-domain-model.md",
         "03-architecture.md"
@@ -485,6 +554,10 @@
       "cost": "low",
       "priority": 1,
       "enforces": [],
+      "gates": [],
+      "advisory": true,
+      "advisory_reason": "A glossary is agreed by readers. The drift guard checks that anchors resolve, not that code and copy use the same word.",
+      "obligation": "In {project}, `{primary}` and `{secondary}` mean one thing each — one name per concept, with no synonym in the code, the tests, the commits or the copy.",
       "artifacts": [
         "02-domain-model.md"
       ],
@@ -518,6 +591,10 @@
       "enforces": [
         "ui.accessibility"
       ],
+      "gates": [],
+      "advisory": false,
+      "advisory_reason": "",
+      "obligation": "In {project}, the main {primary} journey completes with a keyboard and a screen reader, including its error states, before any styling is called finished.",
       "artifacts": [
         "05-verification.md"
       ],
@@ -551,6 +628,10 @@
       "enforces": [
         "ui.design-tokens"
       ],
+      "gates": [],
+      "advisory": false,
+      "advisory_reason": "",
+      "obligation": "In {project}, colour, spacing and type for every {primary} screen come from one token source, so a raw literal is a build failure rather than a preference.",
       "artifacts": [
         "03-architecture.md",
         "05-verification.md"
@@ -586,6 +667,10 @@
         "ui.states",
         "ux.error-taxonomy"
       ],
+      "gates": [],
+      "advisory": false,
+      "advisory_reason": "",
+      "obligation": "In {project}, every {primary} screen has loading, empty, error and success designed before it is built, because the missing three are what make it feel broken.",
       "artifacts": [
         "05-verification.md",
         "01-product-brief.md"
@@ -620,6 +705,10 @@
       "enforces": [
         "core.non-goals"
       ],
+      "gates": [],
+      "advisory": false,
+      "advisory_reason": "",
+      "obligation": "In {project}, the three things this version will not do with {aPrimary} are written down before the first sprint, so scope becomes a review comment instead of a surprise.",
       "artifacts": [
         "01-product-brief.md"
       ],
@@ -648,6 +737,10 @@
       "cost": "low",
       "priority": 1,
       "enforces": [],
+      "gates": [],
+      "advisory": true,
+      "advisory_reason": "A brief is judged by the person who owns the product. The packet can require that it exists; it cannot check that it is right.",
+      "obligation": "In {project}, who needs {aPrimary} and what they do instead today are written down before any of it is designed.",
       "artifacts": [
         "01-product-brief.md"
       ],
@@ -675,7 +768,13 @@
       "tier_min": 0,
       "cost": "low",
       "priority": 3,
-      "enforces": [],
+      "enforces": [
+        "core.primary-journey"
+      ],
+      "gates": [],
+      "advisory": false,
+      "advisory_reason": "",
+      "obligation": "In {project}, the {primary} journey is one path from first step to finished with its failure step written down, and it works end to end before a second journey starts.",
       "artifacts": [
         "01-product-brief.md",
         "06-delivery-plan.md"
@@ -706,8 +805,13 @@
       "priority": 5,
       "enforces": [
         "integration.retries",
-        "pipeline.idempotency"
+        "pipeline.idempotency",
+        "mobile.offline"
       ],
+      "gates": [],
+      "advisory": false,
+      "advisory_reason": "",
+      "obligation": "In {project}, a retried {primary} request produces the same outcome as the first — one record, one effect — because the uniqueness is a {db} constraint, not an application check.",
       "artifacts": [
         "04-contracts.md",
         "02-domain-model.md"
@@ -740,8 +844,13 @@
       "cost": "medium",
       "priority": 6,
       "enforces": [
-        "ops.observability"
+        "ops.observability",
+        "delivery.audit-trail"
       ],
+      "gates": [],
+      "advisory": false,
+      "advisory_reason": "",
+      "obligation": "In {project}, a failed {primary} operation is one structured log line with a correlation id and the record it belonged to, plus an alert someone has received.",
       "artifacts": [
         "03-architecture.md",
         "05-verification.md"
@@ -777,6 +886,10 @@
         "auth.identity",
         "auth.authorization"
       ],
+      "gates": [],
+      "advisory": false,
+      "advisory_reason": "",
+      "obligation": "In {project}, the security of {aPrimary} is a numbered, checkable baseline at a stated level, with each item mapped to code or a test rather than to an opinion.",
       "artifacts": [
         "05-verification.md"
       ],
@@ -809,6 +922,10 @@
         "auth.authorization",
         "auth.tenant-isolation"
       ],
+      "gates": [],
+      "advisory": false,
+      "advisory_reason": "",
+      "obligation": "In {project}, reading or changing another account's {primary} is refused by one server-side policy layer, and the denial path is tested — including across tenants.",
       "artifacts": [
         "02-domain-model.md",
         "04-contracts.md"
@@ -840,6 +957,12 @@
       "cost": "low",
       "priority": 2,
       "enforces": [],
+      "gates": [
+        "G1-SECRETS"
+      ],
+      "advisory": false,
+      "advisory_reason": "",
+      "obligation": "In {project}, no credential is in the repository, and every dependency that reaches {aPrimary} is pinned, installed from a lockfile and audited in CI.",
       "artifacts": [
         "03-architecture.md",
         "05-verification.md"
@@ -873,8 +996,14 @@
       "priority": 5,
       "enforces": [
         "auth.authorization",
-        "ops.rate-limits"
+        "ops.rate-limits",
+        "data.uploads",
+        "ai.guardrails"
       ],
+      "gates": [],
+      "advisory": false,
+      "advisory_reason": "",
+      "obligation": "In {project}, every way into {aPrimary} — its endpoints, uploads, webhooks and admin paths — has a named control, and each accepted risk has an owner.",
       "artifacts": [
         "04-contracts.md",
         "05-verification.md"
@@ -908,6 +1037,10 @@
       "enforces": [
         "spec.drift-guard"
       ],
+      "gates": [],
+      "advisory": false,
+      "advisory_reason": "",
+      "obligation": "In {project}, each acceptance criterion {aPrimary} must satisfy is bound to a named test by an `@req` anchor, so a deleted test fails the build instead of shrinking coverage quietly.",
       "artifacts": [
         "05-verification.md",
         "spec.json"
@@ -941,6 +1074,10 @@
         "api.contract",
         "integration.retries"
       ],
+      "gates": [],
+      "advisory": false,
+      "advisory_reason": "",
+      "obligation": "In {project}, every external service that {aPrimary} depends on is tested against a recorded response — one success, one failure — rather than a mock written from the documentation.",
       "artifacts": [
         "05-verification.md",
         "04-contracts.md"
@@ -971,6 +1108,12 @@
       "cost": "high",
       "priority": 6,
       "enforces": [],
+      "gates": [
+        "G3-MUTATION"
+      ],
+      "advisory": false,
+      "advisory_reason": "",
+      "obligation": "In {project}, assertion strength on the {primary} rules is measured by breaking them on purpose, and the score only moves up.",
       "artifacts": [
         "05-verification.md"
       ],
@@ -1003,6 +1146,10 @@
       "enforces": [
         "payments.correctness"
       ],
+      "gates": [],
+      "advisory": false,
+      "advisory_reason": "",
+      "obligation": "In {project}, the invariants that must hold for every {primary} — not just the examples in the brief — are checked with generated inputs, and a failing seed is replayed in the suite.",
       "artifacts": [
         "05-verification.md"
       ],
@@ -1033,6 +1180,13 @@
       "cost": "low",
       "priority": 1,
       "enforces": [],
+      "gates": [
+        "G1-DOMAIN-TESTS",
+        "G1-AC-TRACE"
+      ],
+      "advisory": false,
+      "advisory_reason": "",
+      "obligation": "In {project}, the first behaviour of every {primary} requirement is a failing test that was watched failing, before the handler that satisfies it exists.",
       "artifacts": [
         "05-verification.md"
       ],
@@ -1060,6 +1214,13 @@
       "cost": "low",
       "priority": 3,
       "enforces": [],
+      "gates": [
+        "G1-CI",
+        "G1-DOMAIN-TESTS"
+      ],
+      "advisory": false,
+      "advisory_reason": "",
+      "obligation": "In {project}, the {primary} rules carry most of the tests and the suite still runs in seconds locally, so the checks are actually run before pushing.",
       "artifacts": [
         "05-verification.md"
       ],

@@ -3,6 +3,7 @@ id: frontend.ui-state-model
 title: UI state model: loading, empty, error, success
 module: frontend
 summary: Define four states per screen before building it; the missing three are what make a product feel broken.
+obligation: "In {project}, every {primary} screen has loading, empty, error and success designed before it is built, because the missing three are what make it feel broken."
 tier_min: 1
 cost: low
 priority: 4
@@ -17,6 +18,14 @@ artifacts: [05-verification.md, 01-product-brief.md]
 Generated screens are built for the success case: data arrives, it renders, it looks finished. Then the list is empty, the request is slow, the server is down, and the screen shows a spinner forever or a blank panel.
 
 Every data-driven screen has four states. A screen with one state is a mockup.
+
+## In this product
+
+Generated per product from the profile — the braces are slots the packet fills:
+
+> In {project}, every {primary} screen has loading, empty, error and success designed before it is built, because the missing three are what make it feel broken.
+
+That sentence is generated from the profile, so it names this product's own nouns. If it would read the same for any product of this kind, the idea behind the profile is too thin to bind the practice — fix the idea, not the sentence.
 
 ## When this applies
 
@@ -42,6 +51,28 @@ Any UI that reads data from outside the component.
 - [ ] State is a discriminated union, not `isLoading` + `hasError` + `data`.
 - [ ] Unexpected errors show a support code, not a stack trace.
 - [ ] Loading does not cause layout shift; skeletons match final layout.
+
+## Red flags
+
+These are the observable signals that the practice is being skipped. Each one is something a reviewer can point at in a diff, rather than a belief about what the author intended.
+
+- `isLoading` and `hasError` both false.
+- An empty state with no call to action.
+- An error state that clears the form.
+- A skeleton whose layout differs from the final one.
+- An unhandled error path that renders nothing.
+
+## Anti-rationalization
+
+The excuse on the left is what a competent person says when they skip this. The middle column is why it does not survive the first real change; the right column is the smallest thing that satisfies the practice anyway.
+
+| Excuse | What is actually true | What to do instead |
+| --- | --- | --- |
+| A spinner covers loading. | Then empty and error are `undefined` at runtime. | Four states per screen, designed. |
+| The empty state is not worth designing. | It is the first screen a new account sees. | One clear next action. |
+| Retry is a refresh button. | It throws away what they typed. | Keep the input and offer retry. |
+| Three booleans are simpler than a union. | They permit four impossible combinations. | A discriminated union. |
+| A stack trace helps support. | It helps attackers. | A support code plus a log reference. |
 
 ## Anti-patterns
 

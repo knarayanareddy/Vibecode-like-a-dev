@@ -3,12 +3,14 @@ id: testing.tdd-loop
 title: Test-driven loop
 module: testing
 summary: Write the failing test first; it is the only instruction an agent cannot reinterpret.
+obligation: "In {project}, the first behaviour of every {primary} requirement is a failing test that was watched failing, before the handler that satisfies it exists."
 tier_min: 0
 cost: low
 priority: 1
 tags: [tdd, tests, red-green-refactor, feedback]
 triggers: [tdd, test first, red green refactor, write tests]
 enforces: []
+gates: [G1-DOMAIN-TESTS, G1-AC-TRACE]
 artifacts: [05-verification.md]
 ---
 
@@ -17,6 +19,14 @@ artifacts: [05-verification.md]
 Ask for a feature and you will get code, a summary, and a test that was written afterwards to match whatever the code does. That test cannot fail, so it verifies nothing. The suite grows, confidence does not.
 
 The loop is old and unfashionable and it survives because it works on the actual difficulty: knowing what "correct" means before you write the code.
+
+## In this product
+
+Generated per product from the profile — the braces are slots the packet fills:
+
+> In {project}, the first behaviour of every {primary} requirement is a failing test that was watched failing, before the handler that satisfies it exists.
+
+That sentence is generated from the profile, so it names this product's own nouns. If it would read the same for any product of this kind, the idea behind the profile is too thin to bind the practice — fix the idea, not the sentence.
 
 ## When this applies
 
@@ -43,6 +53,28 @@ Two habits make the loop survive contact with agents:
 - [ ] One reason to fail per test.
 - [ ] Red step verified by pasted output when a second party wrote the code.
 - [ ] Every automated requirement has an anchor.
+
+## Red flags
+
+These are the observable signals that the practice is being skipped. Each one is something a reviewer can point at in a diff, rather than a belief about what the author intended.
+
+- Test and implementation in one commit with no red evidence.
+- Assertions on call counts or internals.
+- A test asserting that nothing was thrown.
+- Several behaviours in one test.
+- "Tests pass" reported with no output.
+
+## Anti-rationalization
+
+The excuse on the left is what a competent person says when they skip this. The middle column is why it does not survive the first real change; the right column is the smallest thing that satisfies the practice anyway.
+
+| Excuse | What is actually true | What to do instead |
+| --- | --- | --- |
+| I will write the test after; it is the same thing. | It becomes a test of the implementation, not the requirement. | Red first, and observed. |
+| The test failed, that is enough. | It may have failed for the wrong reason. | Read the failure output. |
+| I will generalise now to save time. | It builds cases no test asked for. | The least code that goes green. |
+| All tests pass. | A claim about a command is not a command. | Paste the output. |
+| Refactor and behaviour change together. | Then a failure has two possible causes. | Refactor green, on its own. |
 
 ## Anti-patterns
 

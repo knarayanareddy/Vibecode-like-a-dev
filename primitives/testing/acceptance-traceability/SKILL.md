@@ -3,6 +3,7 @@ id: testing.acceptance-traceability
 title: Acceptance criteria and traceability anchors
 module: testing
 summary: Bind every requirement to a named test with an @req anchor, so the spec cannot drift silently.
+obligation: "In {project}, each acceptance criterion {aPrimary} must satisfy is bound to a named test by an `@req` anchor, so a deleted test fails the build instead of shrinking coverage quietly."
 tier_min: 0
 cost: low
 priority: 1
@@ -17,6 +18,14 @@ artifacts: [05-verification.md, spec.json]
 A specification that nothing checks is a document that becomes wrong on schedule. Everyone who has tried spec-driven development hits this: the spec and the code diverge within weeks, and the spec is worse than nothing because people trust it.
 
 The mechanism that closes the gap is small. Each requirement carries acceptance criteria in Given/When/Then form, and each criterion is proved by a test that names the requirement.
+
+## In this product
+
+Generated per product from the profile — the braces are slots the packet fills:
+
+> In {project}, each acceptance criterion {aPrimary} must satisfy is bound to a named test by an `@req` anchor, so a deleted test fails the build instead of shrinking coverage quietly.
+
+That sentence is generated from the profile, so it names this product's own nouns. If it would read the same for any product of this kind, the idea behind the profile is too thin to bind the practice — fix the idea, not the sentence.
 
 ## When this applies
 
@@ -49,6 +58,28 @@ Ambiguity has nowhere to hide in that sentence.
 - [ ] The spec check runs in CI on every pull request.
 - [ ] Deleted or renamed tests fail the check rather than quietly reducing coverage.
 - [ ] Requirements marked done are genuinely anchored, not annotated.
+
+## Red flags
+
+These are the observable signals that the practice is being skipped. Each one is something a reviewer can point at in a diff, rather than a belief about what the author intended.
+
+- A requirement with only a happy-path criterion.
+- Criteria written in technical vocabulary.
+- An anchor in production code.
+- A done requirement whose anchor file is missing.
+- A passing check that found zero anchors.
+
+## Anti-rationalization
+
+The excuse on the left is what a competent person says when they skip this. The middle column is why it does not survive the first real change; the right column is the smallest thing that satisfies the practice anyway.
+
+| Excuse | What is actually true | What to do instead |
+| --- | --- | --- |
+| The criteria are in the ticket. | The ticket is not in the repository. | Criteria belong in `spec.json`. |
+| We know which test covers it. | Knowing is not checking. | One `@req` anchor per requirement. |
+| The anchor can go in the handler. | Then it proves code exists, not behaviour. | Anchors in test files only. |
+| We will mark it done and add the test later. | Later does not arrive. | Status follows the anchor. |
+| Renaming the test is harmless. | It silently unhooks the requirement. | Let the check fail on rename, by design. |
 
 ## Anti-patterns
 

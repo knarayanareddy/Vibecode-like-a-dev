@@ -3,6 +3,7 @@ id: data.data-lifecycle
 title: Data lifecycle, export and deletion
 module: data
 summary: Decide retention, export and deletion before you store the first personal field; retrofitting them is a project.
+obligation: "In {project}, every personal field of {aPrimary} has a stated purpose and retention period, and deleting {aSecondary} removes it from every copy, not just the table."
 tier_min: 2
 cost: medium
 priority: 5
@@ -17,6 +18,14 @@ artifacts: [04-contracts.md, 02-domain-model.md]
 Personal data arrives as a convenience field and stays as a liability. The deletion path gets built last, if at all, and then it turns out that one table has no owner, one cache is not invalidated, and the analytics export keeps a copy forever.
 
 Deletion is a design constraint, not a feature request. Systems designed with it are cheap to comply with; systems retrofitted with it are a quarter of work.
+
+## In this product
+
+Generated per product from the profile — the braces are slots the packet fills:
+
+> In {project}, every personal field of {aPrimary} has a stated purpose and retention period, and deleting {aSecondary} removes it from every copy, not just the table.
+
+That sentence is generated from the profile, so it names this product's own nouns. If it would read the same for any product of this kind, the idea behind the profile is too thin to bind the practice — fix the idea, not the sentence.
 
 ## When this applies
 
@@ -40,6 +49,28 @@ Any storage of personal data, regulated data, or data a customer would be upset 
 - [ ] A retention job exists and its last run is observable.
 - [ ] Backups have a documented expiry, and the restore process accounts for deleted subjects.
 - [ ] Analytics and log pipelines are in the inventory.
+
+## Red flags
+
+These are the observable signals that the practice is being skipped. Each one is something a reviewer can point at in a diff, rather than a belief about what the author intended.
+
+- A personal field with no stated purpose.
+- Deletion implemented only at the API layer.
+- The retention job has no alert and no last-run time.
+- An analytics pipeline in the diagram but not in the inventory.
+- A deletion test that asserts no error rather than zero rows.
+
+## Anti-rationalization
+
+The excuse on the left is what a competent person says when they skip this. The middle column is why it does not survive the first real change; the right column is the smallest thing that satisfies the practice anyway.
+
+| Excuse | What is actually true | What to do instead |
+| --- | --- | --- |
+| We are not storing personal data. | Email, IP and user agent are personal data. | Inventory the fields and say why each exists. |
+| Deleting removes the row. | Caches, indexes, backups and logs keep the copy. | Follow the data and delete every copy. |
+| The deletion job logs who was deleted. | That log is now the personal data. | Record completion without content. |
+| Retention is a legal question, not code. | The code is what actually deletes. | Encode the period and observe the job. |
+| Backups are out of scope. | A restore reinstates the deleted subject. | Document backup expiry and the restore caveat. |
 
 ## Anti-patterns
 

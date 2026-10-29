@@ -3,12 +3,14 @@ id: delivery.release-and-rollback
 title: Release, feature flags and rollback
 module: delivery
 summary: Ship small, behind a switch, with a rehearsed way back; forecasts are wrong more often than rollbacks are used.
+obligation: "In {project}, a change to {aPrimary} ships behind a switch with a rollback that has been executed once, because the {db} migration cannot be undone by redeploying."
 tier_min: 2
 cost: medium
 priority: 6
 tags: [release, rollback, feature-flags, deployment, canary, runbook]
 triggers: [deploy, release, rollback, feature flag, canary, incident]
 enforces: []
+gates: [G3-ROLLBACK]
 artifacts: [06-delivery-plan.md]
 ---
 
@@ -17,6 +19,14 @@ artifacts: [06-delivery-plan.md]
 A release is not a deploy. A deploy moves code; a release exposes behaviour to users. Conflating them means the only way to stop a bad change is to deploy again, quickly, during an incident, under pressure.
 
 Small releases with a way back are how small products survive their own success.
+
+## In this product
+
+Generated per product from the profile — the braces are slots the packet fills:
+
+> In {project}, a change to {aPrimary} ships behind a switch with a rollback that has been executed once, because the {db} migration cannot be undone by redeploying.
+
+That sentence is generated from the profile, so it names this product's own nouns. If it would read the same for any product of this kind, the idea behind the profile is too thin to bind the practice — fix the idea, not the sentence.
 
 ## When this applies
 
@@ -41,6 +51,28 @@ Tier 2 and above, or any product with real users. Prototypes can deploy straight
 - [ ] Release checklist exists and is followed, not remembered.
 - [ ] Someone is watching a defined window after the release.
 - [ ] A bad release's cause can be identified from logs within minutes.
+
+## Red flags
+
+These are the observable signals that the practice is being skipped. Each one is something a reviewer can point at in a diff, rather than a belief about what the author intended.
+
+- A flag older than the release it guarded.
+- A rollback that has never been executed.
+- A migration that drops a column the previous release still reads.
+- The release checklist lives in someone's memory.
+- Nobody can say what the previous version was.
+
+## Anti-rationalization
+
+The excuse on the left is what a competent person says when they skip this. The middle column is why it does not survive the first real change; the right column is the smallest thing that satisfies the practice anyway.
+
+| Excuse | What is actually true | What to do instead |
+| --- | --- | --- |
+| Deploy is release. | Then every deploy is an incident when the code is wrong. | Separate them behind a flag for risky changes. |
+| The flag is temporary. | Flags without an owner become permanent. | Owner and expiry at creation. |
+| Rollback is redeploying the previous container. | Not after the migration has run. | Expand and contract the schema. |
+| We will write the procedure when we need it. | Under pressure you improvise. | Write it now and execute it once. |
+| Nobody needs to watch the release. | The first hour is where you learn. | Define the window and name the watcher. |
 
 ## Anti-patterns
 

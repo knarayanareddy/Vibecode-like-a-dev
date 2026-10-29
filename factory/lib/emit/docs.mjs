@@ -30,9 +30,17 @@ export function constitution(plan, d) {
   // The packet states the decision (what binds this practice here); the practice's own
   // prose stays in the library, which is where an agent can read it without the packet
   // repeating it in every project.
+  // Middle column is what the practice obliges *here*, filled from this product's
+  // nouns. The library's own sentence is the same for every project; this one is the
+  // reason the practice was selected for this one.
   const practices = plan.primitives.map((primitive) => {
     const card = d.cards.find((entry) => entry.id === primitive.id);
-    return [`\`${primitive.id}\``, card?.bindTo ?? primitive.title, `[SKILL.md](${repoUrl}/${primitive.path})`];
+    return [
+      `\`${primitive.id}\``,
+      card?.obligation || primitive.summary,
+      card?.bindTo ?? primitive.title,
+      `[SKILL.md](${repoUrl}/${primitive.path})`
+    ];
   });
 
   const automatedCount = plan.requirements.filter((requirement) => requirement.verify === 'automated').length;
@@ -143,9 +151,9 @@ export function constitution(plan, d) {
     '',
     h2(conditional.length > 0 ? '5. Selected practices' : '4. Selected practices'),
     '',
-    `${plan.primitives.length} practices for ${d.project}. Each row is bound to the requirement or artefact it serves — the practice's own reasoning lives in the library, linked in the last column, because this packet carries decisions rather than a copy of the book.`,
+    `${plan.primitives.length} practices for ${d.project}. The middle column is what each one obliges in this product, generated from the profile; the column after it is the requirement, gate or document the obligation is checked against. The practice's own reasoning stays in the library, linked last, because this packet carries decisions rather than a copy of the book.`,
     '',
-    table(['Practice', 'Bound to here', 'Read it'], practices),
+    table(['Practice', 'What it obliges here', 'Checked by', 'Read it'], practices),
     '',
     h2(conditional.length > 0 ? '6. Deliberately not doing' : '5. Deliberately not doing'),
     '',
@@ -1092,7 +1100,13 @@ export function singleFileSpec(plan, d) {
       'Run `node specs/spec-check.mjs` before calling anything done.'
     ]),
     '',
-    h2('7. Rules for the agent'),
+    h2('7. Practices, and what they oblige here'),
+    '',
+    'Each line is generated from this product\'s profile, so it names things this product actually has. Apply the practice; its reasoning lives in the library, in the `SKILL.md` filed under the id at the end of the line.',
+    '',
+    bullets(d.cards.map((card) => `${card.obligation || card.title} — \`${card.id}\``)),
+    '',
+    h2('8. Rules for the agent'),
     '',
     ordered(
       d.brief

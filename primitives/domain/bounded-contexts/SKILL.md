@@ -3,6 +3,7 @@ id: domain.bounded-contexts
 title: Bounded contexts and module seams
 module: domain
 summary: Draw boundaries where meaning changes, then make the dependency direction mechanical.
+obligation: "In {project}, the reading and the writing side of the {primary} model are separate contexts, and no query joins them: the seam is a call or an event."
 tier_min: 1
 cost: medium
 priority: 3
@@ -17,6 +18,14 @@ artifacts: [02-domain-model.md, 03-architecture.md]
 The same word means different things in different parts of a system. `Product` in a catalogue has images and copy; `Product` in fulfilment has weight and dimensions. Teams that share one `Product` model end up with 60 nullable columns and a class nobody dares change.
 
 A bounded context is a boundary inside which one model is consistent. Inside it, words have exactly one meaning. Across boundaries, you translate explicitly.
+
+## In this product
+
+Generated per product from the profile — the braces are slots the packet fills:
+
+> In {project}, the reading and the writing side of the {primary} model are separate contexts, and no query joins them: the seam is a call or an event.
+
+That sentence is generated from the profile, so it names this product's own nouns. If it would read the same for any product of this kind, the idea behind the profile is too thin to bind the practice — fix the idea, not the sentence.
 
 ## When this applies
 
@@ -48,6 +57,28 @@ transport → application → domain ← adapters
 - [ ] Every cross-context read is a call or an event, never a joined table.
 - [ ] The allowed import graph is written down and checked by tooling.
 - [ ] Shared kernel is small enough to read in one sitting.
+
+## Red flags
+
+These are the observable signals that the practice is being skipped. Each one is something a reviewer can point at in a diff, rather than a belief about what the author intended.
+
+- A join across two contexts' tables.
+- A context importing another context's domain package.
+- An entity inside the shared kernel.
+- An import rule that does not list a context created after it.
+- Two contexts writing the same table.
+
+## Anti-rationalization
+
+The excuse on the left is what a competent person says when they skip this. The middle column is why it does not survive the first real change; the right column is the smallest thing that satisfies the practice anyway.
+
+| Excuse | What is actually true | What to do instead |
+| --- | --- | --- |
+| One database, one model, it is simpler. | Simpler until two teams mean different things by the same word. | Draw the seams where meaning changes. |
+| Importing the other module's internals is faster. | It is a permanent coupling. | Publish an interface or an event. |
+| A shared table is easier than an API. | Then the schema is the API nobody documented. | Cross-context read through a call or an event. |
+| The shared kernel can hold a few entities. | A shared kernel of entities is a distributed monolith. | Keep primitives and ids in it, nothing else. |
+| We will enforce the boundary when it hurts. | It hurts at the worst possible moment. | Encode the import graph now. |
 
 ## Anti-patterns
 

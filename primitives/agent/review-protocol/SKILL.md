@@ -3,12 +3,15 @@ id: agent.review-protocol
 title: Automated review protocol
 module: agent
 summary: Review against the spec with a reviewer that did not write the code, and refuse the diff that only looks right.
+obligation: "In {project}, every change to a {primary} rule is reviewed by a session that did not write it, against `spec.json` rather than against the diff."
 tier_min: 1
 cost: low
 priority: 4
 tags: [review, code-review, agents, automation, quality]
 triggers: [code review, pull request, review agent, automated review, self-review]
 enforces: []
+advisory_reason: "An independent review is a session habit; CI sees the diff, not who read it or with what memory."
+advisory: true
 artifacts: [07-agent-handoff.md]
 ---
 
@@ -17,6 +20,14 @@ artifacts: [07-agent-handoff.md]
 The agent that wrote the code will approve the code. It shares its own blind spots, has the same misunderstanding of the requirement, and is optimistically biased by having just produced it. "I reviewed my change and it looks correct" is not a review; it is a restatement.
 
 A review needs a reader with a different objective: the spec, not the diff.
+
+## In this product
+
+Generated per product from the profile — the braces are slots the packet fills:
+
+> In {project}, every change to a {primary} rule is reviewed by a session that did not write it, against `spec.json` rather than against the diff.
+
+That sentence is generated from the profile, so it names this product's own nouns. If it would read the same for any product of this kind, the idea behind the profile is too thin to bind the practice — fix the idea, not the sentence.
 
 ## When this applies
 
@@ -45,6 +56,28 @@ Tier 1 and above, and always when a second agent or a human can look. At tier 0,
 - [ ] Test weakening is called out explicitly.
 - [ ] New dependencies and new environment variables appear in the findings list.
 - [ ] The review is committed as a comment or artefact, not in a chat that disappears.
+
+## Red flags
+
+These are the observable signals that the practice is being skipped. Each one is something a reviewer can point at in a diff, rather than a belief about what the author intended.
+
+- The reviewer session saw the implementation discussion.
+- Findings cite style but no requirement or criterion.
+- A category is omitted rather than marked "none".
+- The diff weakens or deletes a test and the review does not say so.
+- The review exists only as chat messages.
+
+## Anti-rationalization
+
+The excuse on the left is what a competent person says when they skip this. The middle column is why it does not survive the first real change; the right column is the smallest thing that satisfies the practice anyway.
+
+| Excuse | What is actually true | What to do instead |
+| --- | --- | --- |
+| I wrote it, so I can review it. | The author shares the blind spot that produced the defect. | Review in a separate session with no memory of writing it. |
+| The tests pass, so the diff is right. | Tests encode what you thought of; review is for what you did not. | Review against the criteria, not the test output. |
+| I only found issues in two categories. | A silent category looks like a clean category. | Write "none" explicitly for every category. |
+| The comments are on the pull request, we will act later. | Chat disappears; a review is an artefact. | Commit the review beside the change. |
+| It is a small change, skip the review. | Twenty lines is exactly where a boundary gets crossed quietly. | Review every change that touches a rule. |
 
 ## Anti-patterns
 

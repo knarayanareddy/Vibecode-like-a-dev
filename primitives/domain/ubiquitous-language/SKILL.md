@@ -3,12 +3,15 @@ id: domain.ubiquitous-language
 title: Ubiquitous language and DDD basics
 module: domain
 summary: One word per concept, in code, tests, UI and commits, so the model cannot quietly fork.
+obligation: "In {project}, `{primary}` and `{secondary}` mean one thing each — one name per concept, with no synonym in the code, the tests, the commits or the copy."
 tier_min: 0
 cost: low
 priority: 1
 tags: [ddd, language, naming, glossary, model]
 triggers: [domain model, glossary, naming, ubiquitous language, ddd, entity, term definition]
 enforces: []
+advisory_reason: "A glossary is agreed by readers. The drift guard checks that anchors resolve, not that code and copy use the same word."
+advisory: true
 artifacts: [02-domain-model.md]
 ---
 
@@ -17,6 +20,14 @@ artifacts: [02-domain-model.md]
 Ask two implementers to build "subscription management" and you will get a `User` with an `isActive` flag, a `Plan` with a `price`, an `Account` with a `planId`, and an unresolved argument about whether a trial is a plan. All of them work. None of them can talk to each other.
 
 The failure is not technical. It is a model that forked because no one wrote the words down. Eric Evans called the fix the ubiquitous language: one vocabulary used everywhere, so a change in understanding is a change you can see.
+
+## In this product
+
+Generated per product from the profile — the braces are slots the packet fills:
+
+> In {project}, `{primary}` and `{secondary}` mean one thing each — one name per concept, with no synonym in the code, the tests, the commits or the copy.
+
+That sentence is generated from the profile, so it names this product's own nouns. If it would read the same for any product of this kind, the idea behind the profile is too thin to bind the practice — fix the idea, not the sentence.
 
 ## When this applies
 
@@ -54,6 +65,28 @@ Then define the model's bones:
 - [ ] Code identifiers match the glossary, including plurals and casing conventions at the boundary.
 - [ ] Ambiguous words (`user`, `item`, `record`, `status`) are replaced or qualified.
 - [ ] Invariants are listed as sentences that a test could make false.
+
+## Red flags
+
+These are the observable signals that the practice is being skipped. Each one is something a reviewer can point at in a diff, rather than a belief about what the author intended.
+
+- A noun in the brief that is absent from the glossary.
+- A definition of the form "a thing that…".
+- Three names for one concept in a single file.
+- Code identifiers that disagree with the glossary.
+- Glossary terms that appear in no test.
+
+## Anti-rationalization
+
+The excuse on the left is what a competent person says when they skip this. The middle column is why it does not survive the first real change; the right column is the smallest thing that satisfies the practice anyway.
+
+| Excuse | What is actually true | What to do instead |
+| --- | --- | --- |
+| The glossary is documentation nobody reads. | The code reads it; that is the point. | Use the term in identifiers, tests and copy. |
+| We mean the same thing by user. | User, account, actor and person are four concepts. | Pick one and qualify the rest. |
+| The term is obvious, it needs no definition. | Then two people will fill it differently. | Define it by what changes and what must hold. |
+| Plurals and casing do not matter. | They are where the boundary leaks. | Fix the convention in the glossary. |
+| The model changed, the glossary can wait. | The glossary is how the change is communicated. | Update it in the same pull request. |
 
 ## Anti-patterns
 

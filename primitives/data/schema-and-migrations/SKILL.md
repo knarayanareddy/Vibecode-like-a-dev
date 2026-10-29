@@ -3,6 +3,7 @@ id: data.schema-and-migrations
 title: Schema and forward-only migrations
 module: data
 summary: Schemas outlive code, so every change ships as a reviewed, replayable migration with a way back.
+obligation: "In {project}, any change to how {primary} is stored ships as an immutable migration on {db} with a restore step that has been executed once."
 tier_min: 1
 cost: medium
 priority: 3
@@ -17,6 +18,14 @@ artifacts: [04-contracts.md]
 Code is deployed and reverted weekly. Data is deployed once and lives for years. The most expensive incidents in small products are not logic bugs; they are a migration that ran halfway on a table nobody had snapshotted.
 
 Generated code tends to produce schema by mutation: whatever the ORM inferred from the model classes this afternoon. The result is a production database nobody can reconstruct from the repository.
+
+## In this product
+
+Generated per product from the profile — the braces are slots the packet fills:
+
+> In {project}, any change to how {primary} is stored ships as an immutable migration on {db} with a restore step that has been executed once.
+
+That sentence is generated from the profile, so it names this product's own nouns. If it would read the same for any product of this kind, the idea behind the profile is too thin to bind the practice — fix the idea, not the sentence.
 
 ## When this applies
 
@@ -44,6 +53,28 @@ The invariant to write down: *running all migrations from empty produces the sam
 - [ ] Destructive changes are two releases apart, not one.
 - [ ] There is a documented restore path and a date on which it was tested.
 - [ ] Referential integrity is enforced by the engine.
+
+## Red flags
+
+These are the observable signals that the practice is being skipped. Each one is something a reviewer can point at in a diff, rather than a belief about what the author intended.
+
+- An already-applied migration file was edited.
+- A destructive change shipped in the same release as its replacement.
+- A backfill running inside a request path.
+- No recorded restore date.
+- Foreign keys declared in the ORM but not in the database.
+
+## Anti-rationalization
+
+The excuse on the left is what a competent person says when they skip this. The middle column is why it does not survive the first real change; the right column is the smallest thing that satisfies the practice anyway.
+
+| Excuse | What is actually true | What to do instead |
+| --- | --- | --- |
+| We will squash the migrations at launch. | Then no environment can be rebuilt to a known point. | Keep them immutable; squash only before the first production run. |
+| The migration only adds a column, it is safe. | Not on a locked table with a million rows. | Two releases for destructive or locking changes. |
+| The framework handles idempotency. | Half of them do not. | Guard it explicitly, or document why not. |
+| Rollback means running the down script. | An untested down script is fiction. | Test a restore and record the date. |
+| Referential integrity can live in the app. | The app has bugs; the engine does not. | Put the constraint in the schema. |
 
 ## Anti-patterns
 

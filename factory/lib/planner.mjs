@@ -151,6 +151,11 @@ export function selectPrimitives(profile, index, routing, rigor) {
       enforces: entry.primitive.enforces ?? [],
       artifacts: entry.primitive.artifacts ?? [],
       gates: entry.primitive.gates ?? [],
+      // Carried into the plan so the packet can say what the practice obliges here,
+      // and so a reviewer can tell an enforced practice from an advisory one.
+      obligation: entry.primitive.obligation ?? '',
+      advisory: entry.primitive.advisory === true,
+      advisoryReason: entry.primitive.advisory_reason ?? '',
       why: entry.why,
       when: entry.when
     })),
@@ -241,11 +246,26 @@ export function collectGates(profile, policy, rigor, primitives) {
     }
   }
 
+  // A practice may name the policy gate it makes real. That is a provenance link, not
+  // a way to smuggle a higher tier's obligations into a lower tier's packet, so a gate
+  // above the project's own tier is ignored here and still binds at that tier.
+  const policyGate = new Map();
+  const gateTier = new Map();
+  for (const [tier, tierGates] of Object.entries(policy.gates)) {
+    for (const gate of tierGates) {
+      policyGate.set(gate.id, gate);
+      gateTier.set(gate.id, Number(tier));
+    }
+  }
+
   for (const primitive of primitives) {
-    for (const gate of primitive.gates ?? []) {
-      if (!gates.has(gate.id)) {
-        gates.set(gate.id, { ...gate, origin: primitive.id });
-      }
+    for (const reference of primitive.gates ?? []) {
+      const id = typeof reference === 'string' ? reference : reference?.id;
+      if (!id || gates.has(id)) continue;
+      const definition = policyGate.get(id);
+      if (!definition) continue;
+      if ((gateTier.get(id) ?? Infinity) > rigor.tier) continue;
+      gates.set(id, { ...definition, origin: primitive.id });
     }
   }
 

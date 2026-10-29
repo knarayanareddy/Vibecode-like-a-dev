@@ -3,12 +3,14 @@ id: testing.test-budget
 title: Test budget and suite shape
 module: testing
 summary: Spend tests where the rules live; keep the suite fast enough that people actually run it.
+obligation: "In {project}, the {primary} rules carry most of the tests and the suite still runs in seconds locally, so the checks are actually run before pushing."
 tier_min: 0
 cost: low
 priority: 3
 tags: [test-strategy, pyramid, coverage, speed]
 triggers: [test suite, coverage, pyramid, slow tests, flaky tests]
 enforces: []
+gates: [G1-CI, G1-DOMAIN-TESTS]
 artifacts: [05-verification.md]
 ---
 
@@ -17,6 +19,14 @@ artifacts: [05-verification.md]
 Test suites fail in two directions. Too small and nothing is checked. Too large and the suite becomes a liability: forty minutes in CI, flaky retries, and tests updated in bulk to match new code without anyone reading them.
 
 A budget makes the trade-off explicit instead of accidental.
+
+## In this product
+
+Generated per product from the profile — the braces are slots the packet fills:
+
+> In {project}, the {primary} rules carry most of the tests and the suite still runs in seconds locally, so the checks are actually run before pushing.
+
+That sentence is generated from the profile, so it names this product's own nouns. If it would read the same for any product of this kind, the idea behind the profile is too thin to bind the practice — fix the idea, not the sentence.
 
 ## When this applies
 
@@ -49,6 +59,28 @@ Rules:
 - [ ] No test depends on execution order or wall-clock time.
 - [ ] Coverage, if measured, is reported and not enforced as a percentage.
 - [ ] A new bug is accompanied by a regression test.
+
+## Red flags
+
+These are the observable signals that the practice is being skipped. Each one is something a reviewer can point at in a diff, rather than a belief about what the author intended.
+
+- The suite takes over a minute locally at tier 1 or 2.
+- Domain tests that need a database.
+- Tests that depend on execution order.
+- A bug fix with no new test.
+- A coverage gate the agent optimises against.
+
+## Anti-rationalization
+
+The excuse on the left is what a competent person says when they skip this. The middle column is why it does not survive the first real change; the right column is the smallest thing that satisfies the practice anyway.
+
+| Excuse | What is actually true | What to do instead |
+| --- | --- | --- |
+| More tests are always better. | Past a point they duplicate and slow feedback. | Most tests at the rule layer. |
+| Every layer needs equal coverage. | The ratio is the budget. | Few tests at the edges. |
+| The slow suite is fine on CI. | It stops being run locally, then gets trusted blindly. | Split it and mark the slow tests. |
+| Coverage percentage is the metric. | It is satisfiable with assertion-free tests. | Report it, do not enforce it. |
+| We will add a regression test with the next feature. | Then the bug returns first. | Add it with the fix. |
 
 ## Anti-patterns
 

@@ -3,6 +3,7 @@ id: security.asvs-baseline
 title: OWASP ASVS baseline
 module: security
 summary: Replace "we did security" with a numbered, checkable baseline that a reviewer can audit.
+obligation: "In {project}, the security of {aPrimary} is a numbered, checkable baseline at a stated level, with each item mapped to code or a test rather than to an opinion."
 tier_min: 1
 cost: low
 priority: 4
@@ -17,6 +18,14 @@ artifacts: [05-verification.md]
 "We follow security best practices" is unfalsifiable. It cannot be reviewed, tested or disagreed with. The OWASP Application Security Verification Standard is numbered, versioned and specific, which makes each claim checkable.
 
 You do not need the full standard. You need the twenty items that apply to a product with a login form and a database, written down with a status.
+
+## In this product
+
+Generated per product from the profile — the braces are slots the packet fills:
+
+> In {project}, the security of {aPrimary} is a numbered, checkable baseline at a stated level, with each item mapped to code or a test rather than to an opinion.
+
+That sentence is generated from the profile, so it names this product's own nouns. If it would read the same for any product of this kind, the idea behind the profile is too thin to bind the practice — fix the idea, not the sentence.
 
 ## When this applies
 
@@ -53,6 +62,28 @@ Then the discipline: **an item is only `met` if a test or a check proves it.** O
 - [ ] `open` items have an owner and a date.
 - [ ] The audit command runs in CI.
 - [ ] The list is reviewed at each release, not once.
+
+## Red flags
+
+These are the observable signals that the practice is being skipped. Each one is something a reviewer can point at in a diff, rather than a belief about what the author intended.
+
+- No baseline level recorded.
+- Items marked done with no code or test reference.
+- `open` items without owners.
+- A one-time spreadsheet audit.
+- A control described as "handled by the framework".
+
+## Anti-rationalization
+
+The excuse on the left is what a competent person says when they skip this. The middle column is why it does not survive the first real change; the right column is the smallest thing that satisfies the practice anyway.
+
+| Excuse | What is actually true | What to do instead |
+| --- | --- | --- |
+| We follow best practice. | Unmeasurable, so unverifiable. | Pick a numbered baseline and record the version. |
+| Our framework handles security. | It handles its part of it. | Map each item to code or a test. |
+| Level 1 is for small projects. | Level 1 is the baseline for every project. | Record the level you are actually meeting. |
+| We will run the audit before launch. | That is when items get marked done without a test. | Run it in CI from now. |
+| Open items can wait. | An open item needs an owner and a date, or it is an accepted risk. | Record both. |
 
 ## Anti-patterns
 

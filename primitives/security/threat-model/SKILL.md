@@ -3,12 +3,13 @@ id: security.threat-model
 title: Lightweight threat model
 module: security
 summary: Draw the trust boundaries once, name the assets, and turn each accepted mitigation into a control or a test.
+obligation: "In {project}, every way into {aPrimary} — its endpoints, uploads, webhooks and admin paths — has a named control, and each accepted risk has an owner."
 tier_min: 2
 cost: medium
 priority: 5
 tags: [security, threat-model, stride, trust-boundary, owasp]
 triggers: [security, threat model, attack, trust boundary, stride, vulnerability]
-enforces: [auth.authorization, ops.rate-limits]
+enforces: [auth.authorization, ops.rate-limits, data.uploads, ai.guardrails]
 artifacts: [04-contracts.md, 05-verification.md]
 ---
 
@@ -17,6 +18,14 @@ artifacts: [04-contracts.md, 05-verification.md]
 Security review arrives late and finds structural problems: an endpoint that trusts a client-supplied tenant id, an upload that serves whatever it is given, a webhook handler that does not verify its signature. Each is cheap to design and expensive to retrofit.
 
 A one-hour threat model finds most of them before the code exists. It does not need a methodology or a meeting; it needs a diagram and four questions.
+
+## In this product
+
+Generated per product from the profile — the braces are slots the packet fills:
+
+> In {project}, every way into {aPrimary} — its endpoints, uploads, webhooks and admin paths — has a named control, and each accepted risk has an owner.
+
+That sentence is generated from the profile, so it names this product's own nouns. If it would read the same for any product of this kind, the idea behind the profile is too thin to bind the practice — fix the idea, not the sentence.
 
 ## When this applies
 
@@ -51,6 +60,30 @@ The four failures that appear in nearly every generated app:
 - [ ] Upload type, size and scanning decisions recorded.
 - [ ] Rate limits on authentication and public writes.
 - [ ] Threats list has an owner and a status; accepted risks are written down.
+- [ ] Uploads are type-sniffed, size-capped, stored outside the executable path, and their filename is never used as a path.
+- [ ] Model output is untrusted input: validated against a schema, never concatenated into a query, a shell command or a template that runs.
+
+## Red flags
+
+These are the observable signals that the practice is being skipped. Each one is something a reviewer can point at in a diff, rather than a belief about what the author intended.
+
+- A trust boundary drawn with no control on it.
+- Public writes with no rate limit.
+- Webhooks processed before the signature is verified.
+- An accepted risk with no owner.
+- A threat list unchanged since its first draft.
+
+## Anti-rationalization
+
+The excuse on the left is what a competent person says when they skip this. The middle column is why it does not survive the first real change; the right column is the smallest thing that satisfies the practice anyway.
+
+| Excuse | What is actually true | What to do instead |
+| --- | --- | --- |
+| We are too small to be a target. | Scanners do not care about size. | Draw the boundaries anyway. |
+| The security review happens at the end. | At the end, changes cost a release. | Model before the first external surface. |
+| Object-level authorization is covered by the role check. | It is a different question. | A denial test per object. |
+| Uploads are just files. | They are the most common way in. | Type, size, containment and a scanning decision. |
+| Accepted risks can stay in our heads. | Then they are rediscovered as bugs. | Write them down with an owner. |
 
 ## Anti-patterns
 
