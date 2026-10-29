@@ -38,10 +38,10 @@ Anchor column: suggested path, followed by `?` until the file exists. Toggle the
 | Req | Criteria | Verified by | Anchor |
 | --- | --- | --- | --- |
 | REQ-001 | A clean clone of Vibecode Like A Dev runs with one documented command, and a missing setting is named rather than guessed. | gate | manual script | ☐ |
-| REQ-002 | One engineering goes from creation to completion end to end, through the documented interface only. | automated | `tests/core/core-primary-journey.test.ts?` | ☐ |
+| REQ-002 | An engineering goes from creation to completion end to end, through the documented interface only. | automated | `tests/core/core-primary-journey.test.ts?` | ☐ |
 | REQ-003 | The three things Vibecode Like A Dev will not do are written down and reviewed before the first sprint. | manual | manual script | ☐ |
-| REQ-004 | Every command that touches a engineering has documented flags, exit codes and a dry run. | automated | `tests/api/cli-ergonomics.test.ts?` | ☐ |
-| REQ-005 | The rules that make a engineering valid are written down, and each one has a test that would fail if it broke. | automated | `tests/core/core-domain-invariants.test.ts?` | ☐ |
+| REQ-004 | Every command that touches an engineering has documented flags, exit codes and a dry run. | automated | `tests/api/cli-ergonomics.test.ts?` | ☐ |
+| REQ-005 | The rules that make an engineering valid are written down, and each one has a test that would fail if it broke. | automated | `tests/core/core-domain-invariants.test.ts?` | ☐ |
 
 ## 4. Gates for tier 1
 

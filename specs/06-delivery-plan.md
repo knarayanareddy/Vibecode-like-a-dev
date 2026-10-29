@@ -29,10 +29,10 @@ _A running, tested, documented empty box. Nothing built on a broken foundation._
 
 _The rules of the product, expressed in code, before any framework is chosen for them._
 
-- [ ] Fill the language table around a engineering: one term, one meaning, no synonyms.
-- [ ] Write failing tests for each rule a engineering must satisfy, including the ones the idea states in its own words.
+- [ ] Fill the language table around an engineering: one term, one meaning, no synonyms.
+- [ ] Write failing tests for each rule an engineering must satisfy, including the ones the idea states in its own words.
 - [ ] Implement the engineering aggregates as pure code with no framework, network or database imports.
-- [ ] Define typed errors for the ways a engineering can be rejected; no exception control flow across module boundaries.
+- [ ] Define typed errors for the ways an engineering can be rejected; no exception control flow across module boundaries.
 - [ ] Review assertion quality by hand: every engineering test must fail if its rule is inverted.
 
 **Exit:** Domain tests pass and the domain layer imports nothing from infrastructure.
@@ -42,7 +42,7 @@ _The rules of the product, expressed in code, before any framework is chosen for
 _Every boundary is fixed while changing it is still free._
 
 - [ ] Fix each shape in the contract inventory: REQ-004.
-- [ ] Write the acceptance tests for a engineering first; they must fail for missing behaviour, not missing setup.
+- [ ] Write the acceptance tests for an engineering first; they must fail for missing behaviour, not missing setup.
 - [ ] Record a real response for every external dependency, or write down the stub and why.
 - [ ] Record an ADR for each library that a reviewer could plausibly want removed.
 
@@ -52,7 +52,7 @@ _Every boundary is fixed while changing it is still free._
 
 _Working engineering behaviour end to end, one requirement at a time._
 
-- [ ] REQ-004 Every command that touches a engineering has documented flags, exit codes and a dry run. Test first, then implement, then trace.
+- [ ] REQ-004 Every command that touches an engineering has documented flags, exit codes and a dry run. Test first, then implement, then trace.
 
 **Exit:** Each requirement is traceable from criterion to test, and its anchor is green in CI.
 

@@ -48,14 +48,14 @@ export function constitution(plan, d) {
   ]);
 
   const { profile } = plan;
-  const db = d.stack.stack.db;
-  const primary = d.nouns.length ? d.nouns.map((entry) => (typeof entry === 'string' ? entry : entry.word))[0] : 'record';
+  const db = d.db;
+  const primary = d.primary;
 
   // Stable law, then the clause that makes it binding *here*. The law survives a
   // change of product; the interpretation is generated from the profile and is
   // the part a reviewer should argue with.
   const laws = [
-    ['The spec is the interface.', `A change to how a ${primary} behaves starts as a change to a requirement or an ADR — never as a code edit the spec is later bent to match.`],
+    ['The spec is the interface.', `A change to how ${d.aPrimary} behaves starts as a change to a requirement or an ADR — never as a code edit the spec is later bent to match.`],
     ['A failing test comes before behaviour.', `${plan.requirements.filter((requirement) => requirement.verify === 'automated').length} of ${plan.requirements.length} requirements are proven by a test carrying \`@req\`; the rest carry a manual script. Untested behaviour is proposed, not done.`],
     ['One term, one meaning.', `The nouns in \`02-domain-model.md\` are the only names for those things — in code, in tests, in commit messages.`],
     ['Boundaries before bodies.', `Interfaces are fixed while changing them is free. Once \`04-contracts.md\` is signed off, a shape change needs its own requirement.`],
@@ -129,7 +129,7 @@ export function constitution(plan, d) {
       : []),
     h2(conditional.length > 0 ? '3. Definition of done' : '2. Definition of done'),
     '',
-    `A ${d.primary} change is done when all of the following are true for ${d.project}. Not "mostly true".`,
+    `${d.aPrimary.charAt(0).toUpperCase()}${d.aPrimary.slice(1)} change is done when all of the following are true for ${d.project}. Not "mostly true".`,
     '',
     checkboxes(dod),
     '',
@@ -203,7 +203,7 @@ export function productBrief(plan, d) {
       ['Question', `Answer for ${d.project}`],
       [
         [`Who handles the ${d.primary} today?`, confirmed],
-        [`What do they do instead — a spreadsheet, a chat thread, a ${d.secondary} in another tool?`, confirmed],
+        [`What do they do instead — a spreadsheet, a chat thread, ${d.aSecondary} in another tool?`, confirmed],
         [`What does ${d.project} remove from that day?`, confirmed],
         [`What makes them abandon it after one use?`, confirmed]
       ]
@@ -366,7 +366,7 @@ export function domainModel(plan, d) {
     plan.requirements.some((requirement) => requirement.key === 'pipeline.idempotency')
       ? ['**StageRun:** `queued → running → committed`, with `failed` retryable. A committed window may not re-enter `running` unless a replay is explicitly requested.', ''].join('\n')
       : '',
-    `Any other state machine around a ${d.primary}: write the states, the legal transitions and the illegal ones as a table before implementing. An illegal transition returns a typed error, never a silent no-op.`,
+    `Any other state machine around ${d.aPrimary}: write the states, the legal transitions and the illegal ones as a table before implementing. An illegal transition returns a typed error, never a silent no-op.`,
     '',
     h2(d.ownRules.length ? '6. Domain events' : '5. Domain events'),
     '',
@@ -380,7 +380,7 @@ export function domainModel(plan, d) {
     '',
     bullets([
       `Nothing under the domain directory imports the web framework, ${d.stack.stack.db === 'none' ? 'a database driver' : d.stack.stack.db}, or a vendor SDK; ${plan.profile.kind === 'library' ? 'the public surface is the only export' : 'the import-boundary rule in `03-architecture.md` checks it'}.`,
-      `Time and randomness are passed in, so a test can pin the moment a ${d.primary} changes state.`,
+      `Time and randomness are passed in, so a test can pin the moment ${d.aPrimary} changes state.`,
       ...(plan.profile.traits.includes('payments') ? ['Money is integer minor units plus a currency code; dates are UTC instants and local time is presentation.'] : ['Dates are UTC instants; local time is presentation and belongs to the transport layer.'])
     ]),
     ''
@@ -443,8 +443,8 @@ export function architecture(plan, d) {
     `**${monolith.name}.** ${monolith.why}`,
     '',
     bullets([
-      `Rejected: microservices — a ${d.primary} write would need a distributed transaction, and there is no team boundary to gain.`,
-      `Rejected: serverless-per-endpoint — the ${d.primary} lifecycle crosses several calls, and cold starts would be paid by ${d.secondary}.`,
+      `Rejected: microservices — ${d.aPrimary} write would need a distributed transaction, and there is no team boundary to gain.`,
+      `Rejected: serverless-per-endpoint — the ${d.primary} lifecycle crosses several calls, and cold starts would be paid by ${d.aSecondary}.`,
       `Rejected: framework-shaped folders — they would put the ${d.primary} rules next to the transport code that is supposed to be the thinnest layer.`
     ]),
     '',
@@ -491,7 +491,7 @@ export function architecture(plan, d) {
         : 'The actor, if any, is resolved and attached to the request context.',
       `The application layer loads the ${d.nouns.length ? d.nouns.map((n) => (typeof n === 'string' ? n : n.word))[0] : 'aggregate'}, checks policy, and calls one domain operation.`,
       'The domain operation enforces the invariants in `02-domain-model.md` and returns a result or a typed error.',
-      `The adapter writes to ${d.stack.stack.db} in one transaction and emits any domain event after commit.`,
+      `The adapter writes to ${d.db} in one transaction and emits any domain event after commit.`,
       'Transport maps the result to the contract shape in `04-contracts.md`, including the correlation id.'
     ]),
     '',
@@ -589,7 +589,7 @@ export function contracts(plan, d) {
   }
 
   const shapes = d.surfaces.slice(0, 4).map(([surface, why]) => {
-    if (/HTTP/.test(surface)) return [`\`POST /v1/${primary}s\``, `creates a ${primary}; returns the created id and its version`, why];
+    if (/HTTP/.test(surface)) return [`\`POST /v1/${primary}s\``, `creates ${d.aPrimary}; returns the created id and its version`, why];
     if (/Session/.test(surface)) return ['`POST /v1/sessions`', `exchanges credentials for a short-lived token tied to a ${nouns[1] ?? 'user'}`, why];
     if (/Upload/.test(surface)) return ['`POST /v1/uploads`', 'returns a content-addressed id the client then attaches', why];
     if (/Payment/.test(surface)) return ['`POST /v1/payment-intents`', 'one intent per attempt, replayable by key', why];
@@ -801,7 +801,7 @@ export function verification(plan, d) {
       `The failure path of the ${d.primary} change exists in code and in a test.`,
       'No test was weakened, skipped or deleted to make CI pass.',
       'The traceability row is updated and its anchor is green.',
-      ...(plan.risks?.pii || plan.profile.risks.pii ? [`No personal field of a ${d.secondary} reaches a log, fixture or error detail.`] : []),
+      ...(plan.risks?.pii || plan.profile.risks.pii ? [`No personal field of ${d.aSecondary} reaches a log, fixture or error detail.`] : []),
       ...(plan.profile.traits.includes('auth') || plan.profile.risks.multiTenant ? [`Every new read of another actor's ${d.primary} is authorized server-side.`] : []),
       ...(plan.primitives.some((primitive) => primitive.id === 'engineering.dependency-policy') ? ['New dependency? ADR present, pinned, removable in a day.'] : [])
     ]),

@@ -24,7 +24,7 @@ Answer from the board side, in the user's words. These four answers are what an 
 **Foundation**
 
 - `REQ-001` A clean clone of Retro Board runs with one documented command, and a missing setting is named rather than guessed. _(runnable from a clean clone)_
-- `REQ-002` One board goes from creation to completion end to end, through the documented interface only. _(the primary journey works end to end)_
+- `REQ-002` A board goes from creation to completion end to end, through the documented interface only. _(the primary journey works end to end)_
 - `REQ-003` The three things Retro Board will not do are written down and reviewed before the first sprint. _(explicit non-goals)_
 - `REQ-014` The rules that make a board valid are written down, and each one has a test that would fail if it broke. _(the product's own rules are named and pinned)_
 

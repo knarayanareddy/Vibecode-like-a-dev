@@ -22,20 +22,20 @@ The left column is law for every project this factory compiles. The right column
 
 | Law | In Vibecode Like A Dev |
 | --- | --- |
-| The spec is the interface. | A change to how a engineering behaves starts as a change to a requirement or an ADR — never as a code edit the spec is later bent to match. |
+| The spec is the interface. | A change to how an engineering behaves starts as a change to a requirement or an ADR — never as a code edit the spec is later bent to match. |
 | A failing test comes before behaviour. | 3 of 5 requirements are proven by a test carrying `@req`; the rest carry a manual script. Untested behaviour is proposed, not done. |
 | One term, one meaning. | The nouns in `02-domain-model.md` are the only names for those things — in code, in tests, in commit messages. |
 | Boundaries before bodies. | Interfaces are fixed while changing them is free. Once `04-contracts.md` is signed off, a shape change needs its own requirement. |
-| The domain stays pure. | Rules import no framework, no PostgreSQL + Drizzle (forward-only SQL migrations), and no vendor SDK. Hexagonal single artifact only holds if this is checked, not intended. |
+| The domain stays pure. | Rules import no framework, no PostgreSQL, and no vendor SDK. Hexagonal single artifact only holds if this is checked, not intended. |
 | Boring technology, justified additions. | Every dependency beyond the declared stack earns an ADR naming what it replaces and what breaks without it. |
 | Fail closed. | Deny by default for authorization; refuse rather than guess; never silently weaken a control to make a test pass. |
 | Make it observable. | Every failure this product can produce is visible in a log with a correlation id, including the ones you think cannot happen. |
-| Reversible beats predictable. | Schema changes go forward only, behind a PostgreSQL + Drizzle (forward-only SQL migrations) migration; 8-week scope means something gets cut, so cut features, not rollback paths. |
+| Reversible beats predictable. | Schema changes go forward only, behind a PostgreSQL migration; 8-week scope means something gets cut, so cut features, not rollback paths. |
 | Stop and ask before guessing. | Three failed attempts at the same failure means the model of the problem is wrong. Escalate with what you tried. |
 
 ## 2. Definition of done
 
-A engineering change is done when all of the following are true for Vibecode Like A Dev. Not "mostly true".
+An engineering change is done when all of the following are true for Vibecode Like A Dev. Not "mostly true".
 
 - [ ] Every acceptance criterion of the requirement maps to a named test, or to a manual script that has been run once — starting with REQ-001.
 - [ ] `node specs/spec-check.mjs` passes and the anchor exists in the file it names.
@@ -72,7 +72,7 @@ A engineering change is done when all of the following are true for Vibecode Lik
 | `domain.bounded-contexts` | `02-domain-model.md` | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/domain/bounded-contexts/SKILL.md) |
 | `testing.test-budget` | `05-verification.md` | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/testing/test-budget/SKILL.md) |
 | `agent.review-protocol` | `07-agent-handoff.md` | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/agent/review-protocol/SKILL.md) |
-| `architecture.ports-and-adapters` | REQ-004 Every command that touches a engineering has documented flags, exit codes and a dry run. | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/architecture/ports-and-adapters/SKILL.md) |
+| `architecture.ports-and-adapters` | REQ-004 Every command that touches an engineering has documented flags, exit codes and a dry run. | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/architecture/ports-and-adapters/SKILL.md) |
 | `architecture.adr-log` | `03-architecture.md` | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/architecture/adr-log/SKILL.md) |
 | `architecture.build-vs-buy` | `03-architecture.md` | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/architecture/build-vs-buy/SKILL.md) |
 

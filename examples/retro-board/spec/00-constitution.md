@@ -27,11 +27,11 @@ The left column is law for every project this factory compiles. The right column
 | A failing test comes before behaviour. | 10 of 14 requirements are proven by a test carrying `@req`; the rest carry a manual script. Untested behaviour is proposed, not done. |
 | One term, one meaning. | The nouns in `02-domain-model.md` are the only names for those things — in code, in tests, in commit messages. |
 | Boundaries before bodies. | Interfaces are fixed while changing them is free. Once `04-contracts.md` is signed off, a shape change needs its own requirement. |
-| The domain stays pure. | Rules import no framework, no PostgreSQL + Drizzle (forward-only SQL migrations), and no vendor SDK. Modular monolith with enforced boundaries only holds if this is checked, not intended. |
+| The domain stays pure. | Rules import no framework, no PostgreSQL, and no vendor SDK. Modular monolith with enforced boundaries only holds if this is checked, not intended. |
 | Boring technology, justified additions. | Every dependency beyond the declared stack earns an ADR naming what it replaces and what breaks without it. |
 | Fail closed. | Deny by default for authorization; refuse rather than guess; never silently weaken a control to make a test pass. |
 | Make it observable. | Every failure this product can produce is visible in a log with a correlation id, including the ones you think cannot happen. |
-| Reversible beats predictable. | Schema changes go forward only, behind a PostgreSQL + Drizzle (forward-only SQL migrations) migration; 4-week scope means something gets cut, so cut features, not rollback paths. |
+| Reversible beats predictable. | Schema changes go forward only, behind a PostgreSQL migration; 4-week scope means something gets cut, so cut features, not rollback paths. |
 | Stop and ask before guessing. | Three failed attempts at the same failure means the model of the problem is wrong. Escalate with what you tried. |
 
 ## 2. Laws this profile adds

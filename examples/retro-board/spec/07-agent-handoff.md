@@ -32,7 +32,7 @@ Start with **REQ-001** — A clean clone of Retro Board runs with one documented
 | Req | What it must do | Proven by | Anchor |
 | --- | --- | --- | --- |
 | REQ-001 | A clean clone of Retro Board runs with one documented command, and a missing setting is named rather than guessed. | gate | manual run |
-| REQ-002 | One board goes from creation to completion end to end, through the documented interface only. | automated | `tests/core/core-primary-journey.test.ts` |
+| REQ-002 | A board goes from creation to completion end to end, through the documented interface only. | automated | `tests/core/core-primary-journey.test.ts` |
 | REQ-003 | The three things Retro Board will not do are written down and reviewed before the first sprint. | manual | manual run |
 | REQ-004 | Board survive a restart in PostgreSQL, and every schema change is a forward-only migration. | automated | `tests/data/data-persistence.test.ts` |
 | REQ-005 | A team signs in and out, and a revoked session stops working server-side. | automated | `tests/security/auth-identity.test.ts` |

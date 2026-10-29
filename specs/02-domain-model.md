@@ -42,7 +42,7 @@ No aggregate hints apply yet. Name the core aggregate and list its invariants as
 
 
 
-Any other state machine around a engineering: write the states, the legal transitions and the illegal ones as a table before implementing. An illegal transition returns a typed error, never a silent no-op.
+Any other state machine around an engineering: write the states, the legal transitions and the illegal ones as a table before implementing. An illegal transition returns a typed error, never a silent no-op.
 
 ## 5. Domain events
 
@@ -53,5 +53,5 @@ Events carry the engineering id and are named in the past tense; a consumer must
 ## 6. Rules for domain code
 
 - Nothing under the domain directory imports the web framework, PostgreSQL + Drizzle (forward-only SQL migrations), or a vendor SDK; the import-boundary rule in `03-architecture.md` checks it.
-- Time and randomness are passed in, so a test can pin the moment a engineering changes state.
+- Time and randomness are passed in, so a test can pin the moment an engineering changes state.
 - Dates are UTC instants; local time is presentation and belongs to the transport layer.

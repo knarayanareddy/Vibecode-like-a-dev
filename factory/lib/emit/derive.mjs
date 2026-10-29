@@ -196,13 +196,14 @@ export function anchorPath(profile, requirement) {
 export function nonGoalsFor(profile, words = []) {
   const primary = words[0] ?? 'the primary object';
   const secondary = words[1] ?? 'the people who use it';
+  const aPrimary = `${articleFor(primary)} ${primary}`;
   const goals = [
     `Any ${primary} capability the idea does not name. When in doubt, it is out of scope and gets its own version.`,
     `Importing ${primary} data from an existing system: v1 starts empty and the first ${secondary} enters it by hand.`
   ];
 
   if (!profile.traits.includes('realtime')) goals.push('Live collaboration on the same ' + primary + ', presence and cursors.');
-  if (!profile.traits.includes('ai')) goals.push(`Any generated or summarised ${primary} content. Every word in v1 is written by a ${secondary.replace(/s$/, '')}.`);
+  if (!profile.traits.includes('ai')) goals.push(`Any generated or summarised ${primary} content. Every word in v1 is written by ${articleFor(secondary.replace(/s$/, ''))} ${secondary.replace(/s$/, '')}.`);
   if (!profile.traits.includes('notifications')) goals.push(`Notifying ${secondary} outside the product: no email, no push, no digest.`);
   if (profile.kind === 'web-app' || profile.kind === 'api') goals.push(`A public ${primary} API for third parties, SDKs and published integrations.`);
   if (profile.kind !== 'mobile') goals.push(`A native client for the ${primary}. If ${secondary} need it offline, that is a v2 decision with its own sync contract.`);
@@ -213,12 +214,13 @@ export function nonGoalsFor(profile, words = []) {
 export function openQuestionsFor(profile, rigor, words = []) {
   const primary = words[0] ?? 'the primary object';
   const secondary = words[1] ?? 'users';
+  const aPrimary = `${articleFor(primary)} ${primary}`;
   const questions = [
     `Who creates the first ${primary}, and what do they use today instead?`,
-    `What must never happen to a ${primary} — and what does it cost when it does?`,
+    `What must never happen to ${aPrimary} — and what does it cost when it does?`,
     `Which part of the ${primary} workflow could be dropped without losing the reason ${secondary} open it?`,
     `How many ${primary} records exist in year one, and how many ${secondary} touch them at once?`,
-    `Who notices first when a ${primary} is wrong, and how do they find out?`
+    `Who notices first when ${aPrimary} is wrong, and how do they find out?`
   ];
 
   if (profile.risks.pii) questions.push('Which fields are personal data, and what is the retention period and lawful basis for each?');
@@ -246,6 +248,7 @@ export function buildPhases(plan, phrases) {
   const reqList = (render) => (groups.find((group) => group.render === render)?.items ?? []);
   const words = ideaNouns(profile).map((entry) => entry.word);
   const primary = words[0] ?? 'record';
+  const aPrimary = `${articleFor(primary)} ${primary}`;
   const secondary = (words[1] ?? 'user').replace(/s$/, '');
   const db = String(stackFor(profile).stack.db).split(/[(+]/)[0].trim();
 
@@ -267,10 +270,10 @@ export function buildPhases(plan, phrases) {
       name: 'Phase 1 — Domain core',
       goal: 'The rules of the product, expressed in code, before any framework is chosen for them.',
       tasks: [
-        `Fill the language table around a ${primary}: one term, one meaning, no synonyms.`,
-        `Write failing tests for each rule a ${primary} must satisfy, including the ones the idea states in its own words.`,
+        `Fill the language table around ${aPrimary}: one term, one meaning, no synonyms.`,
+        `Write failing tests for each rule ${aPrimary} must satisfy, including the ones the idea states in its own words.`,
         `Implement the ${primary} aggregates as pure code with no framework, network or database imports.`,
-        `Define typed errors for the ways a ${primary} can be rejected; no exception control flow across module boundaries.`,
+        `Define typed errors for the ways ${aPrimary} can be rejected; no exception control flow across module boundaries.`,
         hasMutation ? `Run the mutation check on the ${primary} domain and record the baseline score.` : `Review assertion quality by hand: every ${primary} test must fail if its rule is inverted.`
       ],
       exit: 'Domain tests pass and the domain layer imports nothing from infrastructure.'
@@ -280,7 +283,7 @@ export function buildPhases(plan, phrases) {
       goal: 'Every boundary is fixed while changing it is still free.',
       tasks: [
         `Fix each shape in the contract inventory: ${reqList('api').map((r) => r.id).join(', ') || 'internal module interfaces behind the ' + primary + ' use case'}.`,
-        `Write the acceptance tests for a ${primary} first; they must fail for missing behaviour, not missing setup.`,
+        `Write the acceptance tests for ${aPrimary} first; they must fail for missing behaviour, not missing setup.`,
         'Record a real response for every external dependency, or write down the stub and why.',
         `Record an ADR for each library that a reviewer could plausibly want removed.`
       ],
@@ -497,10 +500,11 @@ export function phrasesFor(plan, words) {
   const secondary = words[1] ?? 'users';
   const db = String(stackFor(plan.profile).stack.db).split(/[(+]/)[0].trim();
   const project = titleize(plan.profile.name).replace(/^\d+\s*/, '');
+  const aPrimary = `${articleFor(primary)} ${primary}`;
 
   const templates = {
     'core.runnable': `A clean clone of ${project} runs with one documented command, and a missing setting is named rather than guessed.`,
-    'core.primary-journey': `One ${primary} goes from creation to completion end to end, through the documented interface only.`,
+    'core.primary-journey': `${aPrimary.charAt(0).toUpperCase()}${aPrimary.slice(1)} goes from creation to completion end to end, through the documented interface only.`,
     'core.non-goals': `The three things ${project} will not do are written down and reviewed before the first sprint.`,
     'data.persistence': `${primaryPlural} survive a restart in ${db}, and every schema change is a forward-only migration.`,
     'data.lifecycle': `A ${singular(secondary)}'s ${primary} data has a stated retention period, an export and a deletion path.`,
@@ -514,18 +518,18 @@ export function phrasesFor(plan, words) {
     'api.contract': `The ${primary} interface has a versioned, machine-readable contract that a test enforces.`,
     'api.error-envelope': `Every failure on the ${primary} interface returns the same envelope, and every id in it is opaque.`,
     'integration.retries': `A retried ${primary} request produces the same outcome, not two records.`,
-    'payments.correctness': `Money attached to a ${primary} stays correct under retries and partial failure.`,
+    'payments.correctness': `Money attached to ${aPrimary} stays correct under retries and partial failure.`,
     'ai.guardrails': `Model calls that touch ${primary} content are bounded, observable and evaluated against a fixture.`,
     'ops.observability': `A failed ${primary} operation is visible in a log with a correlation id, without a debugger.`,
     'ops.rate-limits': `Public entry points that create or change ${primaryPlural} are limited per identity and per address.`,
-    'delivery.audit-trail': `Privileged changes to a ${primary} are append-only and attributable to an actor.`,
+    'delivery.audit-trail': `Privileged changes to ${aPrimary} are append-only and attributable to an actor.`,
     'pipeline.idempotency': `Re-running a window of ${primary} data replaces its output instead of duplicating it.`,
     'library.api-stability': `The public surface measured in ${primary} terms is versioned; a breaking change needs a major version.`,
-    'cli.ergonomics': `Every command that touches a ${primary} has documented flags, exit codes and a dry run.`,
+    'cli.ergonomics': `Every command that touches ${aPrimary} has documented flags, exit codes and a dry run.`,
     'spec.drift-guard': `A test that loses its ${primary} requirement anchor fails the build.`,
-    'core.domain-invariants': `The rules that make a ${primary} valid are written down, and each one has a test that would fail if it broke.`,
-    'data.uploads': `A file attached to a ${primary} is type-checked, size-capped and stripped before it is stored.`,
-    'mobile.offline': `A ${primary} change made offline replays exactly once, even after the app is killed.`
+    'core.domain-invariants': `The rules that make ${aPrimary} valid are written down, and each one has a test that would fail if it broke.`,
+    'data.uploads': `A file attached to ${aPrimary} is type-checked, size-capped and stripped before it is stored.`,
+    'mobile.offline': `${aPrimary.charAt(0).toUpperCase()}${aPrimary.slice(1)} change made offline replays exactly once, even after the app is killed.`
   };
 
   const capitalise = (text) => String(text).replace(/^./, (char) => char.toUpperCase());
@@ -715,6 +719,12 @@ export function practiceCards(plan, phrases = new Map()) {
 
 // ---------- whole-packet derivation ----------
 
+const VOWEL = /^[aeiou]/i;
+/** "a" or "an", so a derived noun does not produce "a engineering". */
+export const articleFor = (word) => (VOWEL.test(String(word)) ? 'an' : 'a');
+/** The short label of the database, without the migration tooling in brackets. */
+export const dbLabel = (profile) => String(stackFor(profile).stack.db).split(/[(+]/)[0].trim();
+
 export function derive(plan) {
   const contexts = contextsFor(plan.profile);
   const aggregates = aggregatesFor(plan.requirements);
@@ -733,6 +743,9 @@ export function derive(plan) {
     words,
     primary: words[0] ?? plan.profile.name,
     secondary: words[1] ?? words[0] ?? plan.profile.name,
+    aPrimary: `${articleFor(words[0] ?? plan.profile.name)} ${words[0] ?? plan.profile.name}`,
+    aSecondary: `${articleFor(words[1] ?? words[0] ?? plan.profile.name)} ${words[1] ?? words[0] ?? plan.profile.name}`,
+    db: dbLabel(plan.profile),
     contexts,
     terms: termsFor(plan.requirements),
     aggregates,

@@ -6,8 +6,8 @@
 
 **Hexagonal single artifact.** A CLI is a thin adapter over a pure core. Keeping IO at the edges is what makes the commands testable without spawning processes.
 
-- Rejected: microservices — a engineering write would need a distributed transaction, and there is no team boundary to gain.
-- Rejected: serverless-per-endpoint — the engineering lifecycle crosses several calls, and cold starts would be paid by agent.
+- Rejected: microservices — an engineering write would need a distributed transaction, and there is no team boundary to gain.
+- Rejected: serverless-per-endpoint — the engineering lifecycle crosses several calls, and cold starts would be paid by an agent.
 - Rejected: framework-shaped folders — they would put the engineering rules next to the transport code that is supposed to be the thinnest layer.
 
 ## 2. Shape
@@ -65,7 +65,7 @@ Written for **REQ-001 Runnable from a clean clone** — the first requirement, a
 2. The actor, if any, is resolved and attached to the request context.
 3. The application layer loads the engineering, checks policy, and calls one domain operation.
 4. The domain operation enforces the invariants in `02-domain-model.md` and returns a result or a typed error.
-5. The adapter writes to PostgreSQL + Drizzle (forward-only SQL migrations) in one transaction and emits any domain event after commit.
+5. The adapter writes to PostgreSQL in one transaction and emits any domain event after commit.
 6. Transport maps the result to the contract shape in `04-contracts.md`, including the correlation id.
 
 ## 7. Decision records
