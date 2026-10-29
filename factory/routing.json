@@ -1,0 +1,221 @@
+{
+  "version": 1,
+  "comment": "Each rule states when a practice applies and why. An agent may read this file to justify or challenge a selection. Nothing here is a checklist item by default: if the predicate is false, the practice is skipped on purpose and recorded as such.",
+
+  "rules": [
+    {
+      "primitive": "product.product-brief",
+      "when": { "always": true },
+      "why": "An agent fills every ambiguity silently. A written brief is the cheapest place to remove ambiguity."
+    },
+    {
+      "primitive": "product.non-goals-and-scope",
+      "when": { "always": true },
+      "why": "Scope creep is the default failure mode of generated code; explicit non-goals are the brake."
+    },
+    {
+      "primitive": "product.user-journeys",
+      "when": { "always": true },
+      "why": "Journeys turn a paragraph of intent into testable slices."
+    },
+    {
+      "primitive": "domain.ubiquitous-language",
+      "when": { "always": true },
+      "why": "Shared vocabulary is the highest-leverage defence against plausible-but-wrong generated code."
+    },
+    {
+      "primitive": "domain.bounded-contexts",
+      "when": { "field": "tier", "gte": 1 },
+      "why": "Context boundaries decide module seams before any file is generated."
+    },
+    {
+      "primitive": "domain.aggregates-and-invariants",
+      "when": { "always": true },
+      "why": "Invariants are the properties mutation and property-based tests verify."
+    },
+    {
+      "primitive": "architecture.style-selection",
+      "when": { "always": true },
+      "why": "Default to a modular monolith; distributed complexity must be justified, not inherited."
+    },
+    {
+      "primitive": "architecture.ports-and-adapters",
+      "when": { "always": true },
+      "why": "Keeping the domain free of framework and vendor code is what makes later replacement cheap."
+    },
+    {
+      "primitive": "architecture.api-contract-first",
+      "when": {
+        "any": [
+          { "field": "kind", "in": ["api", "web-app", "mobile"] },
+          { "field": "risks.integrations", "eq": true }
+        ]
+      },
+      "why": "A contract written before implementation is the only interface an agent cannot improvise."
+    },
+    {
+      "primitive": "architecture.adr-log",
+      "when": { "always": true },
+      "why": "Decisions without rationale get re-litigated on every agent session."
+    },
+    {
+      "primitive": "architecture.fitness-functions",
+      "when": { "field": "tier", "gte": 2 },
+      "why": "Architecture that is not executable is decoration. Fitness functions make boundaries fail loudly."
+    },
+    {
+      "primitive": "architecture.build-vs-buy",
+      "when": { "field": "tier", "gte": 1 },
+      "why": "Most generated auth, billing and queues are worse than the boring proven option."
+    },
+    {
+      "primitive": "data.schema-and-migrations",
+      "when": {
+        "any": [
+          { "field": "kind", "in": ["api", "web-app", "data-pipeline", "mobile"] },
+          { "field": "traits", "includes": "persistence" }
+        ]
+      },
+      "why": "Schemas outlive code. Forward-only migrations keep the data recoverable."
+    },
+    {
+      "primitive": "data.data-lifecycle",
+      "when": {
+        "any": [
+          { "field": "risks.pii", "eq": true },
+          { "field": "risks.regulated", "eq": true },
+          { "field": "tier", "gte": 2 }
+        ]
+      },
+      "why": "Retention and deletion are cheap to design and expensive to retrofit."
+    },
+    {
+      "primitive": "testing.tdd-loop",
+      "when": { "always": true },
+      "why": "A failing test is the only instruction an agent cannot misinterpret."
+    },
+    {
+      "primitive": "testing.test-budget",
+      "when": { "always": true },
+      "why": "Test suite shape must match risk: heavy on domain rules, thin on frameworks."
+    },
+    {
+      "primitive": "testing.acceptance-traceability",
+      "when": { "always": true },
+      "why": "Requirement-to-test anchors are the mechanism that closes the enforcement gap."
+    },
+    {
+      "primitive": "testing.contract-tests",
+      "when": {
+        "any": [
+          { "field": "kind", "in": ["api", "web-app", "mobile"] },
+          { "field": "risks.integrations", "eq": true }
+        ]
+      },
+      "why": "Mocks hide integration breakage; contract tests catch it before deploy."
+    },
+    {
+      "primitive": "testing.mutation-testing",
+      "when": { "field": "tier", "gte": 2 },
+      "why": "Coverage measures execution, mutation testing measures assertion strength."
+    },
+    {
+      "primitive": "testing.property-based-testing",
+      "when": {
+        "any": [
+          { "field": "tier", "gte": 3 },
+          { "field": "risks.payments", "eq": true }
+        ]
+      },
+      "why": "Hand-picked examples miss the edge cases that matter most in money and state machines."
+    },
+    {
+      "primitive": "security.threat-model",
+      "when": {
+        "any": [
+          { "field": "tier", "gte": 2 },
+          { "field": "risks.payments", "eq": true },
+          { "field": "risks.regulated", "eq": true }
+        ]
+      },
+      "why": "Trust boundaries define where input validation and authorization must exist."
+    },
+    {
+      "primitive": "security.asvs-baseline",
+      "when": { "field": "tier", "gte": 1 },
+      "why": "OWASP ASVS gives a numbered baseline so 'we did security' becomes checkable."
+    },
+    {
+      "primitive": "security.authz-model",
+      "when": {
+        "any": [
+          { "field": "traits", "includes": "auth" },
+          { "field": "risks.multiTenant", "eq": true },
+          { "field": "traits", "includes": "admin" }
+        ]
+      },
+      "why": "Authorization bugs are invisible in happy-path demos and catastrophic in production."
+    },
+    {
+      "primitive": "security.secrets-and-supply-chain",
+      "when": { "field": "tier", "gte": 1 },
+      "why": "Leaked keys and unpinned dependencies are the two cheapest attacks on a new product."
+    },
+    {
+      "primitive": "reliability.observability-baseline",
+      "when": { "field": "tier", "gte": 2 },
+      "why": "Without correlation IDs and error rates you cannot tell drift from incident."
+    },
+    {
+      "primitive": "reliability.idempotency-and-retries",
+      "when": {
+        "any": [
+          { "field": "tier", "gte": 2 },
+          { "field": "risks.integrations", "eq": true },
+          { "field": "traits", "includes": "webhooks" }
+        ]
+      },
+      "why": "Retries and duplicate events are guaranteed in production; naive handlers double-charge."
+    },
+    {
+      "primitive": "delivery.ci-gates",
+      "when": { "field": "tier", "gte": 1 },
+      "why": "A gate that does not run in CI is a suggestion."
+    },
+    {
+      "primitive": "delivery.release-and-rollback",
+      "when": { "field": "tier", "gte": 2 },
+      "why": "The ability to undo is worth more than the ability to predict."
+    },
+    {
+      "primitive": "frontend.design-system-tokens",
+      "when": { "field": "kind", "in": ["web-app", "mobile"] },
+      "why": "One token source prevents the brownish-green drift typical of generated UIs."
+    },
+    {
+      "primitive": "frontend.accessibility-baseline",
+      "when": { "field": "kind", "in": ["web-app", "mobile"] },
+      "why": "Keyboard and screen-reader support is not retrofittable for free."
+    },
+    {
+      "primitive": "frontend.ui-state-model",
+      "when": { "field": "kind", "in": ["web-app", "mobile"] },
+      "why": "Agents implement the happy path; loading, empty and error states are where products feel broken."
+    },
+    {
+      "primitive": "agent.review-protocol",
+      "when": { "field": "tier", "gte": 1 },
+      "why": "Self-review is theatre when the reviewer shares the author's blind spots."
+    },
+    {
+      "primitive": "agent.handoff-packet",
+      "when": { "always": true },
+      "why": "The spec is useless if the agent that receives it cannot find the entry point."
+    },
+    {
+      "primitive": "agent.spec-drift-guard",
+      "when": { "field": "tier", "gte": 2 },
+      "why": "Specs that nothing checks become confident lies within weeks."
+    }
+  ]
+}

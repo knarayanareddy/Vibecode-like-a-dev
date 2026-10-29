@@ -1,0 +1,38 @@
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # No install step: the CLI and the shipped spec checker have no dependencies.
+      - name: Index is up to date
+        run: node factory/cli.mjs index --check
+
+      - name: Tests
+        run: npm test
+
+      - name: Committed example packet verifies
+        run: node factory/cli.mjs verify examples/retro-board/spec
+
+      - name: Generated packet is in sync with the generator
+        run: |
+          node factory/cli.mjs compile examples/retro-board/profile.json -o /tmp/spec
+          for f in /tmp/spec/*.md /tmp/spec/spec.json /tmp/spec/AGENTS.md /tmp/spec/spec-check.mjs; do
+            name=$(basename "$f")
+            if ! diff -q "$f" "examples/retro-board/spec/$name" > /dev/null; then
+              echo "::error::examples/retro-board/spec/$name is stale. Run: node factory/cli.mjs compile examples/retro-board/profile.json -o examples/retro-board/spec --force"
+              exit 1
+            fi
+          done
+          echo "example packet is in sync"

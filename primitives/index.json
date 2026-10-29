@@ -1,0 +1,1083 @@
+{
+  "meta": {
+    "purpose": "Machine-readable catalog for agent traversal. Read this before opening any SKILL.md.",
+    "generatedFrom": "primitives/**/SKILL.md",
+    "count": 34,
+    "note": "Do not edit by hand. Run `vld index` after changing a primitive."
+  },
+  "primitives": [
+    {
+      "id": "agent.handoff-packet",
+      "module": "agent",
+      "title": "Agent handoff packet",
+      "summary": "A short body of context that makes the spec usable by any agent, without a chat history.",
+      "tier_min": 0,
+      "cost": "low",
+      "priority": 1,
+      "enforces": [],
+      "artifacts": [
+        "07-agent-handoff.md",
+        "AGENTS.md"
+      ],
+      "tags": [
+        "handoff",
+        "agents",
+        "prompt",
+        "brief",
+        "agnostic"
+      ],
+      "triggers": [
+        "handoff",
+        "prompt",
+        "brief",
+        "hand to agent",
+        "lovable",
+        "replit",
+        "claude code"
+      ],
+      "path": "primitives/agent/handoff-packet/SKILL.md",
+      "dir": "agent/handoff-packet"
+    },
+    {
+      "id": "agent.review-protocol",
+      "module": "agent",
+      "title": "Automated review protocol",
+      "summary": "Review against the spec with a reviewer that did not write the code, and refuse the diff that only looks right.",
+      "tier_min": 1,
+      "cost": "low",
+      "priority": 4,
+      "enforces": [],
+      "artifacts": [
+        "07-agent-handoff.md"
+      ],
+      "tags": [
+        "review",
+        "code-review",
+        "agents",
+        "automation",
+        "quality"
+      ],
+      "triggers": [
+        "code review",
+        "pull request",
+        "review agent",
+        "automated review",
+        "self-review"
+      ],
+      "path": "primitives/agent/review-protocol/SKILL.md",
+      "dir": "agent/review-protocol"
+    },
+    {
+      "id": "agent.spec-drift-guard",
+      "module": "agent",
+      "title": "Spec drift guard",
+      "summary": "Make spec-code divergence fail the build, because an unchecked spec becomes a confident lie.",
+      "tier_min": 2,
+      "cost": "low",
+      "priority": 7,
+      "enforces": [
+        "spec.drift-guard"
+      ],
+      "artifacts": [
+        "05-verification.md",
+        "spec-check.mjs"
+      ],
+      "tags": [
+        "spec-drift",
+        "enforcement",
+        "ci",
+        "traceability",
+        "agents"
+      ],
+      "triggers": [
+        "spec drift",
+        "drift detection",
+        "spec check",
+        "keep spec updated",
+        "stale spec"
+      ],
+      "path": "primitives/agent/spec-drift-guard/SKILL.md",
+      "dir": "agent/spec-drift-guard"
+    },
+    {
+      "id": "architecture.adr-log",
+      "module": "architecture",
+      "title": "Architecture decision records",
+      "summary": "Record the why behind every decision that would otherwise be reverse-engineered from code.",
+      "tier_min": 0,
+      "cost": "low",
+      "priority": 5,
+      "enforces": [],
+      "artifacts": [
+        "03-architecture.md"
+      ],
+      "tags": [
+        "adr",
+        "decisions",
+        "documentation",
+        "rationale"
+      ],
+      "triggers": [
+        "adr",
+        "decision record",
+        "why",
+        "rationale",
+        "trade-off"
+      ],
+      "path": "primitives/architecture/adr-log/SKILL.md",
+      "dir": "architecture/adr-log"
+    },
+    {
+      "id": "architecture.api-contract-first",
+      "module": "architecture",
+      "title": "Contract before implementation",
+      "summary": "Fix interfaces, error shapes and status codes while changing them is still free.",
+      "tier_min": 1,
+      "cost": "medium",
+      "priority": 3,
+      "enforces": [
+        "api.contract",
+        "api.error-envelope"
+      ],
+      "artifacts": [
+        "04-contracts.md"
+      ],
+      "tags": [
+        "api",
+        "contract",
+        "openapi",
+        "versioning",
+        "errors",
+        "interfaces"
+      ],
+      "triggers": [
+        "api",
+        "endpoint",
+        "contract",
+        "openapi",
+        "request",
+        "response",
+        "error shape"
+      ],
+      "path": "primitives/architecture/api-contract-first/SKILL.md",
+      "dir": "architecture/api-contract-first"
+    },
+    {
+      "id": "architecture.build-vs-buy",
+      "module": "architecture",
+      "title": "Build versus buy for commodity concerns",
+      "summary": "Never hand-generate auth, payments, email or queues; own the domain, rent the commodity.",
+      "tier_min": 1,
+      "cost": "low",
+      "priority": 5,
+      "enforces": [],
+      "artifacts": [
+        "03-architecture.md"
+      ],
+      "tags": [
+        "build-vs-buy",
+        "auth",
+        "payments",
+        "vendors",
+        "risk"
+      ],
+      "triggers": [
+        "auth",
+        "payment provider",
+        "email",
+        "queue",
+        "build or buy",
+        "vendor"
+      ],
+      "path": "primitives/architecture/build-vs-buy/SKILL.md",
+      "dir": "architecture/build-vs-buy"
+    },
+    {
+      "id": "architecture.fitness-functions",
+      "module": "architecture",
+      "title": "Fitness functions for boundaries",
+      "summary": "Turn architectural claims into checks that fail the build, or accept that they are decoration.",
+      "tier_min": 2,
+      "cost": "medium",
+      "priority": 6,
+      "enforces": [
+        "ui.design-tokens"
+      ],
+      "artifacts": [
+        "03-architecture.md",
+        "05-verification.md"
+      ],
+      "tags": [
+        "fitness-functions",
+        "architecture-testing",
+        "boundaries",
+        "lint",
+        "automation"
+      ],
+      "triggers": [
+        "fitness function",
+        "architecture test",
+        "boundary check",
+        "import rule",
+        "archunit"
+      ],
+      "path": "primitives/architecture/fitness-functions/SKILL.md",
+      "dir": "architecture/fitness-functions"
+    },
+    {
+      "id": "architecture.ports-and-adapters",
+      "module": "architecture",
+      "title": "Ports and adapters (hexagonal)",
+      "summary": "Keep the domain free of frameworks and vendors so the expensive parts stay replaceable.",
+      "tier_min": 0,
+      "cost": "medium",
+      "priority": 5,
+      "enforces": [
+        "library.api-stability",
+        "cli.ergonomics"
+      ],
+      "artifacts": [
+        "03-architecture.md"
+      ],
+      "tags": [
+        "hexagonal",
+        "ports",
+        "adapters",
+        "dependency-inversion",
+        "testability"
+      ],
+      "triggers": [
+        "hexagonal",
+        "ports and adapters",
+        "dependency inversion",
+        "swap database",
+        "vendor lock-in"
+      ],
+      "path": "primitives/architecture/ports-and-adapters/SKILL.md",
+      "dir": "architecture/ports-and-adapters"
+    },
+    {
+      "id": "architecture.style-selection",
+      "module": "architecture",
+      "title": "Architecture style selection",
+      "summary": "Default to a modular monolith, and make distributed complexity justify itself against a measured constraint.",
+      "tier_min": 0,
+      "cost": "low",
+      "priority": 2,
+      "enforces": [],
+      "artifacts": [
+        "03-architecture.md"
+      ],
+      "tags": [
+        "architecture",
+        "monolith",
+        "microservices",
+        "style",
+        "modules"
+      ],
+      "triggers": [
+        "architecture",
+        "monolith",
+        "microservices",
+        "structure",
+        "folder layout"
+      ],
+      "path": "primitives/architecture/style-selection/SKILL.md",
+      "dir": "architecture/style-selection"
+    },
+    {
+      "id": "data.data-lifecycle",
+      "module": "data",
+      "title": "Data lifecycle, export and deletion",
+      "summary": "Decide retention, export and deletion before you store the first personal field; retrofitting them is a project.",
+      "tier_min": 2,
+      "cost": "medium",
+      "priority": 5,
+      "enforces": [
+        "data.lifecycle"
+      ],
+      "artifacts": [
+        "04-contracts.md",
+        "02-domain-model.md"
+      ],
+      "tags": [
+        "privacy",
+        "gdpr",
+        "retention",
+        "deletion",
+        "pii",
+        "compliance"
+      ],
+      "triggers": [
+        "pii",
+        "gdpr",
+        "delete account",
+        "retention",
+        "data export",
+        "privacy"
+      ],
+      "path": "primitives/data/data-lifecycle/SKILL.md",
+      "dir": "data/data-lifecycle"
+    },
+    {
+      "id": "data.schema-and-migrations",
+      "module": "data",
+      "title": "Schema and forward-only migrations",
+      "summary": "Schemas outlive code, so every change ships as a reviewed, replayable migration with a way back.",
+      "tier_min": 1,
+      "cost": "medium",
+      "priority": 3,
+      "enforces": [
+        "data.persistence"
+      ],
+      "artifacts": [
+        "04-contracts.md"
+      ],
+      "tags": [
+        "database",
+        "migrations",
+        "schema",
+        "rollback",
+        "data"
+      ],
+      "triggers": [
+        "schema",
+        "migration",
+        "database change",
+        "alter table",
+        "rollback"
+      ],
+      "path": "primitives/data/schema-and-migrations/SKILL.md",
+      "dir": "data/schema-and-migrations"
+    },
+    {
+      "id": "delivery.ci-gates",
+      "module": "delivery",
+      "title": "CI gates from the first commit",
+      "summary": "Make the definition of done run without a human, on the first day, before there is anything to break.",
+      "tier_min": 1,
+      "cost": "low",
+      "priority": 2,
+      "enforces": [
+        "core.runnable"
+      ],
+      "artifacts": [
+        "06-delivery-plan.md",
+        "05-verification.md"
+      ],
+      "tags": [
+        "ci",
+        "github-actions",
+        "gates",
+        "automation",
+        "pull-requests"
+      ],
+      "triggers": [
+        "ci",
+        "pipeline",
+        "github actions",
+        "gate",
+        "pull request checks"
+      ],
+      "path": "primitives/delivery/ci-gates/SKILL.md",
+      "dir": "delivery/ci-gates"
+    },
+    {
+      "id": "delivery.release-and-rollback",
+      "module": "delivery",
+      "title": "Release, feature flags and rollback",
+      "summary": "Ship small, behind a switch, with a rehearsed way back; forecasts are wrong more often than rollbacks are used.",
+      "tier_min": 2,
+      "cost": "medium",
+      "priority": 6,
+      "enforces": [],
+      "artifacts": [
+        "06-delivery-plan.md"
+      ],
+      "tags": [
+        "release",
+        "rollback",
+        "feature-flags",
+        "deployment",
+        "canary",
+        "runbook"
+      ],
+      "triggers": [
+        "deploy",
+        "release",
+        "rollback",
+        "feature flag",
+        "canary",
+        "incident"
+      ],
+      "path": "primitives/delivery/release-and-rollback/SKILL.md",
+      "dir": "delivery/release-and-rollback"
+    },
+    {
+      "id": "domain.aggregates-and-invariants",
+      "module": "domain",
+      "title": "Aggregates and invariants",
+      "summary": "Name the consistency boundary, list what must always be true, and turn each invariant into a test.",
+      "tier_min": 0,
+      "cost": "medium",
+      "priority": 2,
+      "enforces": [
+        "payments.correctness"
+      ],
+      "artifacts": [
+        "02-domain-model.md"
+      ],
+      "tags": [
+        "ddd",
+        "aggregate",
+        "invariants",
+        "consistency",
+        "transactions"
+      ],
+      "triggers": [
+        "aggregate",
+        "invariant",
+        "transaction boundary",
+        "consistency",
+        "state machine"
+      ],
+      "path": "primitives/domain/aggregates-and-invariants/SKILL.md",
+      "dir": "domain/aggregates-and-invariants"
+    },
+    {
+      "id": "domain.bounded-contexts",
+      "module": "domain",
+      "title": "Bounded contexts and module seams",
+      "summary": "Draw boundaries where meaning changes, then make the dependency direction mechanical.",
+      "tier_min": 1,
+      "cost": "medium",
+      "priority": 3,
+      "enforces": [
+        "auth.tenant-isolation"
+      ],
+      "artifacts": [
+        "02-domain-model.md",
+        "03-architecture.md"
+      ],
+      "tags": [
+        "ddd",
+        "boundaries",
+        "modules",
+        "coupling",
+        "contexts"
+      ],
+      "triggers": [
+        "bounded context",
+        "module",
+        "boundary",
+        "coupling",
+        "separation"
+      ],
+      "path": "primitives/domain/bounded-contexts/SKILL.md",
+      "dir": "domain/bounded-contexts"
+    },
+    {
+      "id": "domain.ubiquitous-language",
+      "module": "domain",
+      "title": "Ubiquitous language and DDD basics",
+      "summary": "One word per concept, in code, tests, UI and commits, so the model cannot quietly fork.",
+      "tier_min": 0,
+      "cost": "low",
+      "priority": 1,
+      "enforces": [],
+      "artifacts": [
+        "02-domain-model.md"
+      ],
+      "tags": [
+        "ddd",
+        "language",
+        "naming",
+        "glossary",
+        "model"
+      ],
+      "triggers": [
+        "domain model",
+        "glossary",
+        "naming",
+        "ubiquitous language",
+        "ddd",
+        "entitiy",
+        "aggregate"
+      ],
+      "path": "primitives/domain/ubiquitous-language/SKILL.md",
+      "dir": "domain/ubiquitous-language"
+    },
+    {
+      "id": "frontend.accessibility-baseline",
+      "module": "frontend",
+      "title": "Accessibility baseline",
+      "summary": "Keyboard, focus, labels and announcements; the four fixes that make a UI usable and are not retrofittable.",
+      "tier_min": 1,
+      "cost": "low",
+      "priority": 4,
+      "enforces": [
+        "ui.accessibility"
+      ],
+      "artifacts": [
+        "05-verification.md"
+      ],
+      "tags": [
+        "accessibility",
+        "a11y",
+        "keyboard",
+        "screen-reader",
+        "wcag",
+        "ux"
+      ],
+      "triggers": [
+        "accessibility",
+        "a11y",
+        "keyboard",
+        "screen reader",
+        "wcag",
+        "focus"
+      ],
+      "path": "primitives/frontend/accessibility-baseline/SKILL.md",
+      "dir": "frontend/accessibility-baseline"
+    },
+    {
+      "id": "frontend.design-system-tokens",
+      "module": "frontend",
+      "title": "Design tokens and UI consistency",
+      "summary": "One token source for colour, space and type, so generated components cannot drift apart.",
+      "tier_min": 1,
+      "cost": "medium",
+      "priority": 4,
+      "enforces": [
+        "ui.design-tokens"
+      ],
+      "artifacts": [
+        "03-architecture.md",
+        "05-verification.md"
+      ],
+      "tags": [
+        "frontend",
+        "design-system",
+        "tokens",
+        "css",
+        "consistency",
+        "ui"
+      ],
+      "triggers": [
+        "design system",
+        "tokens",
+        "styling",
+        "css variables",
+        "consistent ui",
+        "theme"
+      ],
+      "path": "primitives/frontend/design-system-tokens/SKILL.md",
+      "dir": "frontend/design-system-tokens"
+    },
+    {
+      "id": "frontend.ui-state-model",
+      "module": "frontend",
+      "title": "UI state model: loading, empty, error, success",
+      "summary": "Define four states per screen before building it; the missing three are what make a product feel broken.",
+      "tier_min": 1,
+      "cost": "low",
+      "priority": 4,
+      "enforces": [
+        "ui.states",
+        "ux.error-taxonomy"
+      ],
+      "artifacts": [
+        "05-verification.md",
+        "01-product-brief.md"
+      ],
+      "tags": [
+        "ui",
+        "ux",
+        "states",
+        "loading",
+        "empty-state",
+        "error-handling"
+      ],
+      "triggers": [
+        "loading state",
+        "empty state",
+        "error state",
+        "ui states",
+        "spinner",
+        "ux polish"
+      ],
+      "path": "primitives/frontend/ui-state-model/SKILL.md",
+      "dir": "frontend/ui-state-model"
+    },
+    {
+      "id": "product.non-goals-and-scope",
+      "module": "product",
+      "title": "Non-goals and scope discipline",
+      "summary": "Write down what the product will not do, so scope creep becomes a review comment instead of a surprise.",
+      "tier_min": 0,
+      "cost": "low",
+      "priority": 1,
+      "enforces": [
+        "core.non-goals"
+      ],
+      "artifacts": [
+        "01-product-brief.md"
+      ],
+      "tags": [
+        "scope",
+        "non-goals",
+        "yagni",
+        "review"
+      ],
+      "triggers": [
+        "scope",
+        "creep",
+        "out of scope",
+        "feature request",
+        "non-goals"
+      ],
+      "path": "primitives/product/non-goals-and-scope/SKILL.md",
+      "dir": "product/non-goals-and-scope"
+    },
+    {
+      "id": "product.product-brief",
+      "module": "product",
+      "title": "Product brief",
+      "summary": "Force the ambiguity out of a one-line idea before an agent fills it with confident guesses.",
+      "tier_min": 0,
+      "cost": "low",
+      "priority": 1,
+      "enforces": [],
+      "artifacts": [
+        "01-product-brief.md"
+      ],
+      "tags": [
+        "requirements",
+        "ambiguity",
+        "scope",
+        "brief"
+      ],
+      "triggers": [
+        "idea",
+        "brief",
+        "one-liner",
+        "what are we building",
+        "requirements"
+      ],
+      "path": "primitives/product/product-brief/SKILL.md",
+      "dir": "product/product-brief"
+    },
+    {
+      "id": "product.user-journeys",
+      "module": "product",
+      "title": "User journeys as testable slices",
+      "summary": "Turn intent into a small number of end-to-end paths, then build one of them completely before widening.",
+      "tier_min": 0,
+      "cost": "low",
+      "priority": 3,
+      "enforces": [],
+      "artifacts": [
+        "01-product-brief.md",
+        "06-delivery-plan.md"
+      ],
+      "tags": [
+        "journeys",
+        "slices",
+        "vertical-slice",
+        "ux"
+      ],
+      "triggers": [
+        "user journey",
+        "user story",
+        "flow",
+        "slice",
+        "walkthrough"
+      ],
+      "path": "primitives/product/user-journeys/SKILL.md",
+      "dir": "product/user-journeys"
+    },
+    {
+      "id": "reliability.idempotency-and-retries",
+      "module": "reliability",
+      "title": "Idempotency and retry policy",
+      "summary": "Assume every message arrives twice; make replay safe and retry only what can succeed.",
+      "tier_min": 2,
+      "cost": "medium",
+      "priority": 5,
+      "enforces": [
+        "integration.retries",
+        "pipeline.idempotency"
+      ],
+      "artifacts": [
+        "04-contracts.md",
+        "02-domain-model.md"
+      ],
+      "tags": [
+        "idempotency",
+        "retries",
+        "webhooks",
+        "queues",
+        "distributed"
+      ],
+      "triggers": [
+        "webhook",
+        "retry",
+        "duplicate",
+        "idempotency",
+        "queue",
+        "at-least-once",
+        "double charge"
+      ],
+      "path": "primitives/reliability/idempotency-and-retries/SKILL.md",
+      "dir": "reliability/idempotency-and-retries"
+    },
+    {
+      "id": "reliability.observability-baseline",
+      "module": "reliability",
+      "title": "Observability baseline",
+      "summary": "One correlation ID, structured logs, and two numbers you can alert on; nothing more.",
+      "tier_min": 2,
+      "cost": "medium",
+      "priority": 6,
+      "enforces": [
+        "ops.observability"
+      ],
+      "artifacts": [
+        "03-architecture.md",
+        "05-verification.md"
+      ],
+      "tags": [
+        "observability",
+        "logging",
+        "tracing",
+        "correlation-id",
+        "slo",
+        "alerts"
+      ],
+      "triggers": [
+        "observability",
+        "logging",
+        "monitoring",
+        "tracing",
+        "correlation id",
+        "alert"
+      ],
+      "path": "primitives/reliability/observability-baseline/SKILL.md",
+      "dir": "reliability/observability-baseline"
+    },
+    {
+      "id": "security.asvs-baseline",
+      "module": "security",
+      "title": "OWASP ASVS baseline",
+      "summary": "Replace \"we did security\" with a numbered, checkable baseline that a reviewer can audit.",
+      "tier_min": 1,
+      "cost": "low",
+      "priority": 4,
+      "enforces": [
+        "auth.identity",
+        "auth.authorization"
+      ],
+      "artifacts": [
+        "05-verification.md"
+      ],
+      "tags": [
+        "owasp",
+        "asvs",
+        "security",
+        "checklist",
+        "review"
+      ],
+      "triggers": [
+        "owasp",
+        "asvs",
+        "security checklist",
+        "security review",
+        "hardening"
+      ],
+      "path": "primitives/security/asvs-baseline/SKILL.md",
+      "dir": "security/asvs-baseline"
+    },
+    {
+      "id": "security.authz-model",
+      "module": "security",
+      "title": "Authorization model, deny by default",
+      "summary": "Put one policy layer between the request and the data, and test the denial path, not the happy path.",
+      "tier_min": 1,
+      "cost": "medium",
+      "priority": 3,
+      "enforces": [
+        "auth.authorization",
+        "auth.tenant-isolation"
+      ],
+      "artifacts": [
+        "02-domain-model.md",
+        "04-contracts.md"
+      ],
+      "tags": [
+        "authorization",
+        "rbac",
+        "abac",
+        "tenancy",
+        "security"
+      ],
+      "triggers": [
+        "authorization",
+        "permissions",
+        "roles",
+        "rbac",
+        "tenant isolation",
+        "access control"
+      ],
+      "path": "primitives/security/authz-model/SKILL.md",
+      "dir": "security/authz-model"
+    },
+    {
+      "id": "security.secrets-and-supply-chain",
+      "module": "security",
+      "title": "Secrets and supply chain hygiene",
+      "summary": "Keep credentials out of the repository and make the dependency graph small, pinned and auditable.",
+      "tier_min": 1,
+      "cost": "low",
+      "priority": 2,
+      "enforces": [],
+      "artifacts": [
+        "03-architecture.md",
+        "05-verification.md"
+      ],
+      "tags": [
+        "secrets",
+        "dependencies",
+        "supply-chain",
+        "sbom",
+        "pinning"
+      ],
+      "triggers": [
+        "api key",
+        "env file",
+        "secret",
+        "dependency",
+        "lockfile",
+        "supply chain",
+        "audit"
+      ],
+      "path": "primitives/security/secrets-and-supply-chain/SKILL.md",
+      "dir": "security/secrets-and-supply-chain"
+    },
+    {
+      "id": "security.threat-model",
+      "module": "security",
+      "title": "Lightweight threat model",
+      "summary": "Draw the trust boundaries once, name the assets, and turn each accepted mitigation into a control or a test.",
+      "tier_min": 2,
+      "cost": "medium",
+      "priority": 5,
+      "enforces": [
+        "auth.authorization",
+        "ops.rate-limits"
+      ],
+      "artifacts": [
+        "04-contracts.md",
+        "05-verification.md"
+      ],
+      "tags": [
+        "security",
+        "threat-model",
+        "stride",
+        "trust-boundary",
+        "owasp"
+      ],
+      "triggers": [
+        "security",
+        "threat model",
+        "attack",
+        "trust boundary",
+        "owasp",
+        "vulnerability"
+      ],
+      "path": "primitives/security/threat-model/SKILL.md",
+      "dir": "security/threat-model"
+    },
+    {
+      "id": "testing.acceptance-traceability",
+      "module": "testing",
+      "title": "Acceptance criteria and traceability anchors",
+      "summary": "Bind every requirement to a named test with an @req anchor, so the spec cannot drift silently.",
+      "tier_min": 0,
+      "cost": "low",
+      "priority": 1,
+      "enforces": [
+        "spec.drift-guard"
+      ],
+      "artifacts": [
+        "05-verification.md",
+        "spec.json"
+      ],
+      "tags": [
+        "traceability",
+        "acceptance",
+        "anchors",
+        "drift",
+        "verification"
+      ],
+      "triggers": [
+        "acceptance criteria",
+        "traceability",
+        "requirement coverage",
+        "spec drift",
+        "anchor"
+      ],
+      "path": "primitives/testing/acceptance-traceability/SKILL.md",
+      "dir": "testing/acceptance-traceability"
+    },
+    {
+      "id": "testing.contract-tests",
+      "module": "testing",
+      "title": "Contract tests and real fixtures",
+      "summary": "Test adapters against recorded reality, not against a mock you wrote from the docs.",
+      "tier_min": 2,
+      "cost": "medium",
+      "priority": 5,
+      "enforces": [
+        "api.contract",
+        "integration.retries"
+      ],
+      "artifacts": [
+        "05-verification.md",
+        "04-contracts.md"
+      ],
+      "tags": [
+        "contract-testing",
+        "fixtures",
+        "integrations",
+        "mocks",
+        "pacts"
+      ],
+      "triggers": [
+        "contract test",
+        "integration test",
+        "mock",
+        "fixture",
+        "third party api"
+      ],
+      "path": "primitives/testing/contract-tests/SKILL.md",
+      "dir": "testing/contract-tests"
+    },
+    {
+      "id": "testing.mutation-testing",
+      "module": "testing",
+      "title": "Mutation testing",
+      "summary": "Measure assertion strength by breaking the code on purpose; coverage cannot tell you this.",
+      "tier_min": 2,
+      "cost": "high",
+      "priority": 6,
+      "enforces": [],
+      "artifacts": [
+        "05-verification.md"
+      ],
+      "tags": [
+        "mutation-testing",
+        "assertions",
+        "test-quality",
+        "stryker",
+        "mutmut"
+      ],
+      "triggers": [
+        "mutation testing",
+        "coverage",
+        "test quality",
+        "stryker",
+        "mutmut",
+        "surviving mutant"
+      ],
+      "path": "primitives/testing/mutation-testing/SKILL.md",
+      "dir": "testing/mutation-testing"
+    },
+    {
+      "id": "testing.property-based-testing",
+      "module": "testing",
+      "title": "Property-based testing for invariants",
+      "summary": "Generate thousands of inputs to check invariants your example tests only sampled.",
+      "tier_min": 3,
+      "cost": "high",
+      "priority": 7,
+      "enforces": [
+        "payments.correctness"
+      ],
+      "artifacts": [
+        "05-verification.md"
+      ],
+      "tags": [
+        "property-based-testing",
+        "generative",
+        "invariants",
+        "hypothesis",
+        "fast-check"
+      ],
+      "triggers": [
+        "property based",
+        "generative testing",
+        "hypothesis",
+        "fast-check",
+        "invariant",
+        "edge cases"
+      ],
+      "path": "primitives/testing/property-based-testing/SKILL.md",
+      "dir": "testing/property-based-testing"
+    },
+    {
+      "id": "testing.tdd-loop",
+      "module": "testing",
+      "title": "Test-driven loop",
+      "summary": "Write the failing test first; it is the only instruction an agent cannot reinterpret.",
+      "tier_min": 0,
+      "cost": "low",
+      "priority": 1,
+      "enforces": [],
+      "artifacts": [
+        "05-verification.md"
+      ],
+      "tags": [
+        "tdd",
+        "tests",
+        "red-green-refactor",
+        "feedback"
+      ],
+      "triggers": [
+        "tdd",
+        "test first",
+        "red green refactor",
+        "write tests"
+      ],
+      "path": "primitives/testing/tdd-loop/SKILL.md",
+      "dir": "testing/tdd-loop"
+    },
+    {
+      "id": "testing.test-budget",
+      "module": "testing",
+      "title": "Test budget and suite shape",
+      "summary": "Spend tests where the rules live; keep the suite fast enough that people actually run it.",
+      "tier_min": 0,
+      "cost": "low",
+      "priority": 3,
+      "enforces": [],
+      "artifacts": [
+        "05-verification.md"
+      ],
+      "tags": [
+        "test-strategy",
+        "pyramid",
+        "coverage",
+        "speed"
+      ],
+      "triggers": [
+        "test suite",
+        "coverage",
+        "pyramid",
+        "slow tests",
+        "flaky tests"
+      ],
+      "path": "primitives/testing/test-budget/SKILL.md",
+      "dir": "testing/test-budget"
+    }
+  ]
+}

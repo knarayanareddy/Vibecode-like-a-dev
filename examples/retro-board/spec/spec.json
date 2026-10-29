@@ -1,0 +1,676 @@
+{
+  "$schema": "https://raw.githubusercontent.com/knarayanareddy/Vibecode-like-a-dev/main/factory/schema/spec.schema.json",
+  "schemaVersion": 1,
+  "generatedWith": {
+    "tool": "vibecode-like-a-dev",
+    "version": "0.1.0"
+  },
+  "project": {
+    "name": "retro-board",
+    "title": "Retro Board",
+    "kind": "web-app",
+    "stage": "mvp",
+    "idea": "A retrospective board for small engineering teams. A facilitator creates a board per sprint, teammates add anonymous cards into Start / Stop / Continue columns, then everyone votes and the team leaves with three agreed actions. Today teams do this in a shared doc that nobody can vote on and that loses its history.",
+    "users": {
+      "scale": "small"
+    },
+    "traits": [
+      "auth",
+      "persistence",
+      "realtime"
+    ],
+    "risks": {
+      "pii": true,
+      "payments": false,
+      "regulated": false,
+      "multiTenant": false,
+      "destructiveWrites": false,
+      "publicFacing": true,
+      "integrations": false
+    },
+    "constraints": {
+      "team": 2,
+      "weeks": 4,
+      "stack": "typescript",
+      "mustUse": [
+        "postgres"
+      ]
+    }
+  },
+  "rigor": {
+    "tier": 1,
+    "label": "standard",
+    "score": 2,
+    "signals": [
+      {
+        "label": "stores personal data",
+        "weight": 1,
+        "field": "risks.pii"
+      },
+      {
+        "label": "publicly reachable",
+        "weight": 1,
+        "field": "risks.publicFacing"
+      }
+    ],
+    "capped": false,
+    "cappedReason": null,
+    "packet": "full"
+  },
+  "anchorConvention": {
+    "marker": "@req",
+    "syntax": "// @req REQ-001   (or \"# @req REQ-001\" in Python)",
+    "countedIn": [
+      "tests/**"
+    ],
+    "check": "node specs/spec-check.mjs --repo ."
+  },
+  "primitives": [
+    {
+      "id": "product.product-brief",
+      "title": "Product brief",
+      "path": "primitives/product/product-brief/SKILL.md",
+      "why": "An agent fills every ambiguity silently. A written brief is the cheapest place to remove ambiguity.",
+      "when": "always",
+      "enforces": []
+    },
+    {
+      "id": "product.non-goals-and-scope",
+      "title": "Non-goals and scope discipline",
+      "path": "primitives/product/non-goals-and-scope/SKILL.md",
+      "why": "Scope creep is the default failure mode of generated code; explicit non-goals are the brake.",
+      "when": "always",
+      "enforces": [
+        "core.non-goals"
+      ]
+    },
+    {
+      "id": "domain.ubiquitous-language",
+      "title": "Ubiquitous language and DDD basics",
+      "path": "primitives/domain/ubiquitous-language/SKILL.md",
+      "why": "Shared vocabulary is the highest-leverage defence against plausible-but-wrong generated code.",
+      "when": "always",
+      "enforces": []
+    },
+    {
+      "id": "testing.tdd-loop",
+      "title": "Test-driven loop",
+      "path": "primitives/testing/tdd-loop/SKILL.md",
+      "why": "A failing test is the only instruction an agent cannot misinterpret.",
+      "when": "always",
+      "enforces": []
+    },
+    {
+      "id": "testing.acceptance-traceability",
+      "title": "Acceptance criteria and traceability anchors",
+      "path": "primitives/testing/acceptance-traceability/SKILL.md",
+      "why": "Requirement-to-test anchors are the mechanism that closes the enforcement gap.",
+      "when": "always",
+      "enforces": [
+        "spec.drift-guard"
+      ]
+    },
+    {
+      "id": "agent.handoff-packet",
+      "title": "Agent handoff packet",
+      "path": "primitives/agent/handoff-packet/SKILL.md",
+      "why": "The spec is useless if the agent that receives it cannot find the entry point.",
+      "when": "always",
+      "enforces": []
+    },
+    {
+      "id": "domain.aggregates-and-invariants",
+      "title": "Aggregates and invariants",
+      "path": "primitives/domain/aggregates-and-invariants/SKILL.md",
+      "why": "Invariants are the properties mutation and property-based tests verify.",
+      "when": "always",
+      "enforces": [
+        "payments.correctness"
+      ]
+    },
+    {
+      "id": "architecture.style-selection",
+      "title": "Architecture style selection",
+      "path": "primitives/architecture/style-selection/SKILL.md",
+      "why": "Default to a modular monolith; distributed complexity must be justified, not inherited.",
+      "when": "always",
+      "enforces": []
+    },
+    {
+      "id": "security.secrets-and-supply-chain",
+      "title": "Secrets and supply chain hygiene",
+      "path": "primitives/security/secrets-and-supply-chain/SKILL.md",
+      "why": "Leaked keys and unpinned dependencies are the two cheapest attacks on a new product.",
+      "when": "tier gte 1",
+      "enforces": []
+    },
+    {
+      "id": "delivery.ci-gates",
+      "title": "CI gates from the first commit",
+      "path": "primitives/delivery/ci-gates/SKILL.md",
+      "why": "A gate that does not run in CI is a suggestion.",
+      "when": "tier gte 1",
+      "enforces": [
+        "core.runnable"
+      ]
+    },
+    {
+      "id": "product.user-journeys",
+      "title": "User journeys as testable slices",
+      "path": "primitives/product/user-journeys/SKILL.md",
+      "why": "Journeys turn a paragraph of intent into testable slices.",
+      "when": "always",
+      "enforces": []
+    },
+    {
+      "id": "domain.bounded-contexts",
+      "title": "Bounded contexts and module seams",
+      "path": "primitives/domain/bounded-contexts/SKILL.md",
+      "why": "Context boundaries decide module seams before any file is generated.",
+      "when": "tier gte 1",
+      "enforces": [
+        "auth.tenant-isolation"
+      ]
+    },
+    {
+      "id": "architecture.api-contract-first",
+      "title": "Contract before implementation",
+      "path": "primitives/architecture/api-contract-first/SKILL.md",
+      "why": "A contract written before implementation is the only interface an agent cannot improvise.",
+      "when": "(kind in [\"api\",\"web-app\",\"mobile\"] OR risks.integrations eq true)",
+      "enforces": [
+        "api.contract",
+        "api.error-envelope"
+      ]
+    },
+    {
+      "id": "data.schema-and-migrations",
+      "title": "Schema and forward-only migrations",
+      "path": "primitives/data/schema-and-migrations/SKILL.md",
+      "why": "Schemas outlive code. Forward-only migrations keep the data recoverable.",
+      "when": "(kind in [\"api\",\"web-app\",\"data-pipeline\",\"mobile\"] OR traits includes \"persistence\")",
+      "enforces": [
+        "data.persistence"
+      ]
+    },
+    {
+      "id": "testing.test-budget",
+      "title": "Test budget and suite shape",
+      "path": "primitives/testing/test-budget/SKILL.md",
+      "why": "Test suite shape must match risk: heavy on domain rules, thin on frameworks.",
+      "when": "always",
+      "enforces": []
+    },
+    {
+      "id": "security.authz-model",
+      "title": "Authorization model, deny by default",
+      "path": "primitives/security/authz-model/SKILL.md",
+      "why": "Authorization bugs are invisible in happy-path demos and catastrophic in production.",
+      "when": "(traits includes \"auth\" OR risks.multiTenant eq true OR traits includes \"admin\")",
+      "enforces": [
+        "auth.authorization",
+        "auth.tenant-isolation"
+      ]
+    },
+    {
+      "id": "security.asvs-baseline",
+      "title": "OWASP ASVS baseline",
+      "path": "primitives/security/asvs-baseline/SKILL.md",
+      "why": "OWASP ASVS gives a numbered baseline so 'we did security' becomes checkable.",
+      "when": "tier gte 1",
+      "enforces": [
+        "auth.identity",
+        "auth.authorization"
+      ]
+    },
+    {
+      "id": "frontend.design-system-tokens",
+      "title": "Design tokens and UI consistency",
+      "path": "primitives/frontend/design-system-tokens/SKILL.md",
+      "why": "One token source prevents the brownish-green drift typical of generated UIs.",
+      "when": "kind in [\"web-app\",\"mobile\"]",
+      "enforces": [
+        "ui.design-tokens"
+      ]
+    },
+    {
+      "id": "frontend.accessibility-baseline",
+      "title": "Accessibility baseline",
+      "path": "primitives/frontend/accessibility-baseline/SKILL.md",
+      "why": "Keyboard and screen-reader support is not retrofittable for free.",
+      "when": "kind in [\"web-app\",\"mobile\"]",
+      "enforces": [
+        "ui.accessibility"
+      ]
+    },
+    {
+      "id": "frontend.ui-state-model",
+      "title": "UI state model: loading, empty, error, success",
+      "path": "primitives/frontend/ui-state-model/SKILL.md",
+      "why": "Agents implement the happy path; loading, empty and error states are where products feel broken.",
+      "when": "kind in [\"web-app\",\"mobile\"]",
+      "enforces": [
+        "ui.states",
+        "ux.error-taxonomy"
+      ]
+    },
+    {
+      "id": "agent.review-protocol",
+      "title": "Automated review protocol",
+      "path": "primitives/agent/review-protocol/SKILL.md",
+      "why": "Self-review is theatre when the reviewer shares the author's blind spots.",
+      "when": "tier gte 1",
+      "enforces": []
+    },
+    {
+      "id": "architecture.ports-and-adapters",
+      "title": "Ports and adapters (hexagonal)",
+      "path": "primitives/architecture/ports-and-adapters/SKILL.md",
+      "why": "Keeping the domain free of framework and vendor code is what makes later replacement cheap.",
+      "when": "always",
+      "enforces": [
+        "library.api-stability",
+        "cli.ergonomics"
+      ]
+    }
+  ],
+  "deferred": [
+    {
+      "id": "architecture.adr-log",
+      "title": "Architecture decision records",
+      "reason": "budget",
+      "detail": "fits at tier 1 only above 22 primitives; deferred, not deleted"
+    },
+    {
+      "id": "architecture.build-vs-buy",
+      "title": "Build versus buy for commodity concerns",
+      "reason": "budget",
+      "detail": "fits at tier 1 only above 22 primitives; deferred, not deleted"
+    }
+  ],
+  "skipped": [
+    {
+      "id": "architecture.fitness-functions",
+      "title": "Fitness functions for boundaries",
+      "reason": "tier",
+      "detail": "requires tier 2, project is tier 1"
+    },
+    {
+      "id": "data.data-lifecycle",
+      "title": "Data lifecycle, export and deletion",
+      "reason": "tier",
+      "detail": "requires tier 2, project is tier 1"
+    },
+    {
+      "id": "testing.contract-tests",
+      "title": "Contract tests and real fixtures",
+      "reason": "tier",
+      "detail": "requires tier 2, project is tier 1"
+    },
+    {
+      "id": "testing.mutation-testing",
+      "title": "Mutation testing",
+      "reason": "tier",
+      "detail": "requires tier 2, project is tier 1"
+    },
+    {
+      "id": "testing.property-based-testing",
+      "title": "Property-based testing for invariants",
+      "reason": "tier",
+      "detail": "requires tier 3, project is tier 1"
+    },
+    {
+      "id": "security.threat-model",
+      "title": "Lightweight threat model",
+      "reason": "tier",
+      "detail": "requires tier 2, project is tier 1"
+    },
+    {
+      "id": "reliability.observability-baseline",
+      "title": "Observability baseline",
+      "reason": "tier",
+      "detail": "requires tier 2, project is tier 1"
+    },
+    {
+      "id": "reliability.idempotency-and-retries",
+      "title": "Idempotency and retry policy",
+      "reason": "tier",
+      "detail": "requires tier 2, project is tier 1"
+    },
+    {
+      "id": "delivery.release-and-rollback",
+      "title": "Release, feature flags and rollback",
+      "reason": "tier",
+      "detail": "requires tier 2, project is tier 1"
+    },
+    {
+      "id": "agent.spec-drift-guard",
+      "title": "Spec drift guard",
+      "reason": "tier",
+      "detail": "requires tier 2, project is tier 1"
+    }
+  ],
+  "requirements": [
+    {
+      "id": "REQ-001",
+      "key": "core.runnable",
+      "area": "core",
+      "title": "Runnable from a clean clone",
+      "statement": "A new contributor can install dependencies, start the project and run its tests from a clean clone using only the documented commands, with no manual database seeding, no hidden local state and no undocumented environment variables.",
+      "failurePath": "A missing environment variable produces a single actionable error naming the variable, not a stack trace deep in a startup path.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given a fresh clone and an empty environment file, when the documented setup command runs, then it either succeeds or lists every missing required variable by name."
+        }
+      ],
+      "verify": "gate",
+      "anchor": null,
+      "status": "todo"
+    },
+    {
+      "id": "REQ-002",
+      "key": "core.primary-journey",
+      "area": "core",
+      "title": "The primary journey works end to end",
+      "statement": "The single journey described in the product brief works from first step to last, through the real interface, persisting whatever it must persist, and produces the outcome the brief promises. It is exercised by one end-to-end test, not by unit tests of its parts.",
+      "failurePath": "If any step of the journey fails, the user is left in a state they can retry from, with no partially written data and an explanation that names what failed.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given a new user and empty storage, when they complete the primary journey using only the documented interface, then the outcome named in the brief exists and is readable on a second visit."
+        },
+        {
+          "id": "AC-02",
+          "text": "Given the same journey, when a dependency it relies on is unavailable, then the user sees an actionable message and no partial record is created."
+        }
+      ],
+      "verify": "automated",
+      "anchor": "tests/core/core-primary-journey.test.ts",
+      "status": "todo"
+    },
+    {
+      "id": "REQ-003",
+      "key": "core.non-goals",
+      "area": "core",
+      "title": "Explicit non-goals",
+      "statement": "The product brief lists at least three things this version deliberately does not do, and the codebase contains no partially built version of them.",
+      "failurePath": "Out-of-scope work arrives as a failing review comment referencing a non-goal, rather than as silent extra code.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given the brief, when a reviewer reads the change, then every capability in the diff maps to an in-scope requirement or is rejected."
+        }
+      ],
+      "verify": "manual",
+      "anchor": null,
+      "status": "todo"
+    },
+    {
+      "id": "REQ-004",
+      "key": "data.persistence",
+      "area": "data",
+      "title": "Durable state with forward-only migrations",
+      "statement": "Persistent state is defined by a schema kept in version control. Every schema change ships as a forward-only migration that can run on a non-empty database without data loss.",
+      "failurePath": "A migration that fails halfway leaves the database in a known state, and the documented restore step returns it to the pre-migration snapshot.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given a database at the previous schema version with representative rows, when the migration runs, then all rows remain readable and no column required by the new code is null."
+        },
+        {
+          "id": "AC-02",
+          "text": "Given the same database, when the migration is re-run, then it is a no-op rather than an error."
+        }
+      ],
+      "verify": "automated",
+      "anchor": "tests/data/data-persistence.test.ts",
+      "status": "todo"
+    },
+    {
+      "id": "REQ-005",
+      "key": "auth.identity",
+      "area": "security",
+      "title": "Authentication with explicit session lifecycle",
+      "statement": "Users authenticate through a named mechanism. Sessions expire, can be revoked, and never rely on client-held claims that the server cannot verify.",
+      "failurePath": "An expired or revoked session receives an unauthenticated response and performs no state change.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given valid credentials, when the user signs in, then a session is issued and the identifier is not placed in a URL."
+        },
+        {
+          "id": "AC-02",
+          "text": "Given a revoked session, when any protected endpoint is called, then the response is 401 and no data is written."
+        },
+        {
+          "id": "AC-03",
+          "text": "Given a sign-out-everywhere request, when any previously issued session is used, then all are rejected except the current one."
+        }
+      ],
+      "verify": "automated",
+      "anchor": "tests/security/auth-identity.test.ts",
+      "status": "todo"
+    },
+    {
+      "id": "REQ-006",
+      "key": "auth.authorization",
+      "area": "security",
+      "title": "Server-side authorization with deny-by-default",
+      "statement": "Every state-changing operation and every read of another subject's data checks permission on the server, keyed to a named role or policy, with deny as the default.",
+      "failurePath": "A forbidden request returns 403 or 404 as documented, writes nothing, and emits an authorization-denied log line without leaking the resource's contents.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given a user without the required role, when the operation is attempted directly against the API, then it is refused even if the UI hides the control."
+        },
+        {
+          "id": "AC-02",
+          "text": "Given a resource owned by another subject, when it is requested by identifier, then the response does not reveal existence."
+        }
+      ],
+      "verify": "automated",
+      "anchor": "tests/security/auth-authorization.test.ts",
+      "status": "todo"
+    },
+    {
+      "id": "REQ-007",
+      "key": "ui.accessibility",
+      "area": "frontend",
+      "title": "Accessible primary journey",
+      "statement": "The primary journey is completable with a keyboard only and with a screen reader, with visible focus, labelled controls and no colour-only status encoding.",
+      "failurePath": "Validation errors are announced and focus moves to the first invalid field, rather than the form silently failing.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given the primary journey, when it is driven by keyboard only, then every control is reachable and the outcome is completed."
+        },
+        {
+          "id": "AC-02",
+          "text": "Given a form submission with an invalid field, when it fails, then an error message is programmatically associated with that field and announced."
+        }
+      ],
+      "verify": "manual",
+      "anchor": null,
+      "status": "todo"
+    },
+    {
+      "id": "REQ-008",
+      "key": "ui.states",
+      "area": "frontend",
+      "title": "Every screen has loading, empty, error and success states",
+      "statement": "Each data-driven screen defines four states before it is considered done, and the empty state tells the user the next action.",
+      "failurePath": "A failed request shows a retry affordance and preserves the user's input rather than discarding the form.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given a slow response, when the screen loads, then a loading state appears within 200ms and does not shift layout."
+        },
+        {
+          "id": "AC-02",
+          "text": "Given zero records, when the screen loads, then an empty state with a single next action is shown."
+        },
+        {
+          "id": "AC-03",
+          "text": "Given a server error, when the request fails, then an error state with a working retry is shown."
+        }
+      ],
+      "verify": "manual",
+      "anchor": null,
+      "status": "todo"
+    },
+    {
+      "id": "REQ-009",
+      "key": "ui.design-tokens",
+      "area": "frontend",
+      "title": "One design token source",
+      "statement": "Colour, spacing, typography and radius come from a single token source. No component hard-codes a hex colour, pixel spacing value or font family.",
+      "failurePath": "A component using a raw value fails the design-token fitness check in CI.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given the component directory, when the token check runs, then no raw colour or spacing literal is reported."
+        }
+      ],
+      "verify": "automated",
+      "anchor": "tests/frontend/ui-design-tokens.test.ts",
+      "status": "todo"
+    },
+    {
+      "id": "REQ-010",
+      "key": "ux.error-taxonomy",
+      "area": "frontend",
+      "title": "Errors are classified before they are rendered",
+      "statement": "Errors are classified as user-correctable, retryable or unexpected, and each class has one documented presentation and logging rule.",
+      "failurePath": "Unexpected errors never render internal messages, stack traces or identifiers to the user, and are logged with a correlation ID that is shown as a short support code.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given a forced internal failure, when it is displayed, then the user sees a generic message plus a support code and the server log contains the matching correlation ID."
+        }
+      ],
+      "verify": "automated",
+      "anchor": "tests/frontend/ux-error-taxonomy.test.ts",
+      "status": "todo"
+    },
+    {
+      "id": "REQ-011",
+      "key": "api.contract",
+      "area": "api",
+      "title": "Versioned machine-readable interface contract",
+      "statement": "Every exposed or consumed interface is described in a machine-readable contract kept in the repository, and breaking changes are detected before merge.",
+      "failurePath": "An incompatible change fails the contract check and names the field and the consumer affected.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given the contract and the implementation, when the contract check runs, then they agree on paths, methods, status codes and error shape."
+        },
+        {
+          "id": "AC-02",
+          "text": "Given a removed response field, when the check runs, then it fails as a breaking change."
+        }
+      ],
+      "verify": "automated",
+      "anchor": "tests/api/api-contract.test.ts",
+      "status": "todo"
+    },
+    {
+      "id": "REQ-012",
+      "key": "api.error-envelope",
+      "area": "api",
+      "title": "One error envelope and one identifier scheme",
+      "statement": "All errors share one envelope containing a stable machine code, a human message, a correlation ID and optional field details. Identifiers are opaque and are never sequential integers in public interfaces.",
+      "failurePath": "An unknown route and a failed validation return the same envelope shape with distinguishable machine codes.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given an invalid payload, when the response is inspected, then its shape matches the documented envelope and the machine code is stable across releases."
+        }
+      ],
+      "verify": "automated",
+      "anchor": "tests/api/api-error-envelope.test.ts",
+      "status": "todo"
+    },
+    {
+      "id": "REQ-013",
+      "key": "ops.rate-limits",
+      "area": "security",
+      "title": "Abuse limits on public entry points",
+      "statement": "Public write and authentication endpoints are rate limited per identity and per IP, with a documented response that includes a retry hint.",
+      "failurePath": "Exceeding the limit returns 429 with a retry hint and performs no work; the limiter fails closed for authentication endpoints.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given N+1 requests within the window, when the last is made, then it is refused with 429 and no state change occurred."
+        }
+      ],
+      "verify": "automated",
+      "anchor": "tests/security/ops-rate-limits.test.ts",
+      "status": "todo"
+    }
+  ],
+  "gates": [
+    {
+      "id": "G0-RUN",
+      "statement": "The project starts from a clean clone with one documented command.",
+      "origin": "policy:tier-0"
+    },
+    {
+      "id": "G0-CHECK",
+      "statement": "Lint or typecheck runs in CI on every pull request.",
+      "origin": "policy:tier-0"
+    },
+    {
+      "id": "G0-SMOKE",
+      "statement": "One happy-path smoke test exercises the primary user journey.",
+      "origin": "policy:tier-0"
+    },
+    {
+      "id": "G1-CI",
+      "statement": "The full test suite runs in CI on every pull request and is required to merge.",
+      "origin": "policy:tier-1"
+    },
+    {
+      "id": "G1-DOMAIN-TESTS",
+      "statement": "Every rule in the domain model has at least one automated test.",
+      "origin": "policy:tier-1"
+    },
+    {
+      "id": "G1-AC-TRACE",
+      "statement": "Every requirement marked automated maps to a named test through an @req anchor.",
+      "origin": "policy:tier-1"
+    },
+    {
+      "id": "G1-RUNBOOK",
+      "statement": "README documents how to run, test and deploy, plus known limitations.",
+      "origin": "policy:tier-1"
+    },
+    {
+      "id": "G1-SECRETS",
+      "statement": "No secret is committed; configuration comes from the environment and is validated at startup.",
+      "origin": "policy:tier-1"
+    }
+  ],
+  "docs": [
+    "00-constitution.md",
+    "01-product-brief.md",
+    "02-domain-model.md",
+    "03-architecture.md",
+    "04-contracts.md",
+    "05-verification.md",
+    "06-delivery-plan.md",
+    "07-agent-handoff.md",
+    "spec.json",
+    "AGENTS.md",
+    "spec-check.mjs"
+  ],
+  "stats": {
+    "primitives": 22,
+    "requirements": 13,
+    "acceptanceCriteria": 22,
+    "automated": 9,
+    "gates": 8,
+    "deferred": 2,
+    "skipped": 10
+  }
+}
