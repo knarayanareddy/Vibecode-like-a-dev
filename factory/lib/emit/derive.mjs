@@ -95,11 +95,34 @@ export function isGoStack(profile) {
   return GOISH.test(String(profile.constraints?.stack ?? '').toLowerCase());
 }
 
-/** The commands an agent must be able to run, derived from the declared stack. */
+const TSISH = /typescript|node|react|vite|javascript|undecided|^$/;
+
+export function recognisesStack(profile) {
+  const declared = String(profile.constraints?.stack ?? 'undecided').toLowerCase();
+  return isGoStack(profile) || isPythonStack(profile) || TSISH.test(declared);
+}
+
+/**
+ * The commands an agent must be able to run, derived from the declared stack.
+ * A stack this tool has no profile for gets `null`, not a TypeScript default: an
+ * invented command is worse than an honest gap, because the agent will run it.
+ */
 export function commandsFor(profile) {
   if (isGoStack(profile)) return ['go build ./...', 'go vet ./...', 'go test ./...'];
   if (isPythonStack(profile)) return ['ruff check .', 'mypy .', 'pytest'];
-  return ['npm run lint', 'npm run typecheck', 'npm test'];
+  if (TSISH.test(String(profile.constraints?.stack ?? 'undecided').toLowerCase())) return ['npm run lint', 'npm run typecheck', 'npm test'];
+  return null;
+}
+
+const UNKNOWN_COMMANDS = 'record the real build and test commands here and in the README before implementation starts';
+
+/**
+ * Text from a profile is user input, and user input must not become document
+ * structure. Flatten it before it is embedded in a line of prose.
+ */
+export function inline(text, limit = 600) {
+  const flat = String(text ?? '').replace(/\s+/g, ' ').replace(/^[#>\s]+/, '').trim();
+  return flat.length > limit ? `${flat.slice(0, limit).trimEnd()}… (full text in profile.json)` : flat;
 }
 
 export function stackFor(profile) {
@@ -329,7 +352,7 @@ export function copyBrief(plan) {
     : `Rigor tier: ${rigor.tier} (${rigor.label}) — gates in specs/05-verification.md are the definition of done.`;
 
   return [
-    `Build "${titleize(profile.name)}": ${profile.idea}`,
+    `Build "${titleize(profile.name)}": ${inline(profile.idea, 400)}`,
     '',
     `Non-negotiable rules for this build:`,
     readFirst,
@@ -341,7 +364,7 @@ export function copyBrief(plan) {
     '',
     `V1 scope: ${scope.join('; ')}.`,
     outOfScope,
-    `Stack: ${plan.config.stack === 'undecided' ? 'not fixed yet — pick one and record it before Phase 1' : plan.config.stack} — build and test: ${commandsFor(profile).join(' && ')}.`,
+    `Stack: ${plan.config.stack === 'undecided' ? 'not fixed yet — pick one and record it before Phase 1' : plan.config.stack} — ${commandsFor(profile)?.join(' && ') ?? UNKNOWN_COMMANDS}.`,
     gates,
     '',
     'Start with Phase 0, then Phase 1. Stop after each phase and report: what changed, which tests pass, which requirement moved, what you are unsure about.'

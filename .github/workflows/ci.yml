@@ -45,6 +45,9 @@ jobs:
       - name: Ten ideas survive the pipeline
         run: node scripts/stress-test.mjs
 
+      - name: Twenty hostile ideas and six invalid profiles
+        run: node scripts/stress-adversarial.mjs
+
       - name: Adoption runs against this repository
         run: node factory/cli.mjs adopt . -o /tmp/self-profile.json --force
 

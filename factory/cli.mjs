@@ -289,7 +289,7 @@ function runCompile(profilePath) {
   try {
     result = emitPacket(plan, out, { force: hasFlag('--force') });
   } catch (error) {
-    if (error.code === 'OUTPUT_NOT_EMPTY') fail(error.message);
+    if (error.code === 'OUTPUT_NOT_EMPTY' || error.code === 'OUTPUT_NOT_DIRECTORY') fail(error.message);
     throw error;
   }
 

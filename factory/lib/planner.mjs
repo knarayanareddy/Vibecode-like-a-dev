@@ -47,12 +47,11 @@ export function computeRigor(profile, policy) {
   let score = 0;
 
   for (const signal of policy.signals) {
-    let matched;
-    if (signal.eq !== undefined) {
-      matched = getPath(profile, signal.field) === signal.eq;
-    } else {
-      matched = Boolean(getPath(profile, signal.field)) === true;
-    }
+    // A signal is either a full predicate or the older {field, eq} shorthand;
+    // predicates allow "declared as a feature but not flagged as a risk".
+    const predicate =
+      signal.when ?? (signal.eq !== undefined ? { field: signal.field, eq: signal.eq } : { field: signal.field, truthy: true });
+    const matched = evaluate(predicate, profile);
     if (matched) {
       score += signal.weight;
       signals.push({ label: signal.label, weight: signal.weight, field: signal.field });

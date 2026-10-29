@@ -113,6 +113,21 @@ test('cli contract: data on stdout, diagnostics on stderr, non-zero exit on misu
     rmSync(invalidProfile, { force: true });
   }
 
+  // A target path that is a file, not a directory, is a mistake worth a sentence.
+  const usable = path.join(os.tmpdir(), `vld-usable-${process.pid}.json`);
+  writeFileSync(usable, JSON.stringify(PROFILE));
+  const blocked = path.join(os.tmpdir(), `vld-blocked-${process.pid}`);
+  writeFileSync(blocked, 'not a directory');
+  try {
+    const intoFile = await cli(['compile', usable, '-o', blocked, '--force']);
+    assert.equal(intoFile.code, 2);
+    assert.match(intoFile.stderr, /is not a directory/);
+    assert.ok(!/^\s+at\s/m.test(intoFile.stderr), 'a user mistake does not print a stack trace');
+  } finally {
+    rmSync(blocked, { force: true });
+    rmSync(usable, { force: true });
+  }
+
   // A failing verification must exit 1, not 2: findings and misuse are different.
   const workspace = mkdtempSync(path.join(os.tmpdir(), 'vld-exit-'));
   try {

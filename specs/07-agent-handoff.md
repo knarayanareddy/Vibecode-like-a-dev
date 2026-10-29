@@ -17,7 +17,7 @@
 This is the message that starts a build. It is short on purpose: the packet carries the detail, and a brief nobody reads is a longer prompt.
 
 ```text
-Build "Vibecode Like A Dev": A deterministic compiler for engineering discipline. A developer who can describe an app in one paragraph, or point at a repository they already have, runs it and gets a specification packet an agent can execute: requirements with acceptance criteria, a computed rigor tier, the gates that define done, and a script that fails CI when the spec and the code stop agreeing. Today those developers paste a prompt into an agent and inherit whatever engineering the model happened to infer, which is why the output rarely survives review, maintenance or a second contributor.
+Build "Vibecode Like A Dev": A deterministic compiler for engineering discipline. A developer who can describe an app in one paragraph, or point at a repository they already have, runs it and gets a specification packet an agent can execute: requirements with acceptance criteria, a computed rigor tier, the gates that define done, and a script that fails CI when the spec and the code stop agreeing. Today those developers paste… (full text in profile.json)
 
 Non-negotiable rules for this build:
 1. Read specs/AGENTS.md first, then specs/07-agent-handoff.md. Follow the loop there.
@@ -29,7 +29,7 @@ Non-negotiable rules for this build:
 
 V1 scope: The primary journey works end to end; Predictable command-line behaviour; The product's own rules are named and pinned.
 Out of scope: anything not listed above, plus the non-goals in specs/01-product-brief.md.
-Stack: javascript — build and test: npm run lint && npm run typecheck && npm test.
+Stack: javascript — npm run lint && npm run typecheck && npm test.
 Rigor tier: 1 (standard) — gates in specs/05-verification.md are the definition of done.
 
 Start with Phase 0, then Phase 1. Stop after each phase and report: what changed, which tests pass, which requirement moved, what you are unsure about.

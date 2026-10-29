@@ -23,7 +23,7 @@
     "test": "node --test factory/test/*.test.mjs",
     "check": "npm run index -- --check && npm test && npm run verify && node specs/spec-check.mjs --repo . --strict && npm run stress",
     "dogfood": "node factory/cli.mjs compile profile.json -o specs --force && node specs/spec-check.mjs --repo . --strict",
-    "stress": "node scripts/stress-test.mjs"
+    "stress": "node scripts/stress-test.mjs && node scripts/stress-adversarial.mjs"
   },
   "engines": {
     "node": ">=20"

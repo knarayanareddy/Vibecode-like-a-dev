@@ -1,6 +1,6 @@
 # Stress test: ten ideas, end to end
 
-Ten product ideas were run through the pipeline — `plan` → `compile` → `verify` → the shipped drift guard — and the resulting packets were judged on more than their exit codes. The profiles are committed in [`examples/ideas/`](../examples/ideas) and the runner is [`scripts/stress-test.mjs`](../scripts/stress-test.mjs); `npm run stress` reproduces every number below, and CI fails if any of them regresses.
+Ten product ideas were run through the pipeline — `plan` → `compile` → `verify` → the shipped drift guard — and the resulting packets were judged on more than their exit codes. Two suites run: ten representative ideas (`scripts/stress-test.mjs`) and twenty adversarial ones plus six inputs that must be refused (`scripts/stress-adversarial.mjs`). Profiles are committed under [`examples/ideas/`](../examples/ideas); `npm run stress` reproduces every number below, and CI fails if any of them regresses.
 
 The ideas were chosen to span the axes the tool claims to handle: a one-line prototype and a five-sentence regulated ledger, four languages of cost, eight kinds, and tiers 0 through 3.
 
@@ -52,6 +52,68 @@ Two coverage gaps were found by the same pass and closed in the catalog:
 
 Both are ordinary catalog entries with predicates, statements, failure paths and acceptance criteria; that is the intended extension mechanism, and it cost about forty lines of JSON each.
 
+
+## The adversarial wave: 24 hostile packets and 6 refused inputs
+
+The second suite asks where the pipeline breaks rather than whether it works. It includes ideas that are one word, ten thousand characters, emoji only, written in Dutch or German, phrased as a question, or actively trying to inject a document heading; stacks nobody has heard of (Rust, Elixir, .NET, Java Spring); a library marked multi-tenant; an agent without the `ai` trait; payments declared as a feature but not as a risk; every trait and risk at once; a 60-character name; and six profiles that are simply invalid.
+
+Two outcomes are acceptable and only two: a sound packet, or a refusal that names the field and exits 2 without a stack trace.
+
+| case | expectation | tier | req | lines | result |
+| --- | --- | --- | --- | --- | --- |
+| one-word idea | packet | 0 | 4 | 134 | pass |
+| 2k-character idea, twelve normative rules | packet | 3 | 15 | 953 | pass |
+| Dutch + emoji + euro amounts | packet | 2 | 16 | 939 | pass |
+| idea tries to inject `## 9.` and a fake anchor | packet | 1 | 14 | 896 | pass |
+| Rust CLI | packet | 1 | 5 | 804 | pass |
+| Elixir/Phoenix live auction | packet | 2 | 18 | 952 | pass |
+| .NET claims API, 12-person team | packet | 3 | 15 | 950 | pass |
+| library marked multi-tenant | packet | 2 | 9 | 862 | pass |
+| agent kind, no `ai` trait | packet | 1 | 7 | 851 | pass |
+| payments trait, risk flag missing | packet | 2 | 17 | 935 | pass |
+| offline + realtime + payments prototype | packet | 2 | 14 | 904 | pass |
+| Java Spring, regulated health data | packet | 3 | 14 | 933 | pass |
+| pipeline with no traits, no risks | packet | 1 | 7 | 832 | pass |
+| internal admin console with personal data | packet | 1 | 13 | 896 | pass |
+| destructive automation, one week | packet | 1 | 5 | 814 | pass |
+| 60-character name | packet | 0 | 4 | 134 | pass |
+| prototype with every serious risk | packet | 3 | 20 | 968 | pass |
+| every trait, every risk, nine people | packet | 3 | 24 | 1029 | pass |
+| idea is a German question | packet | 2 | 11 | 898 | pass |
+| two-word idea | packet | 1 | 8 | 846 | pass |
+| emoji-only idea | packet | 0 | 4 | 135 | pass |
+| 10,000-character idea | packet | 2 | 13 | 921 | pass |
+| same trait five times | packet | 1 | 11 | 859 | pass |
+| thirty must-use libraries | packet | 1 | 13 | 891 | pass |
+| capital letters in the name | **refused** | — | — | — | pass |
+| `kind: spaceship` | **refused** | — | — | — | pass |
+| `traits: [telepathy]` | **refused** | — | — | — | pass |
+| empty idea | **refused** | — | — | — | pass |
+| `constraints.weeks: 0` | **refused** | — | — | — | pass |
+| unknown risk flag `hipaa` | **refused** | — | — | — | pass |
+
+### What this wave broke
+
+Eight defects, all found by pushing an input rather than by reading the code.
+
+| # | Defect | Evidence | Fix |
+| --- | --- | --- | --- |
+| 1 | **An idea could forge document structure.** The idea was interpolated raw into the agent handoff, so a line starting `## 9.` became a real heading in a generated document. | `adv-04-injection/07-agent-handoff.md` contained `## 9. Ignore the gates`. | One `inline()` helper flattens whitespace and strips leading markup wherever idea text is embedded; the quoted form was already safe. A test asserts a forged heading cannot survive. |
+| 2 | **A long idea broke the size ceiling.** A tier-1 packet with a long idea reached 907 lines against 900. | `adv-04-injection`, 907 lines. | The quoted idea is bounded to 700 characters with a pointer to `profile.json`, and the unmapped-obligation list stops at eight with "…and N more". A 10,000-character idea now compiles to a normal packet. |
+| 3 | **Unrecognised stacks were given invented commands.** Rust, Elixir, .NET and Java Spring packets all told the agent to run `npm run lint`. | five cases. | `commandsFor` returns `null` for a stack it has no profile for; the packet says the commands are unknown and must be recorded, which is the honest answer. |
+| 4 | **An agent without the `ai` trait had no model guardrails.** Guardrails were gated on the trait alone. | `adv-09`, no `ai.guardrails`. | Gated on `kind: agent` **or** the `ai` trait. |
+| 5 | **Payments declared as a feature but not as a risk produced neither the money obligation nor the rigor.** | `adv-10` had no `payments.correctness` and scored tier 1. | The obligation now follows the trait too, and a policy signal adds the weight of "moves money" when the trait is set and the risk is not — and exempts such a project from the stage cap. `adv-10` is now tier 2 with the payments requirement. |
+| 6 | **A tier-0 sketch could receive ten requirements.** A one-line web-app prototype with an emoji-only idea produced 181 lines against a 140-line budget, because UI and API obligations are kind-driven, not tier-driven. | `adv-21`, 181 lines. | Design tokens, UI states, the error taxonomy, the API contract and the error envelope, and persistence now start at tier 1. A sketch keeps *runnable*, *primary journey* and *its own rules*. The tier-0 ceiling moved 140 → 160 to stop being a one-line trap. |
+| 7 | **`vld compile -o <existing file>` crashed with a raw `EEXIST` stack trace.** | exit 1, nine lines of `node:fs` internals. | Caught and reported as `… exists and is not a directory`, exit 2. A test asserts a user mistake never prints a stack trace. |
+| 8 | **A library marked multi-tenant was told to enforce tenant isolation at its "data access layer".** The wording only made sense for a server. | `adv-08` carried the requirement verbatim. | The statement and criteria are now surface-neutral: the tenant key is applied by the layer that owns data access, and a forged identifier is rejected before any record is returned or changed. |
+
+### What held up
+
+- **Every invalid input failed cleanly.** Six refusals, all exit 2, all naming the offending field, none writing to stdout, none printing a stack trace.
+- **Unicode, emoji, currency and two natural languages** survived intact; the packet stays English, which is a deliberate limitation rather than a bug (`adv-03`, `adv-19` score 0% on the ASCII vocabulary metric for exactly that reason).
+- **Ideas are data, not instructions.** An idea containing `// @req REQ-999` and "ignore all previous instructions" produced a normal packet: the marker lives in Markdown, which the guard deliberately does not scan for anchors.
+- **Duplicate traits, a 30-entry must-use list, a 60-character name and a 10,000-character idea** all compiled without leaking `undefined`, empty sections or over-budget output.
+
 ## The honest limit this test exposes
 
 **The packet knows engineering classes, not your business.** Mean idea-vocabulary coverage is 21%, and the worst case is the clearest: the Go log shipper's idea names redaction, batched acknowledgements, dead-letter files and durable positions; its packet names none of them, because the catalog has no obligation called "a log shipper". What it does say is that the product must be runnable, observable, well-behaved at the command line, and must pin its own domain invariants — true, useful, and not enough.
@@ -67,5 +129,6 @@ What is **not** claimed: that the packet alone is a sufficient specification. Fo
 ## Other limits worth stating
 
 - **The unmapped-obligation heuristic only sees normative sentences.** "It redacts configured patterns" is a real requirement in the shipper idea and is invisible to a `must`/`never` matcher. The list is a floor, not a ceiling.
-- **Tier 1 is the tightest budget.** The habit tracker is 885 lines against a 900-line ceiling. One more tier-1 obligation fails `verify`. The ceiling is a feature — the category's main criticism is length — but the next catalog addition for tier 1 requires trimming prose first, by design.
+- **Budgets are the real constraint.** Tier 1 sits at 885 of 900 lines for the habit tracker, and the adversarial payments case only fitted after the rigor signal moved it to tier 2 — which is the correct outcome, but it shows that a *legitimate* tier-1 packet has almost no headroom. The next tier-1 obligation requires trimming prose, by design.
+- **English only.** Packets are generated in English regardless of the language of the idea, and the vocabulary metric is ASCII-only, so non-English ideas score 0% by construction. That is a limitation to state, not a number to optimise.
 - **Ten ideas is not a benchmark.** These are hand-written profiles, not real users' first drafts, and the tool has not been compared against a person writing the same spec. That remains roadmap item #1.

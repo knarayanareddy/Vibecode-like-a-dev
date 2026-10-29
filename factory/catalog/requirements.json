@@ -49,19 +49,27 @@
     {
       "key": "data.persistence",
       "when": {
-        "any": [
+        "all": [
           {
-            "field": "kind",
-            "in": [
-              "api",
-              "web-app",
-              "data-pipeline",
-              "mobile"
+            "any": [
+              {
+                "field": "kind",
+                "in": [
+                  "api",
+                  "web-app",
+                  "data-pipeline",
+                  "mobile"
+                ]
+              },
+              {
+                "field": "traits",
+                "includes": "persistence"
+              }
             ]
           },
           {
-            "field": "traits",
-            "includes": "persistence"
+            "field": "tier",
+            "gte": 1
           }
         ]
       },
@@ -160,11 +168,11 @@
       },
       "render": "security",
       "title": "Tenant isolation",
-      "statement": "Every row that belongs to a tenant carries a tenant key that is applied by the data access layer, not by individual call sites.",
+      "statement": "Every unit of work belongs to exactly one tenant. The tenant key is applied by the layer that owns data access, never by individual call sites, and an inbound tenant identifier is never trusted.",
       "failurePath": "A query constructed without a tenant filter fails closed (returns no rows or raises), rather than returning all tenants.",
       "acceptance": [
         "Given two tenants with records, when tenant A lists records, then no tenant B identifier appears.",
-        "Given a request with a forged tenant identifier, when it is processed, then it is rejected before any read."
+        "Given a forged tenant identifier, when it is processed, then it is rejected before any record is returned or changed."
       ],
       "verify": "automated"
     },
@@ -190,10 +198,18 @@
     {
       "key": "ui.states",
       "when": {
-        "field": "kind",
-        "in": [
-          "web-app",
-          "mobile"
+        "all": [
+          {
+            "field": "kind",
+            "in": [
+              "web-app",
+              "mobile"
+            ]
+          },
+          {
+            "field": "tier",
+            "gte": 1
+          }
         ]
       },
       "render": "frontend",
@@ -210,10 +226,18 @@
     {
       "key": "ui.design-tokens",
       "when": {
-        "field": "kind",
-        "in": [
-          "web-app",
-          "mobile"
+        "all": [
+          {
+            "field": "kind",
+            "in": [
+              "web-app",
+              "mobile"
+            ]
+          },
+          {
+            "field": "tier",
+            "gte": 1
+          }
         ]
       },
       "render": "frontend",
@@ -228,10 +252,18 @@
     {
       "key": "ux.error-taxonomy",
       "when": {
-        "field": "kind",
-        "in": [
-          "web-app",
-          "mobile"
+        "all": [
+          {
+            "field": "kind",
+            "in": [
+              "web-app",
+              "mobile"
+            ]
+          },
+          {
+            "field": "tier",
+            "gte": 1
+          }
         ]
       },
       "render": "frontend",
@@ -246,10 +278,18 @@
     {
       "key": "api.contract",
       "when": {
-        "field": "kind",
-        "in": [
-          "api",
-          "web-app"
+        "all": [
+          {
+            "field": "kind",
+            "in": [
+              "api",
+              "web-app"
+            ]
+          },
+          {
+            "field": "tier",
+            "gte": 1
+          }
         ]
       },
       "render": "api",
@@ -265,10 +305,18 @@
     {
       "key": "api.error-envelope",
       "when": {
-        "field": "kind",
-        "in": [
-          "api",
-          "web-app"
+        "all": [
+          {
+            "field": "kind",
+            "in": [
+              "api",
+              "web-app"
+            ]
+          },
+          {
+            "field": "tier",
+            "gte": 1
+          }
         ]
       },
       "render": "api",
@@ -308,8 +356,16 @@
     {
       "key": "payments.correctness",
       "when": {
-        "field": "risks.payments",
-        "eq": true
+        "any": [
+          {
+            "field": "risks.payments",
+            "eq": true
+          },
+          {
+            "field": "traits",
+            "includes": "payments"
+          }
+        ]
       },
       "render": "reliability",
       "title": "Money movement is correct under retries and partial failure",
@@ -325,8 +381,16 @@
     {
       "key": "ai.guardrails",
       "when": {
-        "field": "traits",
-        "includes": "ai"
+        "any": [
+          {
+            "field": "traits",
+            "includes": "ai"
+          },
+          {
+            "field": "kind",
+            "eq": "agent"
+          }
+        ]
       },
       "render": "ai",
       "title": "Model calls are bounded, observable and evaluated",

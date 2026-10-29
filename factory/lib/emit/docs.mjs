@@ -9,7 +9,7 @@
  *     of this entire tool category, and this file is where that is decided.
  */
 
-import { FACTORY_VERSION, bullets, checkboxes, code, commandsFor, heading, ordered, quote, table, titleize } from './derive.mjs';
+import { FACTORY_VERSION, bullets, checkboxes, code, commandsFor, heading, inline, ordered, quote, table, titleize } from './derive.mjs';
 
 const h1 = (text) => heading(1, text);
 const h2 = (text) => heading(2, text);
@@ -166,7 +166,7 @@ export function productBrief(plan, d) {
     '',
     h2('The idea, as stated'),
     '',
-    quote(plan.profile.idea),
+    quoteIdea(plan.profile.idea),
     '',
     h2('Problem and primary user'),
     '',
@@ -188,7 +188,10 @@ export function productBrief(plan, d) {
           '',
           "These sentences state a rule. The catalog has no requirement that covers it, so an agent reading only the requirement list would not build it. Turn each into a requirement with `vld change`, or record it as a non-goal — but do not leave it here.",
           '',
-          bullets(d.unmapped.map((sentence) => `"${sentence}"`)),
+          bullets([
+            ...d.unmapped.slice(0, 8).map((sentence) => `"${inline(sentence, 200)}"`),
+            ...(d.unmapped.length > 8 ? [`…and ${d.unmapped.length - 8} more, in the same style`] : [])
+          ]),
           ''
         ]
       : []),
@@ -948,6 +951,15 @@ export function agentHandoff(plan, d) {
   ].join('\n');
 }
 
+/**
+ * Quote the idea without letting its length or its markup take over the packet.
+ * A 3,000-character idea pushed a tier-1 packet over its ceiling, and an idea
+ * containing "## 9. ..." could otherwise arrive as a real heading.
+ */
+function quoteIdea(idea) {
+  return quote(inline(idea, 700));
+}
+
 // -------------------------------------------------------------- single file
 
 export function singleFileSpec(plan, d) {
@@ -973,11 +985,13 @@ export function singleFileSpec(plan, d) {
     '',
     `**Stack:** ${d.stack.stack.language} · ${d.stack.stack.unitRunner} for tests.${d.stack.recognised ? '' : ` The declared stack (${plan.profile.constraints.stack}) is not one this packet knows: replace this line and record the decision, because the requirements below are language-neutral but the commands are not.`}`,
     '',
-    `**Build and test:** \`${commandsFor(plan.profile).join(' && ')}\``,
+    commandsFor(plan.profile)
+      ? `**Build and test:** \`${commandsFor(plan.profile).join(' && ')}\``
+      : '**Build and test:** not known for this stack. Record the real commands here and in the README before implementation starts.',
     '',
     h2('1. Idea'),
     '',
-    quote(plan.profile.idea),
+    quoteIdea(plan.profile.idea),
     '',
     h2('2. Scope'),
     '',
@@ -1029,7 +1043,11 @@ export function singleFileSpec(plan, d) {
 
 export function agentsMd(plan, d) {
   const single = plan.packet === 'single-file';
-  const commands = [commandsFor(plan.profile).join(' && '), 'node specs/spec-check.mjs --repo .'];
+  const resolved = commandsFor(plan.profile);
+  const commands = [
+    resolved ? resolved.join(' && ') : '# the real build and test commands go here — this stack has no built-in profile',
+    'node specs/spec-check.mjs --repo .'
+  ];
   return [
     h1('AGENTS.md'),
     '',

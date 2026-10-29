@@ -120,7 +120,17 @@ export function emitPacket(plan, outDir, { force = false } = {}) {
     }
   }
 
-  mkdirSync(target, { recursive: true });
+  try {
+    mkdirSync(target, { recursive: true });
+  } catch (error) {
+    // `-o some/file.txt` is a user mistake, not a crash: say which path is wrong.
+    if (error.code === 'EEXIST') {
+      const notADirectory = new Error(`${target} exists and is not a directory. Pass a directory path, or remove the file.`);
+      notADirectory.code = 'OUTPUT_NOT_DIRECTORY';
+      throw notADirectory;
+    }
+    throw error;
+  }
   const progress = carryForwardProgress(target, files);
 
   const written = [];

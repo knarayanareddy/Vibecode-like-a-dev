@@ -157,7 +157,7 @@ A tier-1 packet for a four-week MVP, 891 lines total:
 | `spec.json` | The machine-readable manifest: requirements, criteria, gates, anchors, status |
 | `spec-check.mjs` | A dependency-free drift guard you commit into the product repo |
 
-Tier 0 collapses all of it into **one 60-line file**, because a sketch does not deserve a binder.
+Tier 0 collapses all of it into **one ~135-line file** — runnable, the primary journey and the product's own rules, nothing more — because a sketch does not deserve a binder.
 
 ## Try it: one profile, three tiers
 
@@ -173,7 +173,7 @@ node factory/cli.mjs init /tmp/payout
 # set "risks": {"payments": true, "regulated": true, "multiTenant": true}, "stage": "production"
 node factory/cli.mjs plan /tmp/payout/profile.json
 
-# tier 0: a one-week prototype → 6 practices, one 60-line file, no binder
+# tier 0: a one-week prototype → 6 practices, a single ~135-line file, no binder
 node factory/cli.mjs init /tmp/sketch
 # set "stage": "prototype", "kind": "cli", leave risks empty
 node factory/cli.mjs compile /tmp/sketch/profile.json -o /tmp/sketch/specs
@@ -298,9 +298,11 @@ What this proves: the loop closes — profile in, packet out, guard passes, and 
 
 ## Does it hold up? Ten ideas, judged
 
-`npm run stress` compiles ten committed ideas — from a one-line CLI to a five-sentence regulated ledger, across TypeScript, Python and Go — and scores each packet for things `verify` cannot see: does a Python service get pytest, does a library get told to rate-limit endpoints, does a packet point at a document it does not ship, how much of the idea actually reached the requirements.
+`npm run stress` runs two suites: ten representative ideas, then twenty adversarial ones plus six profiles that must be **refused** cleanly. Together they score packets for things `verify` cannot see: does a Python service get pytest, does a library get told to rate-limit endpoints, does a packet point at a document it does not ship, can an idea forge a heading in a generated document, does a Rust project get handed `npm run lint`, how much of the idea actually reached the requirements.
 
-The first run found six defects: catalog insertions renumbered requirement ids and silently repointed anchors; a payments packet quoted a *retro board* example; a Go project was handed Vitest; tier-0 packets told the agent to read documents they do not contain; libraries were told to rate-limit their endpoints; and a tier-1 daemon had no observability obligation. All six are fixed, each with the test that would catch it again. Two coverage gaps closed with it: uploads and offline had no obligation at all.
+The two runs found fourteen defects. The first wave: catalog insertions renumbered requirement ids and silently repointed anchors; a payments packet quoted a *retro board* example; a Go project was handed Vitest; tier-0 packets told the agent to read documents they do not contain; libraries were told to rate-limit their endpoints; and a tier-1 daemon had no observability obligation. All six are fixed, each with the test that would catch it again. Two coverage gaps closed with it: uploads and offline had no obligation at all.
+
+The adversarial wave broke eight more: an idea could forge a document heading; a long idea pushed a tier-1 packet over its ceiling; unrecognised stacks were given invented npm commands; an `agent` without the `ai` trait had no model guardrails; payments declared as a feature but not as a risk earned neither the obligation nor the rigor; a tier-0 sketch could receive ten requirements; `compile -o <existing file>` crashed with a stack trace; and a library was told to enforce tenant isolation "at its data access layer". All fixed, all with a test.
 
 The finding that did not get fixed, because it is the product's actual boundary: **mean idea-vocabulary coverage is 21%**. The catalog knows engineering classes — payments, tenancy, pipelines, public libraries — not your business. So every normative sentence in an idea that no requirement covers is quoted back as an *unmapped obligation*, and `vld change` is how it becomes a requirement. Full results and method: [`docs/STRESS-TEST.md`](docs/STRESS-TEST.md).
 
@@ -373,15 +375,18 @@ factory/
                        delta specs, MCP protocol, CLI contract, end-to-end enforcement
 profile.json           this repository's own profile
 specs/                 this repository's own compiled packet, guarded in CI
-scripts/stress-test.mjs  ten ideas through the pipeline, judged beyond exit codes
+scripts/
+  stress-test.mjs      ten ideas through the pipeline, judged beyond exit codes
+  stress-adversarial.mjs  24 hostile packets and 6 inputs that must be refused
+  lib/packet-audit.mjs    the shared judgement both suites use
 examples/retro-board/  a profile and its compiled packet
-examples/ideas/        ten profiles spanning tier 0-3, eight kinds, three stacks
+examples/ideas/        ten representative profiles, plus adversarial/cases.json
 docs/                  research notes, authoring guide, stress test, decision records
 ```
 
 ```bash
 npm test        # 98 tests
-npm run stress  # ten ideas through the pipeline, scored on soundness, not exit codes
+npm run stress  # 10 representative + 24 hostile ideas, and 6 refusals; scored on soundness
 npm run check   # index freshness + tests + example packet + own drift guard + stress
 ```
 

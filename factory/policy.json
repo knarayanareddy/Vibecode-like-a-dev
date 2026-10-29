@@ -54,6 +54,23 @@
       "eq": "large",
       "weight": 2,
       "label": "large user scale"
+    },
+    {
+      "when": {
+        "all": [
+          {
+            "field": "traits",
+            "includes": "payments"
+          },
+          {
+            "field": "risks.payments",
+            "ne": true
+          }
+        ]
+      },
+      "weight": 3,
+      "label": "moves money (feature declared, risk not flagged)",
+      "comment": "The trait selects money obligations; the risk did not. Rigor follows the obligation, not the flag the author remembered."
     }
   ],
   "tiers": [
@@ -100,6 +117,10 @@
       {
         "field": "risks.regulated",
         "eq": true
+      },
+      {
+        "field": "traits",
+        "includes": "payments"
       }
     ]
   },
@@ -221,7 +242,7 @@
   "budgets": {
     "comment": "Hard ceilings per tier. A packet that exceeds its ceiling is a bug in the packet, not a virtue: the category's main criticism is that specs are too long to review.",
     "maxLinesByTier": {
-      "0": 140,
+      "0": 160,
       "1": 900,
       "2": 1000,
       "3": 1100
