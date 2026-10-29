@@ -54,6 +54,57 @@ export function renderPacket(plan) {
   return { files, derived: d };
 }
 
+/**
+ * Progress persistence.
+ *
+ * A packet is regenerated whenever policy or the profile changes. Wiping the
+ * record of what has been implemented would make the tool unusable on a project
+ * older than one release: every recompile would claim nothing was ever done.
+ * So `status` and the anchor of a proven requirement survive a recompile,
+ * matched by requirement key. Everything else is regenerated, because everything
+ * else is the product of policy.
+ */
+function carryForwardProgress(target, files) {
+  const specPath = path.join(target, 'spec.json');
+  if (!existsSync(specPath)) return { carried: 0, removed: [] };
+
+  let previous;
+  try {
+    previous = JSON.parse(readFileSync(specPath, 'utf8'));
+  } catch {
+    return { carried: 0, removed: [] };
+  }
+
+  const byKey = new Map((previous.requirements ?? []).map((requirement) => [requirement.key, requirement]));
+  const next = JSON.parse(files.get('spec.json'));
+  const carried = [];
+
+  for (const requirement of next.requirements) {
+    const old = byKey.get(requirement.key);
+    if (!old) continue;
+    if (old.status === 'done' || old.status === 'blocked') {
+      requirement.status = old.status;
+      if (old.anchor) requirement.anchor = old.anchor;
+      carried.push({ id: requirement.id, key: requirement.key, status: old.status });
+    }
+  }
+
+  const removed = [...byKey.keys()].filter((key) => !next.requirements.some((requirement) => requirement.key === key));
+
+  // History records a recompile that actually changed something. A recompile with
+  // nothing to carry is not an event, and writing an empty record into the packet
+  // would make an unchanged recompile differ from a fresh compile — which breaks
+  // the "same profile, same packet" guarantee that the sync check depends on.
+  if (carried.length > 0 || removed.length > 0) {
+    next.history = { carriedForward: carried.length, dropped: removed };
+  } else {
+    delete next.history;
+  }
+
+  files.set('spec.json', `${JSON.stringify(next, null, 2)}\n`);
+  return { carried: carried.length, carriedDetail: carried, removed };
+}
+
 export function emitPacket(plan, outDir, { force = false } = {}) {
   const { files, derived } = renderPacket(plan);
   const target = path.resolve(outDir);
@@ -70,6 +121,7 @@ export function emitPacket(plan, outDir, { force = false } = {}) {
   }
 
   mkdirSync(target, { recursive: true });
+  const progress = carryForwardProgress(target, files);
 
   const written = [];
   let totalLines = 0;
@@ -81,7 +133,7 @@ export function emitPacket(plan, outDir, { force = false } = {}) {
     written.push({ name, lines });
   }
 
-  return { outDir: target, written, totalLines, derived };
+  return { outDir: target, written, totalLines, derived, progress };
 }
 
 function readdirSyncSafe(dir) {

@@ -164,7 +164,7 @@ Tier 0 collapses all of it into **one 60-line file**, because a sketch does not 
 The compiled example is committed, so you can read the output before running anything: [`examples/retro-board/spec/`](examples/retro-board/spec/).
 
 ```bash
-# tier 1: a four-week MVP with auth and personal data → 22 practices, 8 gates, 891 lines
+# tier 1: a four-week MVP with auth and personal data → 14 requirements, 24 criteria, 8 gates
 node factory/cli.mjs plan examples/retro-board/profile.json
 node factory/cli.mjs plan examples/retro-board/profile.json --json | head -40
 
@@ -240,7 +240,60 @@ The ratchet is what makes it usable on day one:
 | `done` + no anchor | **error** |
 | anchor naming a requirement that does not exist | **error** |
 | anchor only outside `tests/` | **error** |
+| anchor suppressed by `@req-ignore` or `anchors.exclude` | not an anchor — counted and printed, never silent |
 | packet over its tier line ceiling | **error** |
+| recompile | `status` and `anchor` survive per requirement key |
+
+### Two escape hatches, both loud
+
+A spec document that *quotes* a marker must not count as an anchor, and a fixture that deliberately cites an unknown requirement must not fail the guard. Both cases are explicit:
+
+```ts
+// @req-ignore: this line demonstrates the marker, it is not a test
+// @req REQ-004
+```
+
+or, for whole files, in `spec.json`:
+
+```json
+{ "anchors": { "exclude": ["factory/test/fixtures/**", "docs/**"] } }
+```
+
+Suppression is never silent: the checker prints `· N anchor(s) ignored` on every run, so a rule that hides work is visible in the output of the thing that checks for hidden work.
+
+### Progress survives the policy
+
+Regenerating a packet is normal — the catalog changes, the profile changes, a practice is added. Wiping the record of what was already built would make the tool useless on any project older than one release. So `status` (`done`, `blocked`) and the anchor travel with the requirement **key** across a recompile; requirements that disappear are named in the output and in `spec.json.history`. A recompile that changes nothing produces byte-identical output to a fresh compile, which is what makes the committed packet reviewable in a diff.
+
+## This repository runs itself
+
+The most useful test of this tool is whether it can describe the tool. `profile.json` at the repository root is this project's own profile, and `specs/` is the packet it generates — committed, so you can read the tool's opinion of itself.
+
+```bash
+npm run dogfood    # compile profile.json -> specs/, then guard this repo with its own checker
+npm run check      # index freshness + tests + example packet + specs/spec-check.mjs --repo . --strict
+```
+
+What it produces today:
+
+| | |
+| --- | --- |
+| profile inferred/defined as | `cli`, javascript, single-maintainer, production |
+| selection | 17 practices, tier 1, 8 gates |
+| packet | 11 documents, 803 lines (ceiling 900) |
+| `vld verify specs` | PASS — 5 requirements, 7 criteria, 0 errors |
+| `node specs/spec-check.mjs --repo . --strict` | PASS — 0 errors, 0 pending, 14 anchored files, 2 ignored |
+
+The interesting part is what it refused to accept. Running the tool on itself found four real defects that no unit test had:
+
+1. `vld adopt -o nested/path.json` crashed with `ENOENT` when the directory did not exist. Fixed in the library, not the CLI.
+2. The drift guard failed on this repository's own fixtures — test files that deliberately cite `REQ-999` to prove the guard rejects unknown requirements. That is the security policy it needed: `@req-ignore`, `anchors.exclude`, and a printed count.
+3. Recompiling wiped `status` and anchors, so the tool's own packet lost its history the first time policy changed.
+4. A no-op recompile wrote an empty `history` block, making an unchanged packet differ from a fresh one — caught by the "committed packet is in sync with the generator" check that now runs in CI.
+
+And it forced two policy corrections: a local CLI was being told to apply OWASP ASVS (now gated on a network surface or a credential), and the catalog had no requirement of the form *"the product's own rules are pinned by tests"* — which is exactly what a spec tool owes its users, so `core.domain-invariants` is now always on, anchored to the very tests you are reading.
+
+What this proves: the loop closes — profile in, packet out, guard passes, and the packet's own requirements are anchored in real tests. What it does not prove: that the packet makes an agent produce *better* software. That is the evaluation harness in the roadmap, and until it exists this section is evidence of internal consistency, not of effectiveness.
 
 ## Why not just use Spec Kit / Kiro / BMAD / OpenSpec?
 
@@ -328,11 +381,13 @@ npm run check   # index freshness + tests + verify the example packet
 - **Delta specs are declarative.** `vld change` produces the proposal, the manifest diff and the verification rules, but it cannot apply a migration or prove the blast radius is complete for you.
 - **MCP tools select; they do not write.** The server answers "what applies and why". Composing the packet is still a compile (or a human/agent writing prose).
 - **The CLI path assumes the profile describes the project honestly.** If you say `mvp` about a regulated product, you get a light packet. The `risks` fields exist because intent cannot be inferred.
+- **Self-consistency is not effectiveness.** This repository passes its own guard, which shows the pipeline is coherent, not that the resulting software is better. The packet also describes a tool whose requirements are unusually easy to anchor because the tool is tested; other products will find that step harder, and nothing here measures that difficulty.
 - **Not published to npm yet.** Clone and use `node factory/cli.mjs`. The `bin` entry is ready.
 
 ## Roadmap
 
 Shipped in v0.2: `vld adopt`, `vld change` (delta specs), `vld mcp`.
+Shipped in v0.3: progress that survives recompiles, anchor suppression (`@req-ignore`, `anchors.exclude`), the always-on `core.domain-invariants` requirement, and a self-spec packet guarded in CI.
 
 1. **An evaluation harness** — the same set of tickets built with no spec, a generic spec, and this packet, scored on merge rate, review defects, spec drift and cost. Until that exists, every claim here is a design argument.
 2. **Exports** — `spec-kit` and `kiro` formats from one source of truth, so the packet is portable rather than a new ecosystem.

@@ -7,7 +7,7 @@
 
 import { aggregatesFor, contextsFor, termsFor } from '../domain-hints.mjs';
 
-export const FACTORY_VERSION = '0.2.0';
+export const FACTORY_VERSION = '0.3.0';
 
 // ---------- text helpers ----------
 

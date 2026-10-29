@@ -13,6 +13,10 @@
  *   - Every document listed in spec.json must exist.
  *   - Every requirement needs acceptance criteria and a verification method.
  *   - An `@req REQ-xxx` anchor pointing at an unknown requirement is an error.
+ *   - A line marked `@req-ignore` is not an anchor. Use it for fixtures and
+ *     examples that quote the marker deliberately; the count is always reported,
+ *     so suppression can never be silent. Whole paths can be excluded with
+ *     spec.json -> anchors.exclude (glob-ish, "*" allowed).
  *   - A requirement marked "done" without an anchor in a test file is an error.
  *   - A requirement marked "todo" without an anchor is pending: a notice, or an
  *     error under --strict. This lets a packet boot on day one and still ratchet.
@@ -40,6 +44,7 @@ const IGNORED_DIRS = new Set([
 ]);
 
 const TEST_FILE = /(^|\/)(tests?|__tests__|specs?)\//;
+const SUPPRESSED = /@req-ignore/i;
 const TEST_NAME = /\.(test|spec)\.[a-z]+$|(^|\/)test_[^/]+\.py$|_test\.(py|go|rb)$/;
 
 const errors = [];
@@ -116,6 +121,11 @@ if (!Array.isArray(spec.gates) || spec.gates.length === 0) errors.push('spec.jso
 const anchored = new Map();
 const strayAnchors = [];
 let scanned = 0;
+let suppressed = 0;
+const exclusions = Array.isArray(spec.anchors?.exclude) ? spec.anchors.exclude : [];
+const globToRegExp = (glob) => new RegExp(`^${glob.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*\*/g, '\u0000').replace(/\*/g, '[^/]*').replace(/\u0000/g, '.*')}$`);
+const exclusionPatterns = exclusions.map(globToRegExp);
+const isExcluded = (file) => exclusionPatterns.some((pattern) => pattern.test(file));
 
 for (const file of walk(REPO)) {
   let source;
@@ -127,9 +137,17 @@ for (const file of walk(REPO)) {
   if (!source.includes('@req')) continue;
   scanned += 1;
 
+  if (isExcluded(rel(file))) continue;
+
   const isTest = TEST_FILE.test(rel(file)) || TEST_NAME.test(rel(file));
-  const matches = source.matchAll(/@req\s+(REQ-\d{3})/g);
-  for (const match of matches) {
+  for (const line of source.split('\n')) {
+    if (!line.includes('@req')) continue;
+    const match = line.match(/@req\s+(REQ-\d{3})/);
+    if (!match) continue;
+    if (SUPPRESSED.test(line)) {
+      suppressed += 1;
+      continue;
+    }
     const id = match[1];
     if (!known.has(id)) {
       strayAnchors.push(`${rel(file)} cites unknown requirement ${id}`);
@@ -174,6 +192,11 @@ if (passes.length) {
   for (const pass of passes) line('✓', pass);
 }
 
+if (suppressed > 0) {
+  console.log('');
+  line('·', `${suppressed} anchor(s) ignored by @req-ignore or spec.json anchors.exclude`);
+}
+
 if (notices.length) {
   console.log('');
   for (const notice of notices) line('•', notice);
@@ -193,6 +216,7 @@ if (strictFailure) {
 const failed = errors.length > 0 || strictFailure;
 console.log(
   `\n${failed ? 'FAIL' : 'PASS'} · ${errors.length} error(s) · ${pending} pending` +
+    (suppressed > 0 ? ` · ${suppressed} ignored` : '') +
     (notices.length && !failed ? ' (pending is expected before implementation; use --strict in release CI)' : '') +
     '\n'
 );

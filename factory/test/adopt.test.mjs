@@ -6,7 +6,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -203,6 +203,11 @@ test('writing the profile refuses to clobber and rejects an invalid one', (t) =>
 
   assert.doesNotThrow(() => writeAdoptedProfile(report, out));
   assert.throws(() => writeAdoptedProfile(report, out), /already exists/);
+
+  // Writing into a directory that does not exist yet should create it.
+  const nested = path.join(repo.root, 'meta', 'nested', 'profile.json');
+  assert.doesNotThrow(() => writeAdoptedProfile(report, nested));
+  assert.ok(existsSync(nested));
   assert.doesNotThrow(() => writeAdoptedProfile(report, out, { force: true }));
 
   const broken = { ...report, profile: { ...report.profile, kind: 'spaceship' } };

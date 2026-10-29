@@ -1,6 +1,6 @@
 {
   "name": "vibecode-like-a-dev",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Turn a one-line idea or an existing repository into an enforceable software factory spec that any coding agent can execute.",
   "type": "module",
   "license": "MIT",
@@ -21,7 +21,8 @@
     "adopt": "node factory/cli.mjs adopt . -o profile.json",
     "mcp": "node factory/cli.mjs mcp",
     "test": "node --test factory/test/*.test.mjs",
-    "check": "npm run index -- --check && npm test && npm run verify"
+    "check": "npm run index -- --check && npm test && npm run verify && node specs/spec-check.mjs --repo . --strict",
+    "dogfood": "node factory/cli.mjs compile profile.json -o specs --force && node specs/spec-check.mjs --repo . --strict"
   },
   "engines": {
     "node": ">=20"

@@ -653,7 +653,7 @@ export function verification(plan, d) {
     code(
       'ts',
       [
-        '// @req REQ-004',
+        '// @req REQ-004  // @req-ignore: example inside a spec document',
         "test('erasing a subject removes every owned row (AC-01)', async () => {",
         '  // given a subject with rows in every table',
         '  // when the deletion sweep runs',
@@ -1086,7 +1086,7 @@ export function manifest(plan, d) {
       },
       anchorConvention: {
         marker: '@req',
-        syntax: '// @req REQ-001   (or "# @req REQ-001" in Python)',
+        syntax: '// @req REQ-xxx   (or "# @req REQ-xxx" in Python)',
         countedIn: ['tests/**'],
         check: 'node specs/spec-check.mjs --repo .'
       },

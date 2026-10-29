@@ -4,7 +4,8 @@
  */
 
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -45,8 +46,8 @@ function patchRequirement(specPath, key, changes) {
 function compileTemp(profile) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'vld-test-'));
   const plan = buildPlan(profile, { index });
-  const { outDir } = emitPacket(plan, path.join(root, 'spec'));
-  return { root, outDir, plan, cleanup: () => rmSync(root, { recursive: true, force: true }) };
+  const result = emitPacket(plan, path.join(root, 'spec'));
+  return { root, outDir: result.outDir, plan, progress: result.progress, cleanup: () => rmSync(root, { recursive: true, force: true }) };
 }
 
 test('a compiled packet verifies clean', (t) => {
@@ -83,6 +84,78 @@ test('compile refuses to overwrite an existing packet without --force', (t) => {
     /Refusing to overwrite/
   );
   assert.doesNotThrow(() => emitPacket(project.plan, project.outDir, { force: true }));
+});
+
+test('recompiling keeps the progress of requirements that are already proven', (t) => {
+  const project = compileTemp(makeProject('progress'));
+  t.after(project.cleanup);
+
+  const specPath = path.join(project.outDir, 'spec.json');
+  const before = JSON.parse(readFileSync(specPath, 'utf8'));
+  const done = before.requirements.find((requirement) => requirement.verify === 'automated');
+  const pending = before.requirements.find((requirement) => requirement.id !== done.id && requirement.verify === 'automated');
+
+  Object.assign(before.requirements.find((entry) => entry.id === done.id), { status: 'done', anchor: 'tests/custom/location.test.ts' });
+  Object.assign(before.requirements.find((entry) => entry.id === pending.id), { status: 'blocked' });
+  writeFileSync(specPath, JSON.stringify(before, null, 2));
+
+  // Simulate a policy change: the packet is regenerated from scratch.
+  const regenerated = emitPacket(project.plan, project.outDir, { force: true });
+  assert.equal(regenerated.progress.carried, 2);
+
+  const after = JSON.parse(readFileSync(specPath, 'utf8'));
+  const afterDone = after.requirements.find((entry) => entry.id === done.id);
+  const afterPending = after.requirements.find((entry) => entry.id === pending.id);
+
+  assert.equal(afterDone.status, 'done', 'a proven requirement stays proven');
+  assert.equal(afterDone.anchor, 'tests/custom/location.test.ts', 'a moved anchor survives');
+  assert.equal(afterPending.status, 'blocked');
+  assert.equal(after.history.carriedForward, 2);
+
+  // When the profile changes, policy selects a different set. Requirements that
+  // drop out take their progress with them, and that must be reported rather than
+  // disappearing quietly.
+  const asCli = buildPlan(
+    normalizeProfile({
+      name: 'cli-shape',
+      idea: 'The same product described as a command-line tool instead of a web application.',
+      kind: 'cli',
+      stage: 'mvp',
+      traits: ['auth']
+    }),
+    { index }
+  );
+  const dropped = emitPacket(asCli, project.outDir, { force: true });
+  assert.ok(dropped.progress.removed.length > 0, 'a changed profile drops requirements, and says so');
+});
+
+test('a first compile has nothing to carry forward', (t) => {
+  const project = compileTemp(makeProject('fresh'));
+  t.after(project.cleanup);
+  assert.equal(project.progress.carried, 0);
+  assert.equal(
+    JSON.parse(readFileSync(path.join(project.outDir, 'spec.json'), 'utf8')).history,
+    undefined,
+    'a packet with no history does not carry an empty history record'
+  );
+});
+
+test('recompiling with nothing to carry produces the same bytes as a fresh compile', (t) => {
+  const project = compileTemp(makeProject('noop'));
+  t.after(project.cleanup);
+
+  const recompiled = emitPacket(project.plan, project.outDir, { force: true });
+  assert.equal(recompiled.progress.carried, 0);
+  assert.equal(recompiled.progress.removed.length, 0);
+
+  const freshDir = path.join(path.dirname(project.outDir), 'fresh-copy');
+  emitPacket(project.plan, freshDir, { force: true });
+
+  assert.equal(
+    readFileSync(path.join(project.outDir, 'spec.json'), 'utf8'),
+    readFileSync(path.join(freshDir, 'spec.json'), 'utf8'),
+    'an unchanged recompile is byte-identical to a fresh compile'
+  );
 });
 
 test('deleting a required document fails verification', (t) => {
@@ -178,11 +251,51 @@ test('an anchor pointing at a requirement that does not exist is an error', (t) 
 
   const repo = path.join(project.root, 'repo');
   mkdirSync(path.join(repo, 'tests'), { recursive: true });
-  writeFileSync(path.join(repo, 'tests', 'stray.test.ts'), '// @req REQ-999\ntest("x", () => {});\n');
+  // The fixture quotes a bad anchor on purpose, so the line suppresses it.
+  // This fixture must contain a bad anchor, yet must not itself look like one to a
+  // static scan. Building the marker at runtime keeps both properties true.
+  const marker = ['@', 'req '].join('');
+  writeFileSync(path.join(repo, 'tests', 'stray.test.ts'), `// ${marker}REQ-999\ntest("x", () => {});\n`);
 
   const report = verifyPacket(project.outDir, { repo });
   assert.equal(report.ok, false);
   assert.match(report.errors.join('\n'), /cites unknown requirement REQ-999/);
+});
+
+test('a suppressed marker is not an anchor, and the count is reported', (t) => {
+  const project = compileTemp(makeProject('suppressed'));
+  t.after(project.cleanup);
+
+  const marker = ['@', 'req '].join('');
+  const repo = path.join(project.root, 'repo');
+  mkdirSync(path.join(repo, 'tests'), { recursive: true });
+  writeFileSync(path.join(repo, 'tests', 'docs-example.test.ts'), `// ${marker}REQ-999  // @req-ignore: quoting the marker in an example\n`);
+  writeFileSync(path.join(repo, 'tests', 'real.test.ts'), `// ${marker}REQ-999\n`);
+
+  const report = verifyPacket(project.outDir, { repo });
+  assert.match(report.errors.join('\n'), /cites unknown requirement REQ-999/);
+  assert.equal(report.errors.filter((error) => /REQ-999/.test(error)).length, 1, 'only the unsuppressed line fails');
+  assert.ok(report.info.some((line) => /1 anchor\(s\) ignored/.test(line)), 'suppression is reported, not silent');
+});
+
+test('anchors.exclude removes a path from the scan', (t) => {
+  const project = compileTemp(makeProject('excluded'));
+  t.after(project.cleanup);
+
+  const marker = ['@', 'req '].join('');
+  const repo = path.join(project.root, 'repo');
+  mkdirSync(path.join(repo, 'tests', 'fixtures'), { recursive: true });
+  writeFileSync(path.join(repo, 'tests', 'fixtures', 'sample.test.ts'), `// ${marker}REQ-999\n`);
+
+  const strictReport = verifyPacket(project.outDir, { repo });
+  assert.match(strictReport.errors.join('\n'), /cites unknown requirement REQ-999/);
+
+  const specPath = path.join(project.outDir, 'spec.json');
+  const spec = JSON.parse(readFileSync(specPath, 'utf8'));
+  spec.anchors = { exclude: ['tests/fixtures/**'] };
+  writeFileSync(specPath, JSON.stringify(spec, null, 2));
+
+  assert.equal(verifyPacket(project.outDir, { repo }).ok, true);
 });
 
 test('an anchor outside a test file does not count as proof', (t) => {
@@ -203,18 +316,81 @@ test('an anchor outside a test file does not count as proof', (t) => {
   assert.match(report.errors.join('\n'), /anchored only outside a test file/);
 });
 
-test('the shipped spec-check.mjs agrees with the factory verifier on a clean packet', (t) => {
-  const project = compileTemp(makeProject('standalone-check'));
+/**
+ * The checker shipped inside a packet is a second implementation of the drift
+ * rule, because it may not import from this repository. Two implementations mean
+ * two chances to disagree, and the copy is the one users actually run — so this
+ * runs it as a process and requires the same verdict as the factory verifier on
+ * the same repository, in both directions.
+ */
+function runShippedChecker(packetDir, repo, strict = false) {
+  const args = [path.join(packetDir, 'spec-check.mjs'), '--repo', repo];
+  if (strict) args.push('--strict');
+  try {
+    const stdout = execFileSync(process.execPath, args, { encoding: 'utf8' });
+    return { code: 0, stdout };
+  } catch (error) {
+    return { code: error.status ?? 1, stdout: `${error.stdout ?? ''}` };
+  }
+}
+
+/** Anchor every automated requirement in a test file, the way an honest repo would. */
+function anchorEverything(packetDir, repo) {
+  const spec = JSON.parse(readFileSync(path.join(packetDir, 'spec.json'), 'utf8'));
+  mkdirSync(path.join(repo, 'tests'), { recursive: true });
+  const automated = spec.requirements.filter((requirement) => requirement.verify === 'automated');
+  for (const requirement of automated) {
+    writeFileSync(
+      path.join(repo, 'tests', `${requirement.key.replace(/\./g, '-')}.test.ts`),
+      `// @req ${requirement.id}\ntest('${requirement.key}', () => { expect(true).toBe(true); });\n`
+    );
+    const target = path.join(packetDir, 'spec.json');
+    const next = JSON.parse(readFileSync(target, 'utf8'));
+    const entry = next.requirements.find((candidate) => candidate.id === requirement.id);
+    entry.status = 'done';
+    entry.anchor = `tests/${requirement.key.replace(/\./g, '-')}.test.ts`;
+    writeFileSync(target, `${JSON.stringify(next, null, 2)}\n`);
+  }
+  return automated;
+}
+
+test('the shipped checker and the factory verifier reach the same verdict', (t) => {
+  const project = compileTemp(makeProject('parity'));
   t.after(project.cleanup);
 
   const checker = readFileSync(path.join(project.outDir, 'spec-check.mjs'), 'utf8');
-  assert.ok(checker.includes('spec-check.mjs'), 'the standalone checker is copied into the packet');
   assert.ok(!checker.includes("from 'node:fs/promises'"), 'the checker stays dependency-free');
 
-  // The packet is written with specs/ as a sibling of the repo root, so point the
-  // checker at the directory it lives in by running it from there.
-  const report = verifyPacket(project.outDir);
-  assert.ok(report.ok);
+  const repo = path.join(project.root, 'repo');
+  mkdirSync(repo, { recursive: true });
+  const automated = anchorEverything(project.outDir, repo);
+  assert.ok(automated.length > 0, 'the fixture packet has automated requirements to anchor');
+
+  // Both agree when the work is proven.
+  assert.equal(verifyPacket(project.outDir, { repo, strict: true }).ok, true);
+  const clean = runShippedChecker(project.outDir, repo, true);
+  assert.equal(clean.code, 0, clean.stdout);
+  assert.match(clean.stdout, /PASS/);
+
+  // Both agree when a requirement marked done loses its test. Resolve the path the
+  // fixture actually wrote, not the example path the generator suggested.
+  const victim = automated[0];
+  const victimTest = path.join(repo, 'tests', `${victim.key.replace(/\./g, '-')}.test.ts`);
+  assert.ok(existsSync(victimTest), 'the fixture wrote the test it is about to delete');
+  rmSync(victimTest);
+  const factoryVerdict = verifyPacket(project.outDir, { repo, strict: true });
+  const shippedVerdict = runShippedChecker(project.outDir, repo, true);
+  assert.equal(factoryVerdict.ok, false);
+  assert.equal(shippedVerdict.code, 1);
+  assert.match(shippedVerdict.stdout, new RegExp(victim.id), 'the shipped checker names the requirement it lost');
+
+  // Both agree when an anchor names a requirement that does not exist.
+  // Built at runtime: a literal marker in this repository would make the guard
+  // fail on the test that proves the guard rejects unknown requirements.
+  const strayMarker = ['@', 'req '].join('');
+  writeFileSync(path.join(repo, 'tests', 'stray.test.ts'), `// ${strayMarker}REQ-999\ntest('stray', () => {});\n`);
+  assert.equal(verifyPacket(project.outDir, { repo, strict: true }).ok, false);
+  assert.equal(runShippedChecker(project.outDir, repo, true).code, 1);
 });
 
 test('a packet over its tier line ceiling fails, because verbosity is a defect', (t) => {

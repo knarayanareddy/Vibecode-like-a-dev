@@ -460,6 +460,21 @@
         "Given an @req anchor for an identifier absent from the spec, when CI runs, then it fails as unknown."
       ],
       "verify": "automated"
+    },
+    {
+      "key": "core.domain-invariants",
+      "when": {
+        "always": true
+      },
+      "render": "core",
+      "title": "The product's own rules are named and pinned",
+      "statement": "Every invariant listed in the domain model names a rule that makes this product itself, and each has at least one automated test whose failure mode is that rule being violated. An invariant with no test is a comment; a test that would pass with the rule inverted is not a test.",
+      "failurePath": "If a core rule is inverted by a refactor, a test fails and names the rule, rather than the change being discovered by a user or a reviewer.",
+      "acceptance": [
+        "Given the invariants listed in the domain model, when the suite runs, then each invariant is covered by a test that fails if its rule is inverted.",
+        "Given an invariant added to the domain model, when it has no test, then the review checklist rejects the change."
+      ],
+      "verify": "automated"
     }
   ]
 }

@@ -19,6 +19,9 @@ import { buildPlan, loadPolicy } from './lib/planner.mjs';
 import { loadProfile, KINDS, STAGES, SCALES, TRAITS, RISK_FLAGS } from './lib/profile.mjs';
 import { verifyPacket } from './lib/verify.mjs';
 
+// Single source of truth for the version: a literal here drifted once already.
+const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+
 const argv = process.argv.slice(2);
 const command = argv[0];
 const rest = argv.slice(1);
@@ -291,6 +294,14 @@ function runCompile(profilePath) {
   }
   console.log(`\n  ${'markdown total'.padEnd(24)} ${String(markdownLines).padStart(5)} lines (budget ${limit})`);
 
+  if (result.progress?.carried > 0) {
+    console.log(`\n  ✓ kept progress for ${result.progress.carried} requirement(s) from the previous packet:`);
+    for (const entry of result.progress.carriedDetail) console.log(`    ${entry.id} ${entry.key} — ${entry.status}`);
+  }
+  if (result.progress?.removed?.length > 0) {
+    console.log(`\n  ! ${result.progress.removed.length} requirement(s) are no longer selected and their progress is gone: ${result.progress.removed.join(', ')}`);
+  }
+
   if (markdownLines > limit) {
     console.log(`\n  ! Over the tier ceiling: this packet is more ceremony than the project earns.`);
     console.log(`    Trim prose or demote practices by priority. Do not trim criteria or gates.`);
@@ -466,7 +477,7 @@ switch (command) {
     break;
   case '--version':
   case '-v':
-    console.log('vibecode-like-a-dev 0.1.0');
+    console.log(`vibecode-like-a-dev ${VERSION}`);
     break;
   case undefined:
   case '--help':
@@ -475,7 +486,9 @@ switch (command) {
     console.log(USAGE);
     break;
   default:
+    // Usage errors go to stderr: stdout stays clean so `vld ... | jq` never
+    // receives a help page it cannot parse.
     console.error(`Unknown command "${command}".\n`);
-    console.log(USAGE);
+    console.error(USAGE);
     process.exit(2);
 }

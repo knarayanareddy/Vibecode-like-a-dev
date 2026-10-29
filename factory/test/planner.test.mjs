@@ -112,6 +112,7 @@ test('skipped and deferred practices are recorded with reasons, never dropped si
   assert.ok(recorded >= 34 - 0, 'every routed practice is accounted for');
 });
 
+// @req REQ-005
 test('planning is deterministic apart from the timestamp', () => {
   const a = buildPlan(payout, { index });
   const b = buildPlan(payout, { index });
