@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -391,6 +391,98 @@ test('the shipped checker and the factory verifier reach the same verdict', (t) 
   writeFileSync(path.join(repo, 'tests', 'stray.test.ts'), `// ${strayMarker}REQ-999\ntest('stray', () => {});\n`);
   assert.equal(verifyPacket(project.outDir, { repo, strict: true }).ok, false);
   assert.equal(runShippedChecker(project.outDir, repo, true).code, 1);
+});
+
+test('a packet without a browser interface does not ask for a browser test', (t) => {
+  const project = compileTemp(
+    normalizeProfile({ name: 'go-cli', idea: 'A command-line tool that never renders a page.', kind: 'cli', stage: 'production', constraints: { stack: 'go' } })
+  );
+  t.after(project.cleanup);
+
+  const plan = readFileSync(path.join(project.outDir, '05-verification.md'), 'utf8');
+  const layers = plan.slice(plan.indexOf('## 1. Test layers'), plan.indexOf('## 2.'));
+  assert.ok(!/Playwright/.test(layers), 'no Playwright row for a product with no browser');
+  assert.match(layers, /go test/);
+});
+
+test('a single-file packet never points at documents it does not ship', (t) => {
+  // Tier 0 ships spec.md, spec.json, AGENTS.md and the checker. An instruction to
+  // read 05-verification.md there is an instruction to read a missing file.
+  const project = compileTemp(
+    normalizeProfile({ name: 'sketch', idea: 'A one-week prototype of a note-taking CLI that will be deleted if it is wrong.', kind: 'cli', stage: 'prototype' })
+  );
+  t.after(project.cleanup);
+
+  const shipped = readdirSync(project.outDir);
+  const text = shipped
+    .filter((file) => file.endsWith('.md'))
+    .map((file) => readFileSync(path.join(project.outDir, file), 'utf8'))
+    .join('\n');
+
+  const referenced = [...text.matchAll(/\b(0[0-7]-[a-z-]+\.md)\b/g)].map((match) => match[1]);
+  const missing = [...new Set(referenced)].filter((file) => !shipped.includes(file));
+  assert.deepEqual(missing, [], `packet references documents it does not ship: ${missing.join(', ')}`);
+});
+
+test('a single-file packet states the stack it is asking for', (t) => {
+  const project = compileTemp(
+    normalizeProfile({
+      name: 'go-sketch',
+      idea: 'A one-week prototype written in a language the packet must not guess at.',
+      kind: 'cli',
+      stage: 'prototype',
+      constraints: { stack: 'go' }
+    })
+  );
+  t.after(project.cleanup);
+
+  const text = readFileSync(path.join(project.outDir, 'spec.md'), 'utf8');
+  assert.match(text, /\bGo\b/, 'the declared stack is named');
+  assert.match(text, /go test/, 'the commands match the declared stack');
+});
+
+test('the idea\'s own rules that no requirement covers are listed, not dropped', (t) => {
+  const project = compileTemp(
+    makeProject('unmapped', {
+      idea: 'A booking service for therapists. A booking must never double-book a therapist, and a cancellation must free the slot immediately.'
+    })
+  );
+  t.after(project.cleanup);
+
+  const brief = readFileSync(path.join(project.outDir, '01-product-brief.md'), 'utf8');
+  assert.match(brief, /Obligations in the idea with no requirement yet/);
+  assert.match(brief, /never double-book a therapist/, 'the rule the catalog cannot know is quoted back');
+});
+
+test('an idea whose rules the catalog already covers produces no gap list', (t) => {
+  const project = compileTemp(
+    makeProject('covered', {
+      // The rule the catalog does carry: server-side authorization, deny by default.
+      idea: 'An API where an actor must be authorized server-side before reading any record.',
+      traits: ['auth', 'persistence'],
+      risks: { pii: true }
+    })
+  );
+  t.after(project.cleanup);
+
+  const brief = readFileSync(path.join(project.outDir, '01-product-brief.md'), 'utf8');
+  assert.ok(!brief.includes('Obligations in the idea with no requirement yet'), 'no invented gap when the catalog covers it');
+});
+
+test('a packet never borrows vocabulary from another product', (t) => {
+  // The domain model used to illustrate "name your own nouns" with the example
+  // project's nouns. A payments packet then talked about a retro board.
+  const project = compileTemp(makeProject('vocab', { kind: 'library', traits: [], risks: { payments: true } }));
+  t.after(project.cleanup);
+
+  const text = readdirSync(project.outDir)
+    .filter((file) => file.endsWith('.md'))
+    .map((file) => readFileSync(path.join(project.outDir, file), 'utf8'))
+    .join('\n');
+
+  for (const borrowed of ['retro board', 'retro-board', 'board, card, vote']) {
+    assert.ok(!text.toLowerCase().includes(borrowed), `packet mentions "${borrowed}", which belongs to an example project`);
+  }
 });
 
 test('a packet over its tier line ceiling fails, because verbosity is a defect', (t) => {

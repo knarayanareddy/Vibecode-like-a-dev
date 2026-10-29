@@ -105,7 +105,18 @@ function fail(message) {
   process.exit(2);
 }
 
-function loadPlanOrFail(profilePath) {
+/** Requirement ids already handed out by an existing packet, so they survive a catalog change. */
+function previousRequirementIds(packetDir) {
+  if (!packetDir || !existsSync(path.join(packetDir, 'spec.json'))) return {};
+  try {
+    const previous = JSON.parse(readFileSync(path.join(packetDir, 'spec.json'), 'utf8'));
+    return Object.fromEntries((previous.requirements ?? []).map((requirement) => [requirement.key, requirement.id]));
+  } catch {
+    return {};
+  }
+}
+
+function loadPlanOrFail(profilePath, { previousIds = {} } = {}) {
   if (!profilePath) fail('Missing profile path. Run `vld init <dir>` to create one.');
   if (!existsSync(profilePath)) fail(`No such profile: ${profilePath}`);
 
@@ -124,7 +135,7 @@ function loadPlanOrFail(profilePath) {
     index = buildIndex();
   }
 
-  return buildPlan(profile, { index });
+  return buildPlan(profile, { index, previousIds });
 }
 
 function printPlan(plan) {
@@ -270,9 +281,9 @@ function runPlan(profilePath) {
 }
 
 function runCompile(profilePath) {
-  const plan = loadPlanOrFail(profilePath);
   const out = option('-o', option('--out', null));
   if (!out) fail('Missing output directory. Usage: vld compile <profile.json> -o <dir>');
+  const plan = loadPlanOrFail(profilePath, { previousIds: previousRequirementIds(out) });
 
   let result;
   try {

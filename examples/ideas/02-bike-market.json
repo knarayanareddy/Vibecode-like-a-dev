@@ -1,0 +1,25 @@
+{
+  "name": "02-bike-market",
+  "idea": "A marketplace where people list, search and buy vintage bicycles, with seller profiles and photo uploads.",
+  "kind": "web-app",
+  "stage": "mvp",
+  "users": {
+    "scale": "medium"
+  },
+  "traits": [
+    "auth",
+    "search",
+    "upload",
+    "payments"
+  ],
+  "risks": {
+    "publicFacing": true,
+    "payments": true
+  },
+  "constraints": {
+    "team": 3,
+    "weeks": 8,
+    "stack": "typescript",
+    "mustUse": []
+  }
+}

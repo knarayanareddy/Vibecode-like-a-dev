@@ -12,7 +12,7 @@
 | Application | Use case orchestration, authorization, transaction boundaries | same runner, fake adapters | a few per use case |
 | Contract | Interface shapes and error envelopes | deferred | n/a |
 | Acceptance | The requirement criteria, end to end through the public surface | integration harness | one per criterion |
-| Journey | The primary user path in a real browser, if a UI exists | Playwright | one, maybe two |
+| Journey | The primary user path in a real browser | Playwright | one, maybe two |
 | Property | Invariants across generated inputs | deferred | n/a |
 
 ## 2. Anchors: how a requirement stays bound to a test

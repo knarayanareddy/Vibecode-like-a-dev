@@ -28,7 +28,7 @@ Candidates proposed from the selected requirements. Confirm or replace them in P
 | **Machine code** | A stable string identifying an error class; changes are breaking. | REQ-012 | no |
 | **Window** | The time bucket over which a limit is enforced. | REQ-013 | no |
 
-**What this table cannot supply:** the nouns of your product itself. For a retro board that is board, card, vote, action. Add three to five of them with definitions before Phase 1 — the rows above cover rules that recur across products, not your domain.
+**What this table cannot supply:** the nouns of your product itself. Name three to five of them with definitions before Phase 1 — the rows above cover rules that recur across products, not your domain.
 
 ### Naming rules
 

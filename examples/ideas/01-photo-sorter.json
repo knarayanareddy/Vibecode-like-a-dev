@@ -1,0 +1,17 @@
+{
+  "name": "01-photo-sorter",
+  "idea": "A CLI that renames photos in a folder by their EXIF capture date.",
+  "kind": "cli",
+  "stage": "prototype",
+  "users": {
+    "scale": "small"
+  },
+  "traits": [],
+  "risks": {},
+  "constraints": {
+    "team": 1,
+    "weeks": 1,
+    "stack": "typescript",
+    "mustUse": []
+  }
+}

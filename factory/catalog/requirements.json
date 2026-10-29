@@ -342,8 +342,23 @@
     {
       "key": "ops.observability",
       "when": {
-        "field": "tier",
-        "gte": 2
+        "any": [
+          {
+            "field": "tier",
+            "gte": 2
+          },
+          {
+            "field": "kind",
+            "in": [
+              "data-pipeline",
+              "automation"
+            ]
+          },
+          {
+            "field": "traits",
+            "includes": "background-jobs"
+          }
+        ]
       },
       "render": "reliability",
       "title": "Observable behaviour under failure",
@@ -358,6 +373,15 @@
       "key": "ops.rate-limits",
       "when": {
         "all": [
+          {
+            "field": "kind",
+            "in": [
+              "web-app",
+              "api",
+              "mobile",
+              "agent"
+            ]
+          },
           {
             "field": "risks.publicFacing",
             "eq": true
@@ -473,6 +497,62 @@
       "acceptance": [
         "Given the invariants listed in the domain model, when the suite runs, then each invariant is covered by a test that fails if its rule is inverted.",
         "Given an invariant added to the domain model, when it has no test, then the review checklist rejects the change."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "data.uploads",
+      "when": {
+        "all": [
+          {
+            "field": "traits",
+            "includes": "upload"
+          },
+          {
+            "any": [
+              {
+                "field": "tier",
+                "gte": 1
+              },
+              {
+                "field": "risks.publicFacing",
+                "eq": true
+              }
+            ]
+          }
+        ]
+      },
+      "render": "data",
+      "title": "Uploads are validated, contained and stripped",
+      "statement": "Every uploaded file is checked against an allowlist of types and a size limit before it is stored, stored under a generated name outside any directory the web server executes, and served only through an authorised or signed URL. Metadata that the product does not need, such as location, is removed on ingest.",
+      "failurePath": "An uploaded HTML file served from the asset host becomes stored XSS; a photo carrying GPS coordinates leaks the user's home address; an unbounded upload fills the disk and takes the service down.",
+      "acceptance": [
+        "Given a file whose type or size is not allowed, when it is uploaded, then it is rejected with a named reason and nothing is written to storage.",
+        "Given an allowed image with location metadata, when it is stored, then the stored object contains no location metadata and is reachable only through an authorised URL."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "mobile.offline",
+      "when": {
+        "all": [
+          {
+            "field": "traits",
+            "includes": "offline"
+          },
+          {
+            "field": "tier",
+            "gte": 1
+          }
+        ]
+      },
+      "render": "reliability",
+      "title": "Offline writes are durable and replay is safe",
+      "statement": "A write made without a network is persisted locally before the interface reports success, survives the application being killed, and is replayed on reconnect without duplicating the effect. Conflicting writes follow one documented rule, and the interface shows what is still pending rather than implying it is saved.",
+      "failurePath": "A user ticks a habit on a train, closes the app, and the tick is gone; or it is replayed three times and the streak counts three.",
+      "acceptance": [
+        "Given no network, when a write is made and the process is killed before reconnecting, then the write is present after restart and is eventually applied exactly once.",
+        "Given the same record edited on two devices while offline, when both reconnect, then the documented conflict rule decides the result and the loser is reported, not silently dropped."
       ],
       "verify": "automated"
     }

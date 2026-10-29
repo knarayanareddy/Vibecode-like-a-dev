@@ -9,7 +9,7 @@
  *     of this entire tool category, and this file is where that is decided.
  */
 
-import { FACTORY_VERSION, bullets, checkboxes, code, heading, ordered, quote, table, titleize } from './derive.mjs';
+import { FACTORY_VERSION, bullets, checkboxes, code, commandsFor, heading, ordered, quote, table, titleize } from './derive.mjs';
 
 const h1 = (text) => heading(1, text);
 const h2 = (text) => heading(2, text);
@@ -182,6 +182,16 @@ export function productBrief(plan, d) {
       ]
     ),
     '',
+    ...(d.unmapped.length > 0
+      ? [
+          h2('Obligations in the idea with no requirement yet'),
+          '',
+          "These sentences state a rule. The catalog has no requirement that covers it, so an agent reading only the requirement list would not build it. Turn each into a requirement with `vld change`, or record it as a non-goal — but do not leave it here.",
+          '',
+          bullets(d.unmapped.map((sentence) => `"${sentence}"`)),
+          ''
+        ]
+      : []),
     h2('In scope for v1'),
     '',
     'Derived from the selected requirements. Every capability below exists in `spec.json` with acceptance criteria.',
@@ -277,7 +287,7 @@ export function domainModel(plan, d) {
     '',
     table(['Term', 'Working definition', 'Source', 'Confirmed'], languageRows),
     '',
-    `**What this table cannot supply:** the nouns of your product itself. For a retro board that is board, card, vote, action. Add three to five of them with definitions before Phase 1 — the rows above cover rules that recur across products, not your domain.`,
+    '**What this table cannot supply:** the nouns of your product itself. Name three to five of them with definitions before Phase 1 — the rows above cover rules that recur across products, not your domain.',
     '',
     h3('Naming rules'),
     '',
@@ -594,6 +604,9 @@ export function contracts(plan, d) {
 // ------------------------------------------------------------- verification
 
 export function verification(plan, d) {
+  // A browser journey only exists for a product with a browser interface. Pretending
+  // otherwise tells a Go CLI to install Playwright.
+  const hasUi = ['web-app', 'mobile'].includes(plan.profile.kind);
   const trace = plan.requirements.map((requirement) => [
     requirement.id,
     requirement.acceptance.map((ac) => `${ac.id}`).join(', ') || '—',
@@ -637,11 +650,13 @@ export function verification(plan, d) {
     table(
       ['Layer', 'What it proves', 'Tool', 'Volume'],
       [
-        ['Domain unit', 'Invariants and state transitions, with no IO', d.stack.stack.tests.split(' ')[0], 'most tests live here'],
+        ['Domain unit', 'Invariants and state transitions, with no IO', d.stack.stack.unitRunner, 'most tests live here'],
         ['Application', 'Use case orchestration, authorization, transaction boundaries', 'same runner, fake adapters', 'a few per use case'],
         ['Contract', 'Interface shapes and error envelopes', plan.primitives.some((p) => p.id === 'testing.contract-tests') ? 'contract tests + fixtures' : 'deferred', plan.primitives.some((p) => p.id === 'testing.contract-tests') ? 'one per endpoint' : 'n/a'],
         ['Acceptance', 'The requirement criteria, end to end through the public surface', 'integration harness', 'one per criterion'],
-        ['Journey', 'The primary user path in a real browser, if a UI exists', 'Playwright', 'one, maybe two'],
+        hasUi
+          ? ['Journey', 'The primary user path in a real browser', 'Playwright', 'one, maybe two']
+          : ['Journey', 'Not applicable: this product has no browser interface, so the acceptance layer carries the end-to-end claim', 'n/a', 'none'],
         ['Property', 'Invariants across generated inputs', plan.primitives.some((p) => p.id === 'testing.property-based-testing') ? 'fast-check / hypothesis' : 'deferred', plan.primitives.some((p) => p.id === 'testing.property-based-testing') ? 'per core invariant' : 'n/a']
       ]
     ),
@@ -956,6 +971,10 @@ export function singleFileSpec(plan, d) {
     '',
     quote('Tier 0 packet: one file, because a sketch does not deserve a binder. Promote to a full packet when the stage moves past prototype.'),
     '',
+    `**Stack:** ${d.stack.stack.language} · ${d.stack.stack.unitRunner} for tests.${d.stack.recognised ? '' : ` The declared stack (${plan.profile.constraints.stack}) is not one this packet knows: replace this line and record the decision, because the requirements below are language-neutral but the commands are not.`}`,
+    '',
+    `**Build and test:** \`${commandsFor(plan.profile).join(' && ')}\``,
+    '',
     h2('1. Idea'),
     '',
     quote(plan.profile.idea),
@@ -964,6 +983,14 @@ export function singleFileSpec(plan, d) {
     '',
     bullets(plan.requirements.map((requirement) => `\`${requirement.id}\` ${requirement.title}`)),
     '',
+    ...(d.unmapped.length > 0
+      ? [
+          '**Obligations in the idea with no requirement yet** — build these, or say they are out of scope:',
+          '',
+          bullets(d.unmapped.map((sentence) => `"${sentence}"`)),
+          ''
+        ]
+      : []),
     h2('3. Not doing'),
     '',
     bullets(d.nonGoals.slice(0, 5)),
@@ -987,7 +1014,13 @@ export function singleFileSpec(plan, d) {
     '',
     h2('7. Rules for the agent'),
     '',
-    ordered(d.brief.split('\n').filter((line) => /^\d\./.test(line)).slice(0, 6)),
+    ordered(
+      d.brief
+        .split('\n')
+        .filter((line) => /^\d\./.test(line))
+        .slice(0, 6)
+        .map((line) => line.replace(/^\d+\.\s*/, ''))
+    ),
     ''
   ].join('\n');
 }
@@ -995,6 +1028,8 @@ export function singleFileSpec(plan, d) {
 // ------------------------------------------------------------------ AGENTS.md
 
 export function agentsMd(plan, d) {
+  const single = plan.packet === 'single-file';
+  const commands = [commandsFor(plan.profile).join(' && '), 'node specs/spec-check.mjs --repo .'];
   return [
     h1('AGENTS.md'),
     '',
@@ -1004,17 +1039,26 @@ export function agentsMd(plan, d) {
     '',
     h2('Read order'),
     '',
-    ordered([
-      'This file.',
-      '`spec.json` — the requirements and gates. If it is not in here, it is not in scope.',
-      '`05-verification.md` — how your work will be judged.',
-      '`02-domain-model.md` and `03-architecture.md` — the words you must use, and what may import what.',
-      'Your assigned requirement, and nothing else, until it is implemented.'
-    ]),
+    ordered(
+      single
+        ? [
+            'This file.',
+            '`spec.md` — the whole specification: scope, requirements, gates and build order.',
+            '`spec.json` — the same requirements, machine-readable. If it is not in here, it is not in scope.',
+            'Your assigned requirement, and nothing else, until it is implemented.'
+          ]
+        : [
+            'This file.',
+            '`spec.json` — the requirements and gates. If it is not in here, it is not in scope.',
+            '`05-verification.md` — how your work will be judged.',
+            '`02-domain-model.md` and `03-architecture.md` — the words you must use, and what may import what.',
+            'Your assigned requirement, and nothing else, until it is implemented.'
+          ]
+    ),
     '',
     h2('Commands'),
     '',
-    code('bash', ['# after setup', 'npm run lint && npm run typecheck && npm test', 'node specs/spec-check.mjs --repo .'].join('\n')),
+    code('bash', ['# after setup, then keep this block accurate', ...commands].join('\n')),
     '',
     'Replace with the real commands once Phase 0 exists, and keep this block accurate. An agent that cannot run the checks will claim success instead.',
     '',

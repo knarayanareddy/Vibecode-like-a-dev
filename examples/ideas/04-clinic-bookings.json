@@ -1,0 +1,27 @@
+{
+  "name": "04-clinic-bookings",
+  "idea": "A booking service for a network of four physiotherapy clinics. Patients book appointments with a specific therapist, reschedule or cancel them, and receive a reminder 24 hours before. Clinics publish their availability; a booking must never double-book a therapist. Staff can mark an appointment as attended or no-show, which feeds a monthly report. Patient records are health data, so retention, access and deletion rules matter and every read of a record must be auditable. The service is the system of record for appointments and is called by the clinic's own website and by the reception desk tool.",
+  "kind": "api",
+  "stage": "production",
+  "users": {
+    "scale": "medium"
+  },
+  "traits": [
+    "auth",
+    "notifications",
+    "i18n",
+    "persistence",
+    "background-jobs"
+  ],
+  "risks": {
+    "pii": true,
+    "regulated": true,
+    "integrations": true
+  },
+  "constraints": {
+    "team": 4,
+    "weeks": 16,
+    "stack": "python",
+    "mustUse": []
+  }
+}

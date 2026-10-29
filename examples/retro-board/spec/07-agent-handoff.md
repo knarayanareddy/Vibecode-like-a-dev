@@ -29,7 +29,7 @@ Non-negotiable rules for this build:
 
 V1 scope: The primary journey works end to end; Durable state with forward-only migrations; Authentication with explicit session lifecycle; Server-side authorization with deny-by-default; Accessible primary journey; Every screen has loading, empty, error and success states; One design token source; Errors are classified before they are rendered; Versioned machine-readable interface contract; One error envelope and one identifier scheme; Abuse limits on public entry points; The product's own rules are named and pinned.
 Out of scope: anything not listed above, plus the non-goals in specs/01-product-brief.md.
-Stack: typescript.
+Stack: typescript — build and test: npm run lint && npm run typecheck && npm test.
 Rigor tier: 1 (standard) — gates in specs/05-verification.md are the definition of done.
 
 Start with Phase 0, then Phase 1. Stop after each phase and report: what changed, which tests pass, which requirement moved, what you are unsure about.

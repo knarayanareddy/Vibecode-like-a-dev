@@ -49,6 +49,7 @@ const TS_STACK = {
   http: 'Hono or Fastify, typed handlers',
   db: 'PostgreSQL + Drizzle (forward-only SQL migrations)',
   validation: 'Zod at every boundary (input, env, external API)',
+  unitRunner: 'Vitest',
   tests: 'Vitest for unit and integration, Playwright for the primary journey',
   lint: 'ESLint + Prettier, typecheck in CI',
   logs: 'pino with a correlation ID field',
@@ -62,19 +63,57 @@ const PY_STACK = {
   http: 'FastAPI with Pydantic models at the boundary',
   db: 'PostgreSQL + SQLAlchemy Core/Alembic (forward-only migrations)',
   validation: 'Pydantic at every boundary (input, env, external API)',
+  unitRunner: 'pytest',
   tests: 'pytest for unit and integration, Playwright for the primary journey',
   lint: 'ruff + mypy, both blocking in CI',
   logs: 'structlog with a correlation ID field',
   ci: 'GitHub Actions'
 };
 
+const GO_STACK = {
+  language: 'Go 1.23',
+  runtime: 'the Go toolchain, shipped as a single static binary',
+  ui: 'templ + HTMX only if a UI is in scope',
+  http: 'net/http with chi, typed handlers and explicit error returns',
+  db: 'PostgreSQL + pgx, forward-only migrations with goose',
+  validation: 'explicit decode and validation at the boundary (no reflection magic)',
+  unitRunner: 'go test',
+  tests: 'go test for unit and integration, chromedp only if a UI exists',
+  lint: 'golangci-lint + go vet, both blocking in CI',
+  logs: 'slog with a correlation ID field',
+  ci: 'GitHub Actions'
+};
+
+const PYTHONISH = /python|fastapi|django|flask|pytest|poetry|uv/;
+const GOISH = /(^|[^a-z])go([^a-z]|$)|golang|go 1\./;
+
+export function isPythonStack(profile) {
+  return PYTHONISH.test(String(profile.constraints?.stack ?? '').toLowerCase());
+}
+
+export function isGoStack(profile) {
+  return GOISH.test(String(profile.constraints?.stack ?? '').toLowerCase());
+}
+
+/** The commands an agent must be able to run, derived from the declared stack. */
+export function commandsFor(profile) {
+  if (isGoStack(profile)) return ['go build ./...', 'go vet ./...', 'go test ./...'];
+  if (isPythonStack(profile)) return ['ruff check .', 'mypy .', 'pytest'];
+  return ['npm run lint', 'npm run typecheck', 'npm test'];
+}
+
 export function stackFor(profile) {
   const declared = String(profile.constraints.stack || 'undecided').toLowerCase();
-  const pythonish = /python|fastapi|django|flask|pytest|poetry|uv/.test(declared);
-  const base = pythonish ? PY_STACK : TS_STACK;
+  const pythonish = PYTHONISH.test(declared);
+  const goish = !pythonish && GOISH.test(declared);
+  const recognised = declared === 'undecided' || pythonish || goish || /typescript|node|react|vite|javascript/.test(declared);
+  const base = pythonish ? PY_STACK : goish ? GO_STACK : TS_STACK;
   const mustUse = profile.constraints.mustUse ?? [];
 
-  const rows = Object.entries(base).map(([layer, choice]) => [
+  // unitRunner is an implementation detail of the `tests` row, not a layer.
+  const rows = Object.entries(base)
+    .filter(([layer]) => layer !== 'unitRunner')
+    .map(([layer, choice]) => [
     layer,
     choice,
     layer === 'db'
@@ -88,8 +127,10 @@ export function stackFor(profile) {
     stack: base,
     rows,
     mustUse,
-    note:
-      mustUse.length > 0
+    recognised,
+    note: !recognised
+      ? `The declared stack (${declared}) is not one this packet has a built-in profile for, so the table above is a TypeScript default and must be replaced. Record an ADR that names the real language, test runner and migration tool before implementation starts; the requirements and gates are language-neutral and do not change.`
+      : mustUse.length > 0
         ? `Declared constraints: ${mustUse.join(', ')}. Keep them; record an ADR explaining how they fit, and do not add a second framework that duplicates their job.`
         : 'This is the default. Override it only through an ADR that names the trade-off; the tests and gates do not depend on any specific framework.'
   };
@@ -122,11 +163,8 @@ export function groupRequirements(requirements) {
 }
 
 export function anchorPath(profile, requirement) {
-  const pythonish = /python|fastapi|django|flask|pytest|poetry|uv/.test(
-    String(profile.constraints.stack || '').toLowerCase()
-  );
   const name = slugOf(requirement.key);
-  const ext = pythonish ? 'py' : 'ts';
+  const ext = isPythonStack(profile) ? 'py' : isGoStack(profile) ? 'go' : 'ts';
   return `tests/${requirement.render}/${name}.test.${ext}`;
 }
 
@@ -274,41 +312,119 @@ export function copyBrief(plan) {
     .slice(0, 12)
     .map((requirement) => requirement.title);
 
+  // A single-file packet does not ship the documents a full packet does, so an
+  // instruction to read them is an instruction to read a missing file.
+  const single = plan.packet === 'single-file';
+  const readFirst = single
+    ? '1. Read specs/AGENTS.md first, then spec.md (this file). The whole specification is those two.'
+    : '1. Read specs/AGENTS.md first, then specs/07-agent-handoff.md. Follow the loop there.';
+  const adrRule = single
+    ? '4. Do not add a dependency without writing down what it replaces and what breaks without it.'
+    : '4. Do not add a dependency without an ADR entry in specs/03-architecture.md.';
+  const outOfScope = single
+    ? 'Out of scope: anything not listed above or in the non-goals above.'
+    : 'Out of scope: anything not listed above, plus the non-goals in specs/01-product-brief.md.';
+  const gates = single
+    ? `Rigor tier: ${rigor.tier} (${rigor.label}) — the gates in section 5 are the definition of done.`
+    : `Rigor tier: ${rigor.tier} (${rigor.label}) — gates in specs/05-verification.md are the definition of done.`;
+
   return [
     `Build "${titleize(profile.name)}": ${profile.idea}`,
     '',
     `Non-negotiable rules for this build:`,
-    `1. Read specs/AGENTS.md first, then specs/07-agent-handoff.md. Follow the loop there.`,
+    readFirst,
     `2. Implement only what specs/spec.json lists as requirements. No extra endpoints, screens or abstractions.`,
     `3. Write a failing test before the behaviour, and add an @req anchor to every automated requirement.`,
-    `4. Do not add a dependency without an ADR entry in specs/03-architecture.md.`,
+    adrRule,
     `5. Do not delete or weaken a test to make something pass. Stop and report instead.`,
     `6. Keep files under ~300 lines and keep the domain layer free of framework imports.`,
     '',
     `V1 scope: ${scope.join('; ')}.`,
-    `Out of scope: anything not listed above, plus the non-goals in specs/01-product-brief.md.`,
-    `Stack: ${plan.config.stack === 'undecided' ? 'the defaults in specs/03-architecture.md' : plan.config.stack}.`,
-    `Rigor tier: ${rigor.tier} (${rigor.label}) — gates in specs/05-verification.md are the definition of done.`,
+    outOfScope,
+    `Stack: ${plan.config.stack === 'undecided' ? 'not fixed yet — pick one and record it before Phase 1' : plan.config.stack} — build and test: ${commandsFor(profile).join(' && ')}.`,
+    gates,
     '',
     'Start with Phase 0, then Phase 1. Stop after each phase and report: what changed, which tests pass, which requirement moved, what you are unsure about.'
   ].join('\n');
+}
+
+// ---------- obligations the catalog cannot see ----------
+
+const NORMATIVE = /\b(must|must not|cannot|can never|never|always|only|at most|at least|no more than|has to|have to|is required to|are required to)\b/i;
+const OBLIGATION_STOP = new Set([
+  'must', 'never', 'always', 'only', 'that', 'this', 'with', 'from', 'into', 'they', 'their', 'them',
+  'then', 'than', 'when', 'what', 'which', 'while', 'have', 'has', 'been', 'being', 'each', 'every',
+  'some', 'such', 'more', 'most', 'other', 'same', 'also', 'over', 'under', 'after', 'before', 'about',
+  'because', 'between', 'there', 'where', 'these', 'those', 'records', 'record', 'state', 'system',
+  'service', 'application', 'product', 'users', 'user', 'data', 'means', 'write', 'writes', 'written',
+  'given', 'criterion', 'criteria', 'acceptance', 'test', 'tests', 'requirement', 'requirements'
+]);
+
+const words = (text) =>
+  String(text)
+    .toLowerCase()
+    .split(/[^a-z0-9-]+/)
+    .filter((word) => word.length >= 4 && !OBLIGATION_STOP.has(word));
+
+/**
+ * Sentences in the idea that state an obligation the catalog does not already
+ * turn into a requirement.
+ *
+ * The catalog knows classes of obligation ("payments must be correct under
+ * retries"); it cannot know that *this* payout must not run twice for the same
+ * seller and day. Dropping such a sentence silently is how a spec that looks
+ * complete produces software that is not. So the packet lists them: either turn
+ * one into a requirement with `vld change`, or write it down as a non-goal.
+ */
+export function unmappedObligations(profile, requirements, domainText = '') {
+  const known = words(
+    requirements
+      .map((requirement) => `${requirement.title} ${requirement.statement} ${(requirement.acceptance ?? []).map((ac) => ac.text).join(' ')}`)
+      .concat(domainText)
+      .join(' ')
+  );
+  // No stemming library, so compare on prefixes: "authorized" and "authorization"
+  // are the same obligation, and so are "read" and "reading".
+  const shares = (word) => known.some((other) => other === word || other.startsWith(word) || word.startsWith(other));
+
+  const sentences = String(profile.idea ?? '')
+    .split(/(?<=[.!?;])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence.length >= 25 && NORMATIVE.test(sentence));
+
+  return sentences
+    .map((sentence) => {
+      const own = [...new Set(words(sentence))];
+      const shared = own.filter((word) => shares(word));
+      return { sentence, shared: shared.length, own: own.length };
+    })
+    .filter((entry) => entry.shared < Math.max(2, Math.ceil(entry.own * 0.5)))
+    .map((entry) => entry.sentence);
 }
 
 // ---------- whole-packet derivation ----------
 
 export function derive(plan) {
   const contexts = contextsFor(plan.profile);
+  const aggregates = aggregatesFor(plan.requirements);
+  // Invariants the domain model already states count as coverage: the idea's
+  // rule is in the packet even when no requirement carries it.
+  const domainText = aggregates
+    .map((aggregate) => `${aggregate.name} ${(aggregate.invariants ?? []).join(' ')}`)
+    .join(' ');
   return {
     project: titleize(plan.profile.name),
     contexts,
     terms: termsFor(plan.requirements),
-    aggregates: aggregatesFor(plan.requirements),
+    aggregates,
     groups: groupRequirements(plan.requirements),
     nonGoals: nonGoalsFor(plan.profile),
     questions: openQuestionsFor(plan.profile, plan.rigor),
     stack: stackFor(plan.profile),
+    commands: commandsFor(plan.profile),
     phases: buildPhases(plan),
     brief: copyBrief(plan),
+    unmapped: unmappedObligations(plan.profile, plan.requirements, domainText),
     anchors: new Map(plan.requirements.map((requirement) => [requirement.id, anchorPath(plan.profile, requirement)]))
   };
 }

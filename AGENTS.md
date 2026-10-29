@@ -51,11 +51,12 @@ No dependencies, no build step, Node 22+. If a change requires a dependency, sto
 11. **A delta declares four things:** what changes, its blast radius, a probe, and a rollback. High risk without a probe and a rollback is invalid, not merely discouraged.
 12. **Suppression is reported, never silent.** `@req-ignore` and `anchors.exclude` exist because a document or a fixture may legitimately quote a marker. Every run prints how many anchors were ignored; a suppression path that hides work quietly defeats the purpose of the guard.
 13. **Progress is never regenerated.** A recompile carries `status` and `anchor` forward per requirement key and reports what it dropped. A no-op recompile must be byte-identical to a fresh compile, so `specs/` stays reviewable in a diff.
-14. **The MCP server must not drift from the CLI.** Both call `buildPlan`. If you add a tool, it returns policy-derived data, never a second implementation of the selection rules.
+14. **Requirement ids are permanent.** `REQ-###` is an anchor target in product repositories. Ids are preserved per requirement key and retired when a requirement drops out — never renumbered, never recycled. This has a test; keep it.
+15. **The MCP server must not drift from the CLI.** Both call `buildPlan`. If you add a tool, it returns policy-derived data, never a second implementation of the selection rules.
 
 ## Definition of done
 
-- [ ] `npm run check` passes, including `index --check`, the example packet verification and this repository's own drift guard (`specs/spec-check.mjs --repo . --strict`).
+- [ ] `npm run check` passes, including `index --check`, the example packet verification, this repository's own drift guard (`specs/spec-check.mjs --repo . --strict`) and the ten-idea stress run.
 - [ ] If a primitive changed, its body is still under 500 lines and its checklist items are falsifiable.
 - [ ] If policy or routing changed, `examples/retro-board/spec` **and** the self-spec packet (`npm run dogfood`) were regenerated and the diff was read, not just accepted.
 - [ ] If a new practice was added, it is routed, its `enforces` keys exist, and its behaviour is covered by a test.

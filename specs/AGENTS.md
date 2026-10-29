@@ -15,7 +15,7 @@ You are implementing a project from a specification. The specification is the co
 ## Commands
 
 ```bash
-# after setup
+# after setup, then keep this block accurate
 npm run lint && npm run typecheck && npm test
 node specs/spec-check.mjs --repo .
 ```

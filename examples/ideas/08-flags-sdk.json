@@ -1,0 +1,21 @@
+{
+  "name": "08-flags-sdk",
+  "idea": "A TypeScript SDK that evaluates feature flags locally. The application initialises the client with a server-side key, receives a ruleset, and evaluates flags in-process with a target under one millisecond. The SDK must fail open to a documented default when the ruleset is stale beyond a configured maximum age, must never throw from an evaluation, and must be usable in both Node and the browser. Rules include percentage rollouts that must be stable per user across devices, so a deterministic hash is part of the contract. Published as a library with semver guarantees.",
+  "kind": "library",
+  "stage": "production",
+  "users": {
+    "scale": "large"
+  },
+  "traits": [
+    "persistence"
+  ],
+  "risks": {
+    "publicFacing": true
+  },
+  "constraints": {
+    "team": 2,
+    "weeks": 8,
+    "stack": "typescript",
+    "mustUse": []
+  }
+}

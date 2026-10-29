@@ -30,3 +30,5 @@ tmp/
 .tmp/
 *.log
 
+
+examples/ideas/build/

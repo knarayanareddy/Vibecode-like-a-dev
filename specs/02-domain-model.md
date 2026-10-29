@@ -12,7 +12,7 @@ Candidates proposed from the selected requirements. Confirm or replace them in P
 | --- | --- | --- | --- |
 | **Command grammar** | The documented shape of commands, flags and exit codes. | REQ-004 | no |
 
-**What this table cannot supply:** the nouns of your product itself. For a retro board that is board, card, vote, action. Add three to five of them with definitions before Phase 1 — the rows above cover rules that recur across products, not your domain.
+**What this table cannot supply:** the nouns of your product itself. Name three to five of them with definitions before Phase 1 — the rows above cover rules that recur across products, not your domain.
 
 ### Naming rules
 

@@ -42,6 +42,9 @@ jobs:
       - name: This repository passes its own drift guard
         run: node specs/spec-check.mjs --repo . --strict
 
+      - name: Ten ideas survive the pipeline
+        run: node scripts/stress-test.mjs
+
       - name: Adoption runs against this repository
         run: node factory/cli.mjs adopt . -o /tmp/self-profile.json --force
 

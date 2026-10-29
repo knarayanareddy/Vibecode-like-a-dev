@@ -271,7 +271,8 @@ The most useful test of this tool is whether it can describe the tool. `profile.
 
 ```bash
 npm run dogfood    # compile profile.json -> specs/, then guard this repo with its own checker
-npm run check      # index freshness + tests + example packet + specs/spec-check.mjs --repo . --strict
+npm run stress     # ten product ideas through the pipeline, judged on more than exit codes
+npm run check      # index + tests + example packet + self-guard + stress
 ```
 
 What it produces today:
@@ -294,6 +295,14 @@ The interesting part is what it refused to accept. Running the tool on itself fo
 And it forced two policy corrections: a local CLI was being told to apply OWASP ASVS (now gated on a network surface or a credential), and the catalog had no requirement of the form *"the product's own rules are pinned by tests"* — which is exactly what a spec tool owes its users, so `core.domain-invariants` is now always on, anchored to the very tests you are reading.
 
 What this proves: the loop closes — profile in, packet out, guard passes, and the packet's own requirements are anchored in real tests. What it does not prove: that the packet makes an agent produce *better* software. That is the evaluation harness in the roadmap, and until it exists this section is evidence of internal consistency, not of effectiveness.
+
+## Does it hold up? Ten ideas, judged
+
+`npm run stress` compiles ten committed ideas — from a one-line CLI to a five-sentence regulated ledger, across TypeScript, Python and Go — and scores each packet for things `verify` cannot see: does a Python service get pytest, does a library get told to rate-limit endpoints, does a packet point at a document it does not ship, how much of the idea actually reached the requirements.
+
+The first run found six defects: catalog insertions renumbered requirement ids and silently repointed anchors; a payments packet quoted a *retro board* example; a Go project was handed Vitest; tier-0 packets told the agent to read documents they do not contain; libraries were told to rate-limit their endpoints; and a tier-1 daemon had no observability obligation. All six are fixed, each with the test that would catch it again. Two coverage gaps closed with it: uploads and offline had no obligation at all.
+
+The finding that did not get fixed, because it is the product's actual boundary: **mean idea-vocabulary coverage is 21%**. The catalog knows engineering classes — payments, tenancy, pipelines, public libraries — not your business. So every normative sentence in an idea that no requirement covers is quoted back as an *unmapped obligation*, and `vld change` is how it becomes a requirement. Full results and method: [`docs/STRESS-TEST.md`](docs/STRESS-TEST.md).
 
 ## Why not just use Spec Kit / Kiro / BMAD / OpenSpec?
 
@@ -353,22 +362,27 @@ factory/
   policy.json          tiers, risk signals, gates, size ceilings
   routing.json         which practice applies when, and why
   catalog/
-    requirements.json  ~24 requirement templates with acceptance criteria
+    requirements.json  27 requirement templates with acceptance criteria
   lib/                 frontmatter, predicates, planner, emitter, verifier,
                        scan + adopt, change (delta specs), mcp (server)
   templates/
     spec-check.mjs     the drift guard shipped into every packet
   schema/
     spec.schema.json   the manifest contract
-  test/                83 tests: data integrity, planning, reproducibility, adoption,
-                       delta specs, MCP protocol, end-to-end enforcement
+  test/                98 tests: data integrity, planning, reproducibility, adoption,
+                       delta specs, MCP protocol, CLI contract, end-to-end enforcement
+profile.json           this repository's own profile
+specs/                 this repository's own compiled packet, guarded in CI
+scripts/stress-test.mjs  ten ideas through the pipeline, judged beyond exit codes
 examples/retro-board/  a profile and its compiled packet
-docs/                  research notes, authoring guide, decision records
+examples/ideas/        ten profiles spanning tier 0-3, eight kinds, three stacks
+docs/                  research notes, authoring guide, stress test, decision records
 ```
 
 ```bash
-npm test        # 83 tests
-npm run check   # index freshness + tests + verify the example packet
+npm test        # 98 tests
+npm run stress  # ten ideas through the pipeline, scored on soundness, not exit codes
+npm run check   # index freshness + tests + example packet + own drift guard + stress
 ```
 
 ## Honest limitations
@@ -381,13 +395,15 @@ npm run check   # index freshness + tests + verify the example packet
 - **Delta specs are declarative.** `vld change` produces the proposal, the manifest diff and the verification rules, but it cannot apply a migration or prove the blast radius is complete for you.
 - **MCP tools select; they do not write.** The server answers "what applies and why". Composing the packet is still a compile (or a human/agent writing prose).
 - **The CLI path assumes the profile describes the project honestly.** If you say `mvp` about a regulated product, you get a light packet. The `risks` fields exist because intent cannot be inferred.
+- **The catalog knows classes, not businesses.** Measured over ten ideas, 21% of the idea's distinctive vocabulary reaches the requirements or the domain model. Payments, tenancy, pipelines and public libraries are well covered because they are heavily conventional; a log shipper or a standup bot is a scaffold plus a checklist of the author's own rules. The packet says so out loud rather than pretending otherwise.
+- **Tier 1 has very little headroom.** The tightest packet in the stress set sits at 885 of 900 lines. The ceiling is deliberate — length is this category's main failure — but it means a new tier-1 obligation requires trimming prose first.
 - **Self-consistency is not effectiveness.** This repository passes its own guard, which shows the pipeline is coherent, not that the resulting software is better. The packet also describes a tool whose requirements are unusually easy to anchor because the tool is tested; other products will find that step harder, and nothing here measures that difficulty.
 - **Not published to npm yet.** Clone and use `node factory/cli.mjs`. The `bin` entry is ready.
 
 ## Roadmap
 
 Shipped in v0.2: `vld adopt`, `vld change` (delta specs), `vld mcp`.
-Shipped in v0.3: progress that survives recompiles, anchor suppression (`@req-ignore`, `anchors.exclude`), the always-on `core.domain-invariants` requirement, and a self-spec packet guarded in CI.
+Shipped in v0.3: progress that survives recompiles, anchor suppression (`@req-ignore`, `anchors.exclude`), stable requirement ids across catalog changes, unmapped-obligation reporting, Go stack support, the always-on `core.domain-invariants` requirement, a self-spec packet guarded in CI, and a ten-idea stress run in `npm run check`.
 
 1. **An evaluation harness** — the same set of tickets built with no spec, a generic spec, and this packet, scored on merge rate, review defects, spec drift and cost. Until that exists, every claim here is a design argument.
 2. **Exports** — `spec-kit` and `kiro` formats from one source of truth, so the packet is portable rather than a new ecosystem.

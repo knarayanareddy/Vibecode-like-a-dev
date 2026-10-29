@@ -161,12 +161,54 @@ export function selectPrimitives(profile, index, routing, rigor) {
   };
 }
 
-export function selectRequirements(profile, catalog, rigor) {
+/**
+ * Requirement identifiers must outlive the catalog.
+ *
+ * Anchors in a product repository cite `REQ-###`. If ids were a position in the
+ * catalog, inserting one requirement in the middle would renumber every later
+ * requirement and silently repoint thousands of anchors at the wrong rules --
+ * the check would still pass, which is the worst possible failure. So ids are
+ * assigned once and then preserved per requirement key:
+ *
+ *   - a key that already had an id keeps it;
+ *   - ids that belonged to requirements which dropped out are retired, never
+ *     recycled, so a stale anchor cannot bind to a different rule;
+ *   - new keys take the next unused number.
+ *
+ * A first compile has no previous ids, so it is still a deterministic function
+ * of the catalog.
+ */
+function assignRequirementIds(chosen, previousIds = {}) {
+  const used = new Set(Object.values(previousIds));
+  const ids = new Map();
+
+  for (const requirement of chosen) {
+    const previous = previousIds[requirement.key];
+    if (previous && !ids.has(previous)) {
+      ids.set(requirement.key, previous);
+    }
+  }
+
+  let next = 1;
+  for (const requirement of chosen) {
+    if (ids.has(requirement.key)) continue;
+    while (used.has(`REQ-${String(next).padStart(3, '0')}`)) next += 1;
+    const id = `REQ-${String(next).padStart(3, '0')}`;
+    ids.set(requirement.key, id);
+    used.add(id);
+    next += 1;
+  }
+
+  return ids;
+}
+
+export function selectRequirements(profile, catalog, rigor, previousIds = {}) {
   const context = { ...profile, tier: rigor.tier };
   const chosen = catalog.requirements.filter((requirement) => evaluate(requirement.when, context));
+  const ids = assignRequirementIds(chosen, previousIds);
 
-  const requirements = chosen.map((requirement, index) => ({
-    id: `REQ-${String(index + 1).padStart(3, '0')}`,
+  const requirements = chosen.map((requirement) => ({
+    id: ids.get(requirement.key),
     key: requirement.key,
     render: requirement.render,
     title: requirement.title,
@@ -207,10 +249,13 @@ export function collectGates(profile, policy, rigor, primitives) {
   return [...gates.values()];
 }
 
-export function buildPlan(profile, { index, routing = loadRouting(), policy = loadPolicy(), catalog = loadCatalog() }) {
+export function buildPlan(
+  profile,
+  { index, routing = loadRouting(), policy = loadPolicy(), catalog = loadCatalog(), previousIds = {} }
+) {
   const rigor = computeRigor(profile, policy);
   const { selected, skipped, deferred, missing } = selectPrimitives(profile, index, routing, rigor);
-  const { requirements } = selectRequirements(profile, catalog, rigor);
+  const { requirements } = selectRequirements(profile, catalog, rigor, previousIds);
   const gates = collectGates(profile, policy, rigor, selected);
   const docs = policy.requiredDocs[rigor.packet];
 
