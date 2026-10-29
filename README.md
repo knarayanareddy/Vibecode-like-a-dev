@@ -378,14 +378,17 @@ specs/                 this repository's own compiled packet, guarded in CI
 scripts/
   stress-test.mjs      ten ideas through the pipeline, judged beyond exit codes
   stress-adversarial.mjs  24 hostile packets and 6 inputs that must be refused
+  eval-library.mjs     library health: self-recall@1, trigger collisions, dead weight
+  eval-specificity.mjs  is a packet about this product, or a form letter with a name in it
   lib/packet-audit.mjs    the shared judgement both suites use
 examples/retro-board/  a profile and its compiled packet
 examples/ideas/        ten representative profiles, plus adversarial/cases.json
-docs/                  research notes, authoring guide, stress test, decision records
+docs/                  research notes, authoring guide, stress test, landscape survey, ADRs
 ```
 
 ```bash
 npm test        # 98 tests
+npm run eval    # library health + packet specificity (how much of two packets is identical)
 npm run stress  # 10 representative + 24 hostile ideas, and 6 refusals; scored on soundness
 npm run check   # index freshness + tests + example packet + own drift guard + stress
 ```

@@ -9,7 +9,7 @@
  *     of this entire tool category, and this file is where that is decided.
  */
 
-import { FACTORY_VERSION, bullets, checkboxes, code, commandsFor, heading, inline, ordered, quote, table, titleize } from './derive.mjs';
+import { FACTORY_VERSION, bullets, checkboxes, code, commandsFor, gateReading, heading, inline, ordered, quote, table, titleize } from './derive.mjs';
 
 const h1 = (text) => heading(1, text);
 const h2 = (text) => heading(2, text);
@@ -27,12 +27,13 @@ const confirmed = '_confirm_';
 
 export function constitution(plan, d) {
   const repoUrl = 'https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main';
-  const practices = plan.primitives.map((primitive) => [
-    `\`${primitive.id}\``,
-    primitive.title,
-    primitive.why,
-    `[SKILL.md](${repoUrl}/${primitive.path})`
-  ]);
+  // The packet states the decision (what binds this practice here); the practice's own
+  // prose stays in the library, which is where an agent can read it without the packet
+  // repeating it in every project.
+  const practices = plan.primitives.map((primitive) => {
+    const card = d.cards.find((entry) => entry.id === primitive.id);
+    return [`\`${primitive.id}\``, card?.bindTo ?? primitive.title, `[SKILL.md](${repoUrl}/${primitive.path})`];
+  });
 
   const notDoing = plan.skipped.map((entry) => [
     `\`${entry.id}\``,
@@ -46,27 +47,54 @@ export function constitution(plan, d) {
     `applicable, but tier ${plan.rigor.tier} allows ${plan.rigor.maxPrimitives} practices`
   ]);
 
+  const { profile } = plan;
+  const db = d.db;
+  const primary = d.primary;
+
+  // Stable law, then the clause that makes it binding *here*. The law survives a
+  // change of product; the interpretation is generated from the profile and is
+  // the part a reviewer should argue with.
   const laws = [
-    ['The spec is the interface.', 'Behaviour changes start as a change to a requirement or an ADR, not as a code edit that the spec later explains.'],
-    ['A failing test comes before behaviour.', 'The test names the criterion it proves with an `@req` anchor. Untested behaviour is not done, it is proposed.'],
-    ['One term, one meaning.', 'If two words exist for one concept, one of them is a bug.'],
-    ['Boundaries before bodies.', 'Interfaces, error shapes and data contracts are fixed while changing them is still free.'],
-    ['The domain stays pure.', 'Rules live in code that imports no framework, no database and no vendor SDK.'],
-    ['Boring technology, justified additions.', 'Every dependency earns an ADR naming what it replaces and what breaks without it.'],
-    ['Fail closed.', 'Deny by default for authorization; refuse rather than guess; never silently degrade a security control.'],
-    ['Make it observable.', 'If a failure cannot be seen in a log with a correlation ID, it will be discovered by a user.'],
-    ['Reversible beats predictable.', 'Ship behind a flag or with a rollback, because the forecast is wrong more often than the rollback is used.'],
+    ['The spec is the interface.', `A change to how ${d.aPrimary} behaves starts as a change to a requirement or an ADR — never as a code edit the spec is later bent to match.`],
+    ['A failing test comes before behaviour.', `${plan.requirements.filter((requirement) => requirement.verify === 'automated').length} of ${plan.requirements.length} requirements are proven by a test carrying \`@req\`; the rest carry a manual script. Untested behaviour is proposed, not done.`],
+    ['One term, one meaning.', `The nouns in \`02-domain-model.md\` are the only names for those things — in code, in tests, in commit messages.`],
+    ['Boundaries before bodies.', `Interfaces are fixed while changing them is free. Once \`04-contracts.md\` is signed off, a shape change needs its own requirement.`],
+    ['The domain stays pure.', `Rules import no framework, no ${db === 'SQLite' ? 'database driver' : db}, and no vendor SDK. ${d.style.name} only holds if this is checked, not intended.`],
+    ['Boring technology, justified additions.', `Every dependency beyond the declared stack earns an ADR naming what it replaces and what breaks without it.`],
+    ['Fail closed.', profile.risks.multiTenant
+      ? `Deny by default. A ${primary} read without a resolved tenant is a failure, not an empty list.`
+      : 'Deny by default for authorization; refuse rather than guess; never silently weaken a control to make a test pass.'],
+    ['Make it observable.', `Every failure this product can produce is visible in a log with a correlation id, including the ones you think cannot happen.`],
+    ['Reversible beats predictable.', `Schema changes go forward only, behind a ${db} migration; ${plan.config.weeks}-week scope means something gets cut, so cut features, not rollback paths.`],
     ['Stop and ask before guessing.', 'Three failed attempts at the same failure means the model of the problem is wrong. Escalate with what you tried.']
   ];
 
+  const conditional = [];
+  if (profile.traits.includes('payments')) conditional.push(['Money is never approximate.', `A ${primary} that moves money writes a ledger entry in the same transaction as the state change. No balance is ever recomputed from events at read time.`]);
+  if (profile.risks.multiTenant) conditional.push(['Tenancy is not a parameter.', 'The tenant comes from the session. Any handler that reads it from a body or a query string is a bug, including in tests.']);
+  if (profile.traits.includes('ai')) conditional.push(['A model is an untrusted dependency.', 'Model output is validated before it is used; a timeout or malformed response degrades, it never half-writes.']);
+  if (profile.traits.includes('offline')) conditional.push(['A write is confirmed once.', `A queued ${primary} change replays idempotently; a duplicate is discarded on the server, not in the client.`]);
+  if (profile.risks.regulated || profile.risks.pii) conditional.push(['Personal data has a reason and a lifetime.', 'Every field has a stated purpose and retention; nothing personal lands in logs, fixtures or error details.']);
+  if (profile.traits.includes('upload')) conditional.push(['Uploaded content is hostile.', 'Type is sniffed, size is capped, the filename is never a path, and metadata is stripped before storage.']);
+
   const dod = [
-    'Every acceptance criterion for the requirement maps to a named test, or to a manual script that has been run once.',
-    'The `@req` anchor exists in the test file and `node specs/spec-check.mjs` passes.',
-    'Failure paths are implemented and tested, not just described.',
-    'No new dependency without an ADR entry, and no new environment variable without documentation.',
-    'The traceability row for the requirement is updated with the anchor path.',
-    'The change can be reverted with one command or one flag.'
+    `Every acceptance criterion of the requirement maps to a named test, or to a manual script that has been run once${d.start.verify === 'automated' ? ` — starting with ${d.start.id}, anch\u200bored at \`${d.anchors.get(d.start.id)}\`` : ` — starting with ${d.start.id}`}.`,
+    '`node specs/spec-check.mjs` passes and the anchor exists in the file it names.',
+    'Failure paths are implemented and tested, not only described.',
+    'No new dependency without an ADR; no new environment variable without documentation.'
   ];
+  if (profile.traits.includes('payments')) dod.push(`A refund or reversal path exists and is tested for the ${primary} it applies to.`);
+  if (profile.risks.multiTenant) dod.push('At least one test proves a cross-tenant read is impossible.');
+  if (plan.config.team > 1) dod.push('The change is reviewable in one sitting; if it is not, it is two changes.');
+  else dod.push('The change can be reverted with one command or one flag.');
+
+  const protocol = [
+    ['New behaviour', 'Add or amend a requirement in `spec.json`, then write the failing test.'],
+    ['Changed interface or error shape', 'Update the contract inventory in 04-contracts.md, then the test.'],
+    ['New dependency or service', 'ADR in 03-architecture.md: what it replaces, what breaks without it, cost of removal.'],
+    ['Test deletion or weakening', 'Not allowed as a fix. Skip it with a requirement reference and escalate.']
+  ];
+  if (profile.kind === 'web-app' || profile.traits.includes('auth')) protocol.push(['Scope expansion', 'Edit the brief and remove something of comparable size in the same change.']);
 
   return [
     h1(`Constitution — ${d.project}`),
@@ -74,64 +102,58 @@ export function constitution(plan, d) {
     stamp(plan),
     '',
     quote(
-      `This is the contract between the human who owns this product and every agent that touches the repository. ` +
-        `When a request, a habit or a model's confidence conflicts with this file, this file wins. ` +
-        `Read order: this file, then 07-agent-handoff.md, then the document for the area you are about to change.`
+      `The contract between whoever owns ${d.project} and every agent that touches the repository. ` +
+        `When a request, a habit or a model's confidence conflicts with this file, this file wins.`
     ),
     '',
-    h2('0. Rigor: why this project is tier ' + plan.rigor.tier),
+    h2(`0. Why this project is tier ${plan.rigor.tier}`),
     '',
-    `Rigor is a cost, so it is computed rather than assumed. Score **${plan.rigor.score}** from these signals:`,
+    `Rigor is a cost, so it is computed rather than assumed. Score **${plan.rigor.score}**:`,
     '',
-    d && plan.rigor.signals.length > 0
+    plan.rigor.signals.length > 0
       ? table(['Signal', 'Weight'], plan.rigor.signals.map((signal) => [signal.label, `+${signal.weight}`]))
       : '_No risk signals detected. This is a low-stakes build and it is treated as one._',
     '',
-    plan.rigor.capped ? `**Capped:** ${plan.rigor.cappedReason}` : 'No cap applied: the stage permits the full rigor the signals imply.',
+    plan.rigor.capped ? `**Capped:** ${plan.rigor.cappedReason}` : `No cap applied: the stage "${profile.stage}" permits the rigor the signals imply.`,
     '',
-    `Tier ${plan.rigor.tier} (${plan.rigor.label}) allows at most ${plan.rigor.maxPrimitives} selected practices and requires the gates listed in [05-verification.md](05-verification.md).`,
+    `Tier ${plan.rigor.tier} (${plan.rigor.label}) allows ${plan.rigor.maxPrimitives} practices and requires ${plan.gates.length} gates, listed in [05-verification.md](05-verification.md).`,
     '',
-    h2('1. The ten laws'),
+    h2('1. The laws, and what they mean here'),
     '',
-    ordered(laws.map(([law, detail]) => `**${law}** ${detail}`)),
+    'The left column is law for every project this factory compiles. The right column is what that law obliges here — when the two seem to conflict, the right column is wrong and belongs back in the compiler.',
     '',
-    h2('2. Definition of done'),
+    table(['Law', `In ${d.project}`], laws),
     '',
-    'A requirement is done when all of the following are true. Not "mostly true".',
+    ...(conditional.length > 0
+      ? [h2('2. Laws this profile adds'), '', 'These bind because of what the product does, not because they are generally good.', '', table(['Law', 'Obligation'], conditional), '']
+      : []),
+    h2(conditional.length > 0 ? '3. Definition of done' : '2. Definition of done'),
+    '',
+    `${d.aPrimary.charAt(0).toUpperCase()}${d.aPrimary.slice(1)} change is done when all of the following are true for ${d.project}. Not "mostly true".`,
     '',
     checkboxes(dod),
     '',
-    h2('3. Change protocol'),
+    h2(conditional.length > 0 ? '4. Change protocol' : '3. Change protocol'),
     '',
-    table(
-      ['Change', 'What must happen first'],
-      [
-        ['New behaviour', 'Add or amend a requirement in `spec.json`, then write the failing test.'],
-        ['Changed interface or error shape', 'Update the contract inventory in 04-contracts.md, then the test.'],
-        ['New dependency or service', 'ADR in 03-architecture.md: what it replaces, what breaks without it, cost of removal.'],
-        ['Scope expansion', 'Edit the brief, and remove something of comparable size in the same change.'],
-        ['Test deletion or weakening', 'Not allowed as a fix. Mark the test skipped with a requirement reference and escalate.'],
-        ['Schema change', 'Forward-only migration plus the rollback or restore note in 04-contracts.md.']
-      ]
-    ),
+    table(['Change', 'What must happen first'], protocol),
     '',
-    h2('4. Selected practices and why they were selected'),
+    h2(conditional.length > 0 ? '5. Selected practices' : '4. Selected practices'),
     '',
-    'Each row is a decision with a reason, so it can be challenged later. The full text of each practice lives in the factory repository, linked in the last column.',
+    `${plan.primitives.length} practices for ${d.project}. Each row is bound to the requirement or artefact it serves — the practice's own reasoning lives in the library, linked in the last column, because this packet carries decisions rather than a copy of the book.`,
     '',
-    table(['Practice', 'Title', 'Why here', 'Read it'], practices),
+    table(['Practice', 'Bound to here', 'Read it'], practices),
     '',
-    h2('5. Deliberately not doing'),
+    h2(conditional.length > 0 ? '6. Deliberately not doing' : '5. Deliberately not doing'),
     '',
-    'Skipped on purpose. If a review comment asks for one of these, the answer is the reason in this table, not silence.',
+    `${plan.skipped.length} practices were considered and refused for ${d.project}. If a review comment asks for one, the answer is the reason below, not silence.`,
     '',
     table(['Practice', 'Title', 'Reason'], notDoing),
     '',
     deferred.length > 0
       ? [
-          `### Deferred by budget`,
+          '### Deferred by budget',
           '',
-          `These apply to this project and did not fit the tier-${plan.rigor.tier} ceiling of ${plan.rigor.maxPrimitives}. Nothing is lost: raise the cap in \`factory/policy.json\` and they return on the next compile.`,
+          `These apply and did not fit the tier-${plan.rigor.tier} ceiling of ${plan.rigor.maxPrimitives}. Nothing is lost: raise the cap in \`factory/policy.json\` and they return on the next compile.`,
           '',
           table(['Practice', 'Title', 'Detail'], deferred),
           ''
@@ -145,7 +167,12 @@ export function constitution(plan, d) {
 
 export function productBrief(plan, d) {
   const inScope = d.groups
-    .map((group) => `**${group.label}**\n\n${bullets(group.items.map((item) => `\`${item.id}\` ${item.title}`))}`)
+    .map(
+      (group) =>
+        `**${group.label}**\n\n${bullets(
+          group.items.map((item) => `\`${item.id}\` ${d.phrases.get(item.key) ?? item.title} _(${item.title.toLowerCase()})_`)
+        )}`
+    )
     .join('\n\n');
 
   const measures = {
@@ -170,15 +197,15 @@ export function productBrief(plan, d) {
     '',
     h2('Problem and primary user'),
     '',
-    'Write this in one paragraph each, from the user\'s side. The prompt is deliberately harder than the code.',
+    `Answer from the ${d.primary} side, in the user's words. These four answers are what an agent will otherwise invent.`,
     '',
     table(
-      ['Question', 'Answer'],
+      ['Question', `Answer for ${d.project}`],
       [
-        ['Who exactly is the user?', confirmed],
-        ['What do they do today instead?', confirmed],
-        ['What does the product remove from their day?', confirmed],
-        ['What makes them stop using it?', confirmed]
+        [`Who handles the ${d.primary} today?`, confirmed],
+        [`What do they do instead — a spreadsheet, a chat thread, ${d.aSecondary} in another tool?`, confirmed],
+        [`What does ${d.project} remove from that day?`, confirmed],
+        [`What makes them abandon it after one use?`, confirmed]
       ]
     ),
     '',
@@ -197,19 +224,19 @@ export function productBrief(plan, d) {
       : []),
     h2('In scope for v1'),
     '',
-    'Derived from the selected requirements. Every capability below exists in `spec.json` with acceptance criteria.',
+    `${plan.requirements.length} requirements, each with acceptance criteria in \`spec.json\`. They were selected by what the idea asks for, not by what a template ships.`,
     '',
     inScope,
     '',
     h2('Out of scope'),
     '',
-    'A starter set, confirmed or replaced before Phase 2. The value is in writing it down, not in the specific items.',
+    `Written for ${d.project} specifically. Confirm or replace before Phase 2 — the list is worth more than any single line on it.`,
     '',
     bullets(d.nonGoals),
     '',
     h2('Success measures'),
     '',
-    'If a measure cannot be observed, it is a wish. One instrumented measure beats five untracked ones.',
+    `Every measure below must be observable from ${d.stack.stack.db} or the logs without a new tool. One instrumented measure beats five wishes.`,
     '',
     table(
       ['Measure', 'Target for v1', 'Observed how'],
@@ -232,7 +259,7 @@ export function productBrief(plan, d) {
     '',
     h2('Open questions'),
     '',
-    'Unanswered questions do not block Phase 0. They block the slice they belong to. Answering them in the spec is cheaper than discovering the answer in production.',
+    `These do not block Phase 0; they block the ${d.primary} slice they belong to. An answered question here is a decision you do not discover in production.`,
     '',
     ordered(d.questions),
     ''
@@ -242,6 +269,11 @@ export function productBrief(plan, d) {
 // ------------------------------------------------------------------- domain
 
 export function domainModel(plan, d) {
+  const ideaTerms = d.nouns.map((entry) => {
+    const word = typeof entry === 'string' ? entry : entry.word;
+    return [`**${word}**`, `from your idea — confirm the exact meaning of ${word} before it appears in code`, 'the idea', 'no'];
+  });
+
   const languageRows = d.terms.length
     ? d.terms.map((term) => [`**${term.term}**`, term.definition, term.source, 'no'])
     : [['_(none yet)_', 'Confirm the core nouns of the product before writing code.', '—', 'no']];
@@ -255,6 +287,7 @@ export function domainModel(plan, d) {
 
   const aggregateBlocks = d.aggregates.length
     ? d.aggregates
+        .slice(0, 3)
         .map((aggregate) =>
           [
             h3(`${aggregate.name} \`(${aggregate.source})\``),
@@ -281,41 +314,45 @@ export function domainModel(plan, d) {
     stamp(plan),
     '',
     quote(
-      'Code that guesses the nouns of a business is plausible and wrong. This document fixes the nouns, the boundaries and the rules before implementation starts.'
+      `Code that guesses the nouns of a business is plausible and wrong. ${d.project} has ${d.nouns.length || 0} words of its own and ${d.aggregates.length} aggregates; this document fixes them before implementation starts.`
     ),
     '',
-    h2('1. Ubiquitous language'),
+    ...(d.ownRules.length
+      ? [
+          h2('1. Rules your idea already states'),
+          '',
+          `Read from the idea verbatim. These are ${d.project}'s own invariants — not the catalog's — and each one is a claim a test can make false. If you implement nothing else from this document, implement these.`,
+          '',
+          ordered(d.ownRules.map((rule) => `"${rule.replace(/\.$/, '')}" — the failing test that would catch a violation belongs beside the ${d.primary} it constrains.`)),
+          ''
+        ]
+      : []),
+    h2(d.ownRules.length ? '2. Ubiquitous language' : '1. Ubiquitous language'),
     '',
-    'Candidates proposed from the selected requirements. Confirm or replace them in Phase 1; a term marked "no" has not been agreed yet and must not be treated as settled.',
+    `The ${d.nouns.length} words below come from your idea; the rest from the requirements you selected. A term marked "no" has not been agreed yet, and code written against an unagreed term is a rename waiting to happen.`,
     '',
-    table(['Term', 'Working definition', 'Source', 'Confirmed'], languageRows),
-    '',
-    '**What this table cannot supply:** the nouns of your product itself. Name three to five of them with definitions before Phase 1 — the rows above cover rules that recur across products, not your domain.',
+    table(['Term', 'Working definition', 'Source', 'Confirmed'], [...ideaTerms, ...languageRows]),
     '',
     h3('Naming rules'),
     '',
     bullets([
-      'A term is used verbatim in code, tests, commit messages and UI copy. No synonyms.',
-      '"User" is a UI word, not a domain word: code uses the actor type this table names.',
-      'If a concept needs a qualifier ("payment v2", "user record"), it is two concepts or a badly named one.'
+      `One spelling per concept, used verbatim in code, tests and commit messages: if the table says \`${d.primary}\`, nothing calls it a "${d.primary.replace(/s$/, '')}" or a "record".`,
+      `A qualifier ("${d.primary} v2", "user ${d.primary}") means two concepts, or a badly named one.`
     ]),
     '',
-    h2('2. Bounded contexts'),
+    h2(d.ownRules.length ? '3. Bounded contexts' : '2. Bounded contexts'),
     '',
     table(['Context', 'Owns', 'Talks to', 'Notes'], contextRows),
     '',
-    bullets([
-      'A context exposes behaviour through an interface it owns; it never reaches into another context\'s tables.',
-      'Cross-context communication is a declared call or an event. Never a shared table.'
-    ]),
+    `A context exposes behaviour through an interface it owns and never reaches into another context's tables${d.contexts.length > 2 ? `; with ${d.contexts.length} contexts here, the only cross-context traffic allowed is a declared call or an event` : ''}. That rule is what makes ${d.style.name.toLowerCase()} a description rather than a hope.`,
     '',
-    h2('3. Aggregates and invariants'),
+    h2(d.ownRules.length ? '4. Aggregates and catalog invariants' : '3. Aggregates and catalog invariants'),
     '',
-    'Each invariant is a claim a test can make false. If you cannot write the failing test, the invariant is not yet understood.',
+    `Each invariant is a claim a test can make false. These come from the requirements you selected; ${d.aggregates.length > 3 ? `the remaining ${d.aggregates.length - 3} aggregates are in \`spec.json\`` : 'the aggregates below are the ones that carry state'}.`,
     '',
     aggregateBlocks,
     '',
-    h2('4. State machines'),
+    h2(d.ownRules.length ? '5. State machines' : '4. State machines'),
     '',
     plan.requirements.some((requirement) => requirement.key === 'payments.correctness')
       ? [
@@ -329,23 +366,22 @@ export function domainModel(plan, d) {
     plan.requirements.some((requirement) => requirement.key === 'pipeline.idempotency')
       ? ['**StageRun:** `queued → running → committed`, with `failed` retryable. A committed window may not re-enter `running` unless a replay is explicitly requested.', ''].join('\n')
       : '',
-    'Any other state machine: write the states, the legal transitions and the illegal ones as a table before implementing. Illegal transitions return a typed error, never a silent no-op.',
+    `Any other state machine around ${d.aPrimary}: write the states, the legal transitions and the illegal ones as a table before implementing. An illegal transition returns a typed error, never a silent no-op.`,
     '',
-    h2('5. Domain events'),
+    h2(d.ownRules.length ? '6. Domain events' : '5. Domain events'),
     '',
     events.length
       ? table(['Event', 'Emitted when', 'Consumers'], events)
       : '_No cross-context events are required by the selected requirements._',
     '',
-    'Events are named in the past tense. A consumer must behave correctly when the same event arrives twice and when it arrives late.',
+    `Events carry the ${d.primary} id and are named in the past tense; a consumer must survive the same event twice and an event that arrives after the next one.`,
     '',
-    h2('6. Rules for domain code'),
+    h2(d.ownRules.length ? '7. Rules for domain code' : '6. Rules for domain code'),
     '',
     bullets([
-      'No imports from the web framework, the database driver, the queue client or any vendor SDK.',
-      'Pure functions and explicit inputs: time and randomness are passed in, not read from the environment.',
-      'Errors are typed domain errors; no error strings compared in tests.',
-      'Money is integer minor units with a currency. Dates are UTC instants; local time is presentation.'
+      `Nothing under the domain directory imports the web framework, ${d.stack.stack.db === 'none' ? 'a database driver' : d.stack.stack.db}, or a vendor SDK; ${plan.profile.kind === 'library' ? 'the public surface is the only export' : 'the import-boundary rule in `03-architecture.md` checks it'}.`,
+      `Time and randomness are passed in, so a test can pin the moment ${d.aPrimary} changes state.`,
+      ...(plan.profile.traits.includes('payments') ? ['Money is integer minor units plus a currency code; dates are UTC instants and local time is presentation.'] : ['Dates are UTC instants; local time is presentation and belongs to the transport layer.'])
     ]),
     ''
   ].join('\n');
@@ -354,37 +390,8 @@ export function domainModel(plan, d) {
 // -------------------------------------------------------------- architecture
 
 export function architecture(plan, d) {
-  const style = {
-    'data-pipeline': {
-      name: 'Staged pipeline with explicit contracts',
-      why: 'Each stage has one job, a declared input and output, and a watermark that makes replay possible. A monolith here would hide the data dependencies that cause most pipeline incidents.'
-    },
-    cli: {
-      name: 'Hexagonal single artifact',
-      why: 'A CLI is a thin adapter over a pure core. Keeping IO at the edges is what makes the commands testable without spawning processes.'
-    },
-    library: {
-      name: 'Stable core with a narrow surface',
-      why: 'The public surface is the product. Everything behind it must be replaceable without a major version.'
-    },
-    agent: {
-      name: 'Hexagonal task runner',
-      why: 'Model calls, tools and storage are adapters. The decision logic must be testable with recorded inputs and no network.'
-    },
-    automation: {
-      name: 'Hexagonal single artifact with explicit steps',
-      why: 'Automation fails on the second run, not the first. Steps need their own state and their own tests.'
-    },
-    default: {
-      name: 'Modular monolith with enforced boundaries',
-      why: 'One deployable, several modules, boundaries checked mechanically. Microservices multiply failure modes before a product has found its shape; the seams here are the ones that survive the split if it ever comes.'
-    }
-  }[plan.profile.kind] ?? null;
-
-  const monolith = style ?? {
-    name: 'Modular monolith with enforced boundaries',
-    why: 'One deployable, several modules, boundaries checked mechanically. Distributed complexity must be earned by a real constraint, not inherited from a template.'
-  };
+  const { profile } = plan;
+  const monolith = d.style;
 
   const moduleRows = d.contexts.map((context) => [
     context.name,
@@ -400,32 +407,30 @@ export function architecture(plan, d) {
     'domain of any context (no business rules here)'
   ]);
 
+  const contextNames = d.contexts.map((context) => context.name.toLowerCase()).join(' · ');
+  const entry = profile.kind === 'cli' ? 'argv · stdin' : profile.kind === 'automation' ? 'schedule · webhook' : profile.kind === 'data-pipeline' ? 'source · windows' : 'http';
   const diagram = [
-    'transport   http · cli · jobs          (thin, no rules)',
+    `transport   ${entry}                    (thin: parses, validates, maps errors)`,
     '     │ calls interfaces it does not own',
-    'application use cases · authz · transactions',
-    '     │ domain types and errors only',
-    'domain      aggregates · invariants · events   (pure, no imports)',
+    `application ${d.primary} use cases · ${profile.traits.includes('auth') ? 'actor and policy' : 'input checks'} · transaction boundary`,
+    `     │ domain types and errors only`,
+    `domain      ${contextNames}                    (pure: no ${d.stack.stack.db}, no framework)`,
     '     ▲ implemented by',
-    'adapters    db · http clients · queue · mail',
+    `adapters    ${d.stack.stack.db === 'none' ? 'filesystem' : d.stack.stack.db} · ${profile.traits.includes('payments') ? 'payment provider · ' : ''}${profile.traits.includes('ai') ? 'model client · ' : ''}${profile.traits.includes('background-jobs') ? 'queue · ' : ''}http clients`,
     '',
-    'Imports point downward only. Anything pointing back up is a bug, not a shortcut.'
+    `Imports point downward only. Anything pointing back up is a bug in ${d.project}, not a shortcut.`
   ].join('\n');
 
-  const adrs = [
-    ['ADR-001', `Use ${monolith.name}`, `A single deployable with module boundaries keeps operational surface small while the product is still finding its shape.`, 'Boundaries are enforced by import rules and a fitness check, not by discipline alone.', 'Proposed'],
-    ['ADR-002', `Language and runtime: ${d.stack.stack.language}`, 'One language for domain, transport and tests reduces context switching for both humans and agents.', 'The ecosystem must support the chosen database and test tooling; revisit if a performance ceiling is measured.', 'Proposed'],
-    ['ADR-003', `Persistence: ${d.stack.stack.db}`, 'Relational constraints express the invariants that matter, and migrations are reviewable artefacts.', 'Schema changes need forward-only migrations and a restore path; revisit if access patterns become document-shaped.', 'Proposed'],
-    ['ADR-004', 'Validation at the boundary', `${d.stack.stack.validation} validates input, environment and external responses at the edges; the domain then works with valid values and does not repeat checks.`, 'Proposed']
-  ];
+  const adrs = d.decisions.map(([id, decision, why, implies]) => [id, decision, why, implies]);
 
+  const hasUi = ['web-app', 'mobile'].includes(profile.kind);
   const fitness = [
-    ['Domain purity', 'No framework, driver or SDK import in domain files', 'grep or dependency-cruiser rule in CI', 'A domain file imports infrastructure'],
-    ['Module boundaries', 'Contexts import only their own domain and the shared kernel', 'import-boundary rule', 'A cross-context import appears'],
-    ['Token usage', 'No raw colour or spacing literals', 'token lint', 'A hex colour appears in a component'],
-    ['Contract agreement', 'Implementation matches the contract inventory', 'contract test', 'A response field is added or removed silently'],
-    ['Requirement coverage', 'Every automated requirement has an anchor and a passing test', '`node specs/spec-check.mjs`', 'A test is deleted or renamed'],
-    ['Test quality', plan.primitives.some((p) => p.id === 'testing.mutation-testing') ? 'Mutation score on the domain layer' : 'Assertion count per test', plan.primitives.some((p) => p.id === 'testing.mutation-testing') ? 'mutation run in CI' : 'review', 'A test asserts only that no exception was thrown']
+    ['Domain purity', `No framework, database driver or vendor SDK imported under \`${d.style.name.includes('Hexagonal') ? 'domain/' : 'domain/'}\``, 'import-boundary rule in CI', 'A domain file imports infrastructure'],
+    ['Module boundaries', `The ${d.contexts.length} contexts import only their own domain and the shared kernel`, 'import-boundary rule', 'A cross-context import appears'],
+    ...(hasUi ? [['Token usage', 'No raw colour or spacing literal in a component', 'token lint', 'A hex colour appears in a component']] : []),
+    ['Contract agreement', 'Implementation matches the shapes in 04-contracts.md', 'contract test', 'A response field is added or removed silently'],
+    ['Requirement coverage', `${plan.requirements.filter((requirement) => requirement.verify === 'automated').length} anchored requirements have a passing test`, '`node specs/spec-check.mjs`', 'A test is deleted or renamed'],
+    [plan.primitives.some((primitive) => primitive.id === 'testing.mutation-testing') ? 'Test quality' : 'Assertion density', plan.primitives.some((primitive) => primitive.id === 'testing.mutation-testing') ? 'Mutation score on the domain layer' : 'Every test asserts an outcome, not just absence of a throw', plan.primitives.some((primitive) => primitive.id === 'testing.mutation-testing') ? 'mutation run in CI' : 'review', 'A test would pass if the behaviour were wrong']
   ];
 
   return [
@@ -438,9 +443,9 @@ export function architecture(plan, d) {
     `**${monolith.name}.** ${monolith.why}`,
     '',
     bullets([
-      'Rejected: microservices — no independent scaling or ownership boundary exists yet.',
-      'Rejected: serverless-per-endpoint — cold paths and split transactions for a product with a small domain.',
-      'Rejected: framework-shaped folders (controllers/services/repositories) — they hide the domain and invite an anaemic model.'
+      `Rejected: microservices — ${d.aPrimary} write would need a distributed transaction, and there is no team boundary to gain.`,
+      `Rejected: serverless-per-endpoint — the ${d.primary} lifecycle crosses several calls, and cold starts would be paid by ${d.aSecondary}.`,
+      `Rejected: framework-shaped folders — they would put the ${d.primary} rules next to the transport code that is supposed to be the thinnest layer.`
     ]),
     '',
     h2('2. Shape'),
@@ -462,24 +467,32 @@ export function architecture(plan, d) {
     table(
       ['Concern', 'Decision', 'Where it lives'],
       [
-        ['Configuration', 'Validated at startup; missing values fail fast and are named', '`config` module, one schema'],
-        ['Errors', 'One envelope, typed domain errors, no leaking internals', '`errors` module + transport mapper'],
-        ['Logging', 'Structured, with correlation ID and actor ID on every line', '`observability` module'],
-        ['Authorization', 'Policy check at the application layer, deny by default', '`application` layer, one policy module'],
-        ['Time and IDs', 'Injected clock; opaque sortable IDs (ULID)', 'shared kernel'],
-        ['Feature flags', 'One mechanism, default off for new behaviour', '`config` module']
+        ['Configuration', `Validated at startup against ${d.stack.stack.validation}; a missing value fails fast and is named`, '`config` module, one schema'],
+        ['Errors', `Typed domain errors mapped to the envelope in \`04-contracts.md\`; internals never leak`, '`errors` module + transport mapper'],
+        ['Logging', 'Structured, with correlation and actor id on every line', '`observability` module'],
+        ...(profile.traits.includes('auth') || profile.traits.includes('admin') || profile.risks.multiTenant
+          ? [['Authorization', 'Checked in the application layer, deny by default, never in the client', '`application` layer, one policy module']]
+          : []),
+        ['Time and IDs', 'Injected clock; opaque sortable ids', 'shared kernel'],
+        ...(profile.kind === 'web-app' || profile.kind === 'mobile'
+          ? [['Feature flags', 'One mechanism, default off for new behaviour', '`config` module']]
+          : [])
       ]
     ),
     '',
-    h2('6. Primary journey, in order'),
+    h2('6. The primary journey, in order'),
+    '',
+    `Written for **${d.start.id} ${d.start.title}** — the first requirement, and the one whose shape the rest copy.`,
     '',
     ordered([
-      'Transport receives the request and validates input against a schema.',
-      'Authentication resolves an actor; unauthenticated requests stop here.',
-      'Application layer loads the aggregate, checks policy, and calls one domain operation.',
-      'Domain operation enforces invariants and returns a result or a typed error.',
-      'Adapters persist atomically and emit domain events after commit.',
-      'Transport maps the result to the contract shape, including the correlation ID.'
+      'Transport receives the request and validates it against a schema.',
+      profile.traits.includes('auth') || profile.traits.includes('admin')
+        ? 'The actor is resolved from the session; a request without one stops here.'
+        : 'The actor, if any, is resolved and attached to the request context.',
+      `The application layer loads the ${d.nouns.length ? d.nouns.map((n) => (typeof n === 'string' ? n : n.word))[0] : 'aggregate'}, checks policy, and calls one domain operation.`,
+      'The domain operation enforces the invariants in `02-domain-model.md` and returns a result or a typed error.',
+      `The adapter writes to ${d.db} in one transaction and emits any domain event after commit.`,
+      'Transport maps the result to the contract shape in `04-contracts.md`, including the correlation id.'
     ]),
     '',
     h2('7. Decision records'),
@@ -513,93 +526,138 @@ export function architecture(plan, d) {
 // ---------------------------------------------------------------- contracts
 
 export function contracts(plan, d) {
+  const { profile } = plan;
+  const nouns = d.nouns.length ? d.nouns.map((entry) => (typeof entry === 'string' ? entry : entry.word)) : [plan.config.name.toLowerCase()];
+  const primary = nouns[0];
+
   const surfaces = plan.requirements
     .filter((requirement) => ['api', 'data', 'reliability', 'ai'].includes(requirement.render))
     .map((requirement) => [
       requirement.id,
       requirement.render === 'api' ? 'HTTP / module interface' : requirement.render === 'data' ? 'Schema / storage' : 'Internal interface',
       requirement.title,
-      'v1',
       requirement.verify === 'automated' ? 'contract test' : 'review'
     ]);
 
+  // Conventions are only worth the reader's attention when the profile makes them
+  // binding. Generic advice in every packet is what made these documents read
+  // alike; the rest lives in the library practice this packet selected.
+  const conventions = [['Identifiers', 'Opaque and sortable (ULID). Never a sequential integer in an external shape.'], ['Timestamps', 'ISO-8601 UTC with `Z`. Never a local time, never a bare date for an instant.']];
+  if (profile.traits.includes('payments')) {
+    conventions.push(['Money', 'Integer minor units plus an ISO-4217 code. Never a float, never a pre-formatted string.']);
+    conventions.push(['Idempotency', `Every mutation that can move money takes an \`Idempotency-Key\`; a replay returns the first result, never a second ${primary}.`]);
+  }
+  if (profile.risks.multiTenant) {
+    conventions.push(['Tenant', 'Derived from the authenticated session, never from a body field or a query parameter.']);
+  }
+  if (profile.traits.includes('upload')) {
+    conventions.push(['Uploads', 'Content type checked by sniffing, size capped before the buffer grows, filename never used as a path.']);
+  }
+  if (profile.traits.includes('realtime') || profile.traits.includes('offline')) {
+    conventions.push(['Ordering', 'Every streamed or queued item carries a monotonically increasing revision so a client can detect a gap.']);
+  }
+  if (profile.traits.includes('ai')) {
+    conventions.push(['Model I/O', 'Input and output are declared schemas; a malformed completion is a rejection, never a partial write.']);
+  }
+  conventions.push(['Errors', 'One envelope for every failure, including unknown routes. An absent field is absent, not `null`.']);
+
+  // The demo error uses this product's own noun and its most likely failure, not a
+  // payment example pasted into every packet.
+  const failureKind = profile.traits.includes('payments')
+    ? 'PAYMENT_DECLINED'
+    : profile.risks.multiTenant
+      ? 'NOT_FOUND'
+      : `${primary.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_CONFLICT`;
   const envelope = {
     error: {
-      code: 'PAYMENT_DECLINED',
-      message: 'The card was declined by the issuer.',
+      code: failureKind,
+      message: profile.traits.includes('payments') ? 'The card was declined by the issuer.' : `The ${primary} is not in a state that allows this.`,
       correlationId: '01J8Z9W3Q4K5M6N7P8R9S0T1V2',
-      details: [{ field: 'paymentMethod', reason: 'insufficient_funds' }]
+      details: [{ field: nouns[1] ?? 'state', reason: 'conflict' }]
     }
   };
+
+  const statuses = [
+    ['401', 'No valid session', 'Missing, expired or revoked credential. No state change.'],
+    ['403', 'Authenticated but not permitted', 'Policy denied. Never reveal whether the resource exists.'],
+    ['404', 'Not found, or not visible to this actor', 'Identical response for both cases.'],
+    ['409', 'Conflict with current state', `An ${primary} would be left in an impossible state, or a replay carries a different payload.`],
+    ['422', 'Semantically invalid', 'Well-formed but breaks a rule in `02-domain-model.md`.']
+  ];
+  if (profile.traits.includes('payments') || profile.traits.includes('upload') || profile.traits.includes('ai')) {
+    statuses.push(['429', 'Rate or quota limited', 'Includes `Retry-After` and performs no work.']);
+  }
+
+  const shapes = d.surfaces.slice(0, 4).map(([surface, why]) => {
+    if (/HTTP/.test(surface)) return [`\`POST /v1/${primary}s\``, `creates ${d.aPrimary}; returns the created id and its version`, why];
+    if (/Session/.test(surface)) return ['`POST /v1/sessions`', `exchanges credentials for a short-lived token tied to a ${nouns[1] ?? 'user'}`, why];
+    if (/Upload/.test(surface)) return ['`POST /v1/uploads`', 'returns a content-addressed id the client then attaches', why];
+    if (/Payment/.test(surface)) return ['`POST /v1/payment-intents`', 'one intent per attempt, replayable by key', why];
+    if (/webhook/i.test(surface)) return ['`POST /hooks/<provider>`', 'verified signature, deduplicated by provider event id', why];
+    if (/Job|Trigger/.test(surface)) return ['job payload `{ id, attempt, payload, traceId }`', 'the handler is idempotent on `id`', why];
+    if (/Model/.test(surface)) return ['`complete(input) -> { output, tokens, model }`', 'schema-validated both ways, with a timeout ceiling', why];
+    if (/Public module/.test(surface)) return ['`export function <verb>(input): Output`', 'each export is a versioned promise', why];
+    if (/Command line/.test(surface)) return [`\`<tool> ${primary} <action> [flags]\``, 'exit codes are part of the contract', why];
+    return [`\`${surface}\``, why, 'documented before implementation'];
+  });
+
+  const asyncWork = plan.requirements.some((requirement) => ['reliability', 'data'].includes(requirement.render) && /queue|job|event|sync|replay/i.test(requirement.title));
 
   return [
     h1('Contracts'),
     '',
     stamp(plan),
     '',
-    quote('An interface is a promise made to code you do not control yet. Fix it before implementing it.'),
+    quote(`An interface is a promise made to code you do not control yet. For ${d.project}, the promises that matter are the ${d.surfaces.length} surfaces below.`),
     '',
     h2('1. Inventory'),
     '',
     'Every row must have a concrete shape before Phase 3. A row marked "to define" blocks implementation of its requirement.',
     '',
-    table(['Req', 'Surface', 'What it promises', 'Version', 'Proven by'], surfaces),
+    table(['Req', 'Surface', 'What it promises', 'Proven by'], surfaces),
     '',
-    h2('2. Conventions'),
+    h2('2. The shapes to fix first'),
     '',
-    table(
-      ['Concern', 'Rule'],
-      [
-        ['Identifiers', 'Opaque, sortable (ULID). Never sequential integers in an external shape.'],
-        ['Timestamps', 'ISO-8601 UTC with `Z`. Never local time, never a bare date for an instant.'],
-        ['Money', 'Integer minor units plus an ISO-4217 currency. Never a float, never a formatted string.'],
-        ['Naming', '`snake_case` in JSON, one spelling per concept, plural for collections.'],
-        ['Pagination', 'Cursor-based, `{ "data": [], "nextCursor": null }`. Offset only for admin tables.'],
-        ['Idempotency', 'Mutating endpoints accept `Idempotency-Key`; the same key returns the original result.'],
-        ['Auth', '`Authorization: Bearer <token>`. Tokens never appear in URLs or logs.'],
-        ['Versioning', 'Path version `/v1`. Additive is non-breaking; removal or a type change is breaking, with one minor version of notice.'],
-        ['Rate limits', '`429` with `Retry-After`; limits keyed by identity and by IP.'],
-        ['Errors', 'One envelope for every failure, including unknown routes and validation. Absent is not null.']
-      ]
-    ),
+    'These are the four that other code will be written against. Naming them now is cheaper than renaming them later.',
     '',
-    h2('3. Error envelope'),
+    table(['Shape', 'Behaviour', 'Why it is on this list'], shapes),
+    '',
+    h2('3. Conventions that bind you'),
+    '',
+    'Only the conventions this profile makes load-bearing are listed. The rest are in the library practice `engineering.api-conventions`, which this packet selected at compile time.',
+    '',
+    table(['Concern', 'Rule'], conventions),
+    '',
+    h2('4. Error envelope'),
+    '',
+    'One shape for every failure. A caller must be able to handle an unknown route with the same code as a rejected input.',
     '',
     code('json', JSON.stringify(envelope, null, 2)),
     '',
-    table(
-      ['Status', 'Meaning', 'When'],
-      [
-        ['400', 'Malformed or invalid input', 'Schema validation failed; details name the field.'],
-        ['401', 'No valid session', 'Missing, expired or revoked credential. No state change.'],
-        ['403', 'Authenticated but not permitted', 'Policy denied. Never reveal whether the resource exists.'],
-        ['404', 'Not found, or not visible to this actor', 'Identical response for both cases.'],
-        ['409', 'Conflict with current state', 'Illegal transition, duplicate idempotency key with different payload.'],
-        ['422', 'Semantically invalid', 'Well-formed but violates a domain rule.'],
-        ['429', 'Rate limited', 'Includes `Retry-After` and performs no work.'],
-        ['500', 'Unexpected', 'Generic message plus correlation ID; details only in logs.']
-      ]
-    ),
+    table(['Status', 'Meaning', 'When'], statuses),
     '',
-    h2('4. Event and job contracts'),
-    '',
-    bullets([
-      'Event names are past-tense facts: `PaymentCaptured`, not `CapturePayment`.',
-      'Every event carries `id`, `type`, `occurredAt`, `correlationId`, `producer`, `schemaVersion`.',
-      'Consumers must tolerate duplicates, out-of-order delivery and late arrival.',
-      'A job has a declared input, an idempotency key and a maximum attempt count.',
-      'Breaking an event schema requires a new `type` or `schemaVersion`, never an in-place change.'
-    ]),
-    '',
-    h2('5. Contract testing'),
+    ...(asyncWork
+      ? [
+          h2('5. Events and jobs'),
+          '',
+          bullets([
+            'Event names are past-tense facts about what happened, not commands.',
+            'Every event carries `id`, `type`, `occurredAt`, `correlationId`, `producer`, `schemaVersion`.',
+            'Consumers tolerate duplicates, out-of-order delivery and late arrival; producers never rely on delivery order.',
+            `A job that touches an ${primary} declares an idempotency key and a maximum attempt count.`
+          ]),
+          ''
+        ]
+      : []),
+    h2(asyncWork ? '6. Contract tests' : '5. Contract tests'),
     '',
     bullets([
-      'Exposed interfaces: a test asserts the response shape and the error envelope against the contract, including one failure case per status code used.',
-      'Consumed interfaces: record a real response once, store it as a fixture, and test the adapter against the fixture — not against a hand-written mock that can drift.',
-      'Generate or verify the machine-readable contract in CI so a breaking change fails before merge.'
+      'Each surface gets one test asserting the happy path shape and one asserting the error envelope.',
+      'A consumed interface is tested against a recorded response, not a hand-written mock that can drift.',
+      'A breaking change to a shape in section 2 fails the build before review, not after deployment.'
     ]),
     '',
-    'Before implementing any row above: shape written, error codes chosen, one failure example recorded.',
+    'Before implementing any row above: shape written, error code chosen, one failure example recorded.',
     ''
   ].join('\n');
 }
@@ -612,7 +670,7 @@ export function verification(plan, d) {
   const hasUi = ['web-app', 'mobile'].includes(plan.profile.kind);
   const trace = plan.requirements.map((requirement) => [
     requirement.id,
-    requirement.acceptance.map((ac) => `${ac.id}`).join(', ') || '—',
+    (d.phrases.get(requirement.key) ?? requirement.title).replace(/\s+/g, ' '),
     requirement.verify,
     requirement.verify === 'automated' ? `\`${d.anchors.get(requirement.id)}?\`` : 'manual script',
     '☐'
@@ -621,6 +679,10 @@ export function verification(plan, d) {
   const automated = plan.requirements.filter((requirement) => requirement.verify === 'automated');
   const manual = plan.requirements.filter((requirement) => requirement.verify === 'manual');
   const mutation = plan.primitives.find((primitive) => primitive.id === 'testing.mutation-testing');
+
+  const startAc = d.start?.acceptance?.[0]?.text ?? `the behaviour of ${d.primary}`;
+  const startAcId = d.start?.acceptance?.[0]?.id ?? 'AC-01';
+  const startSlug = d.start?.title ? d.start.title.toLowerCase() : d.primary;
 
   const ciYaml = [
     'name: spec',
@@ -645,7 +707,7 @@ export function verification(plan, d) {
     stamp(plan),
     '',
     quote(
-      'Coverage measures execution. Assertions measure whether a test would notice a bug. This plan optimises for the second, and binds every automated requirement to a named test so the spec cannot drift away from the code without CI saying so.'
+      `Coverage measures execution; assertions measure whether a test would notice ${d.aPrimary} going wrong. This plan optimises for the second and binds ${automated.length} of ${plan.requirements.length} requirements to a named test, so ${d.project} cannot drift away from its spec without CI saying so.`
     ),
     '',
     h2('1. Test layers'),
@@ -666,25 +728,23 @@ export function verification(plan, d) {
     '',
     h2('2. Anchors: how a requirement stays bound to a test'),
     '',
-    'Every automated requirement carries one anchor line in the test that proves it. The anchor is the mechanism; without it, this packet is just a longer prompt.',
+    `Every automated requirement carries one anchor line in the test that proves it. The example below is ${d.start.id}, so it is the one you will write first.`,
     '',
     code(
-      'ts',
+      d.stack.stack.language === 'Python' ? 'python' : d.stack.stack.language === 'Go' ? 'go' : 'ts',
       [
-        '// @req REQ-004  // @req-ignore: example inside a spec document',
-        "test('erasing a subject removes every owned row (AC-01)', async () => {",
-        '  // given a subject with rows in every table',
-        '  // when the deletion sweep runs',
-        '  // then a query across all tables returns zero rows',
+        `// @req ${d.start.id}  // @req-ignore: example inside a spec document`,
+        `test('${startSlug} (${startAcId})', async () => {`,
+        `  // ${startAc.replace(/^Given |, when |, then /g, (m) => m.trim() + ' ').slice(0, 150)}`,
+        `  // assert the outcome, not the absence of a throw`,
         '});'
       ].join('\n')
     ),
     '',
     bullets([
-      'One anchor per requirement is enough; more than one is fine and counted.',
-      'An anchor in a `tests/` file counts as proof. An anchor in production code does not.',
-      'Renaming or deleting the test fails the spec check, which is the intended behaviour.',
-      'Placeholder tests with no assertion do not satisfy an anchor: the mutation check and review catch those.'
+      `An anchor in a test file in \`${d.anchors.get(d.start.id)?.replace(/[^/]+$/, '') ?? 'tests/'}\` counts as proof; an anchor in production code does not.`,
+      'More than one anchor on a requirement is fine and counted; zero is a failure.',
+      'Renaming or deleting the anchored test fails the spec check — that is the point.'
     ]),
     '',
     h2('3. Traceability'),
@@ -695,20 +755,25 @@ export function verification(plan, d) {
     '',
     h2('4. Gates for tier ' + plan.rigor.tier),
     '',
-    'These are the definition of done for the project, checked mechanically where possible.',
+    `${plan.gates.length} gates, derived from tier ${plan.rigor.tier} and the traits of ${d.project}. A gate that cannot be checked is rewritten, not waived.`,
     '',
-    checkboxes(plan.gates.map((gate) => `**${gate.id}** — ${gate.statement}`)),
+    checkboxes(
+      plan.gates.map((gate) => {
+        const reading = gateReading(gate, plan, d.words);
+        return `**${gate.id}** — ${gate.statement}${reading ? ` _Here: ${reading}._` : ''}`;
+      })
+    ),
     '',
     h2('5. Spec check in CI'),
     '',
-    'The packet ships a dependency-free checker. Put it in CI on the first day, before any feature code exists.',
+    `The packet ships a dependency-free checker. Put it in CI before the first ${d.primary} handler exists, so the anchors are enforced from commit one.`,
     '',
     code('yaml', ciYaml),
     '',
     'Run it locally with `node specs/spec-check.mjs --repo .`; add `--strict` in release CI so pending requirements cannot ship silently.',
     '',
 
-    'What it fails on: a missing document, an automated requirement with no anchor, an anchor that points at an unknown requirement, a requirement with no acceptance criteria, and a primitive reference that has disappeared.',
+    `What it fails on: a missing document, one of the ${automated.length} automated requirements without an anchor, an anchor naming a requirement that does not exist, a requirement with no criteria, and a practice reference that has disappeared.`,
     '',
     mutation
       ? [
@@ -732,17 +797,16 @@ export function verification(plan, d) {
     h2(`${secReview}. Review checklist`),
     '',
     checkboxes([
-      'The diff implements a listed requirement; nothing else was added.',
-      'Failure paths from the requirement exist in code and in a test.',
-      'New dependency? ADR present, removable in a day, pinned.',
-      'Authorization on every new read of another actor\'s data.',
-      'Error messages do not leak internals; correlation ID present.',
+      `The diff implements one of \`spec.json\`'s requirements and nothing beyond it.`,
+      `The failure path of the ${d.primary} change exists in code and in a test.`,
       'No test was weakened, skipped or deleted to make CI pass.',
-      'Traceability row updated, anchor present and green.',
-      'Domain files import nothing from transport or adapters.'
+      'The traceability row is updated and its anchor is green.',
+      ...(plan.risks?.pii || plan.profile.risks.pii ? [`No personal field of ${d.aSecondary} reaches a log, fixture or error detail.`] : []),
+      ...(plan.profile.traits.includes('auth') || plan.profile.risks.multiTenant ? [`Every new read of another actor's ${d.primary} is authorized server-side.`] : []),
+      ...(plan.primitives.some((primitive) => primitive.id === 'engineering.dependency-policy') ? ['New dependency? ADR present, pinned, removable in a day.'] : [])
     ]),
     '',
-    'Deliberately absent: a coverage percentage target (it rewards executing code, not checking it), mocks of the domain to test the domain, tests of framework behaviour, and whole-page snapshots. See `testing.test-budget` in the factory repository for the reasoning.',
+    `Deliberately absent: a coverage percentage target (it rewards executing code, not checking it), mocks of the domain to test the domain, and tests of framework behaviour. Reasoning: \`testing.test-budget\` in the library.`,
     ''
   ].join('\n');
 }
@@ -753,12 +817,14 @@ export function deliveryPlan(plan, d) {
   const firstSlice = plan.requirements.find((requirement) => requirement.verify === 'automated') ?? plan.requirements[0];
 
   const risks = [
-    ['Scope creep from plausible extra features', 'high', 'Non-goals are listed and reviewed; anything unlisted is rejected in review.'],
-    ['Spec drift as implementation reveals constraints', plan.rigor.tier >= 2 ? 'medium' : 'high', plan.rigor.tier >= 2 ? 'Spec check in CI; requirement changes go through the manifest.' : 'Review each requirement against its criteria before starting the next.'],
-    ['Agent invents an abstraction or a dependency', 'medium', 'ADR rule plus a review checklist item; new dependencies are visible in the lockfile.'],
-    ['Test suite grows faster than the product', 'medium', 'Test budget: most tests at the domain layer, one journey test, no framework tests.'],
-    ['Environment and configuration drift', 'medium', 'Environment schema validated at startup; documented in the runbook.'],
-    ['Insecure default in generated auth or upload handling', plan.rigor.tier >= 2 ? 'medium' : 'low', 'Threat model and denial-path tests; ASVS baseline items checked before release.']
+    [`Scope creep past the ${plan.requirements.length} listed requirements`, 'high', 'The non-goals table is the answer: anything unlisted is rejected in review rather than debated.'],
+    [`An invented abstraction around the ${d.primary}`, 'medium', 'One context per owned noun; a new layer needs a reason a reviewer can check.'],
+    ['Environment and configuration drift', 'medium', 'Configuration is validated at startup and fails by naming the missing variable.'],
+    ...(plan.config.weeks <= 4 ? [[`The ${plan.config.weeks}-week calendar slipping`, 'high', 'Cut a requirement, never a gate; the phase order is already cheapest-first.']] : [[`The ${plan.config.weeks}-week calendar slipping`, 'medium', 'Cut scope in the brief, never a gate.']]),
+    ...(plan.profile.traits.includes('payments') ? [['A money path that double-counts or loses an entry', 'high', 'Ledger entries are immutable and written in the same transaction as the state change.']] : []),
+    ...(plan.profile.traits.includes('ai') ? [['Model output treated as trusted', 'high', 'Every response is schema-validated and budgeted; a timeout degrades, it does not half-write.']] : []),
+    ...(plan.profile.traits.includes('offline') ? [['A queued write applied twice on replay', 'high', 'Server-side de-duplication keyed on the client write id, tested with a duplicate replay.']] : []),
+    ...(plan.profile.risks.regulated ? [['A personal-data field escaping its retention rule', 'high', 'Field-level inventory plus a deletion test that asserts zero rows remain.']] : [])
   ];
 
   return [
@@ -795,12 +861,12 @@ export function deliveryPlan(plan, d) {
     h2('3. Commit and branch protocol'),
     '',
     bullets([
-      'One commit, one intention. Reference the requirement: `feat(REQ-004): erase a subject across all tables`.',
-      'A commit that only adds tests is fine and encouraged; a commit that only weakens tests is not.',
-      'Run the full check locally before pushing: lint, typecheck, tests, spec check.',
+      `One commit, one intention, prefixed with the requirement: \`feat(${d.start.id}): ${d.start.title.toLowerCase()}\`.`,
+      'A commit that only adds tests is welcome; a commit that only weakens tests is rejected.',
+      `Run ${d.commands?.join(' && ') ?? 'the test command'} before pushing — ${d.stack.stack.language} will not tell you in CI either.`,
       plan.config.team > 1
-        ? 'One branch (or worktree) per vertical slice. Never two people in the same requirement.'
-        : 'Single branch is fine; keep the working tree releasable at every commit.'
+        ? `One branch per vertical slice, and never two people inside the same ${d.primary} requirement.`
+        : 'A single branch is fine as long as the working tree is releasable at every commit.'
     ]),
     '',
     h2('4. Stop rules'),
@@ -809,17 +875,16 @@ export function deliveryPlan(plan, d) {
     '',
     ordered([
       'Three failed attempts at the same failing check: stop, write down what was tried, escalate with the evidence.',
-      'A test needs to be weakened to proceed: stop. That is either a wrong test or a wrong design.',
-      'A requirement turns out to be ambiguous: stop that requirement, not the whole phase. Record the question in the brief.',
-      'A dependency needs a second framework to work: stop and write the ADR before writing the code.',
-      'The phase gate cannot pass within twice its allotted time: cut scope, do not extend the phase silently.'
+      'A test needs weakening to proceed: stop — that is either a wrong test or a wrong design.',
+      `A requirement about the ${d.primary} turns out to be ambiguous: stop that requirement, record the question, keep going elsewhere.`,
+      'The phase gate cannot pass within twice its allotted time: cut scope; do not extend the phase silently.'
     ]),
     '',
     h2('5. Risk register'),
     '',
     table(['Risk', 'Likelihood', 'Mitigation'], risks),
     '',
-    'A version is finished when every gate in `05-verification.md` passes, every manual check has been run and dated, and the spec reflects what was actually built including the decisions that changed.',
+    `v1 is finished when all ${plan.gates.length} gates in \`05-verification.md\` pass, every manual check is dated, and \`spec.json\` describes what was actually built — including the decisions that changed on the way.`,
     ''
   ].join('\n');
 }
@@ -827,38 +892,31 @@ export function deliveryPlan(plan, d) {
 // ------------------------------------------------------------------- handoff
 
 export function agentHandoff(plan, d) {
-  const loop = [
-    'Read `spec.json` and the requirement you are about to implement. Do not read the whole packet to start; read the requirement and its document.',
-    'Restate the requirement in five bullets: the behaviour, the failure path, what is out of scope, the test you will write, the files you expect to touch.',
-    'Write the failing test first, with an `@req` anchor, matching the acceptance criteria identifier.',
-    'Implement the smallest change that makes the test pass. No extra abstractions, no speculative interfaces.',
-    'Run the check: tests, typecheck, lint, and `node specs/spec-check.mjs`.',
-    'Refactor only with the tests green. Then update the traceability row for that requirement.',
-    'Report: what changed, which requirement moved, what passed, what you are unsure about. Then stop and wait.'
-  ];
+  const start = d.start;
+  const automated = plan.requirements.filter((requirement) => requirement.verify === 'automated');
+  const queue = plan.requirements.map((requirement) => [
+    requirement.id,
+    d.phrases.get(requirement.key) ?? requirement.title,
+    requirement.verify,
+    requirement.verify === 'automated' ? `\`${d.anchors.get(requirement.id)}\`` : 'manual run'
+  ]);
 
-  const hardRules = [
-    'Implement only listed requirements, one at a time. If something is missing, ask: do not invent scope.',
-    'Never delete, skip or weaken a test to make a check pass. Stop and report instead.',
-    'Every automated requirement gets an `@req REQ-xxx` anchor in the test that proves it.',
-    'No new dependency without an ADR naming what it replaces; no secret in the repository.',
-    'Keep domain code free of framework, database and vendor imports, and files under ~300 lines.',
-    'Do not reformat unrelated files. Report uncertainty explicitly: a confident wrong answer costs more than a question.'
-  ];
-
+  // Escalation triggers this product can actually hit. A generic list wastes the
+  // reader's attention on failure modes this profile does not have.
   const escalate = [
+    ...(plan.profile.traits.includes('payments') || plan.profile.risks.payments
+      ? ['A change would alter a balance, a ledger entry or a payout without a compensating entry.']
+      : []),
+    ...(plan.profile.risks.multiTenant ? ['A query or handler would work on more than one tenant at once.'] : []),
+    ...(plan.profile.traits.includes('offline') ? ['A queued write could apply twice, or a confirmed write could be lost.'] : []),
+    ...(plan.profile.traits.includes('upload') ? ['A file would be stored without type and size validation, or served from an executable path.'] : []),
+    ...(plan.profile.risks.regulated || plan.profile.risks.pii
+      ? ['A read or write of personal data would bypass the audit or retention rule.']
+      : []),
     'The requirement contradicts the architecture or the domain model.',
-    'Two requirements imply different shapes for the same interface.',
     'A check fails for a reason that is not in the code you wrote.',
-    'You need a dependency, a credential or a decision that is not in the packet.',
+    'You need a decision the packet does not make.',
     'You have attempted the same fix three times.'
-  ];
-
-  const perTool = [
-    ['Claude Code, Codex CLI, Cursor, Gemini CLI', 'Add the packet to the repo at `specs/` and point the agent at `specs/AGENTS.md`. Give one requirement per session. Ask it to run the spec check before reporting.'],
-    ['Lovable, Replit, Bolt, v0', 'Paste the brief from section 2 first, then one requirement with its criteria per turn. Ask for a file list before it writes code. These tools do migrations and authorization unreliably: keep those for a human or a code agent.'],
-    ['Chat-only (ChatGPT, Claude web, etc.)', 'Paste the brief and the requirement. Ask for the test, then the implementation, then a review against the checklist. Short conversations, one requirement each.'],
-    ['Another agent, unknown behaviour', 'Start with one requirement of the smallest scope. Judge the agent on whether it wrote the failing test before the code and whether it lied about running it.']
   ];
 
   const reviewPrompt = [
@@ -870,23 +928,10 @@ export function agentHandoff(plan, d) {
     '1. Requirements not implemented, or implemented beyond scope.',
     '2. Acceptance criteria with no corresponding assertion.',
     '3. Failure paths that are described but not handled.',
-    '4. Tests that would pass if the behaviour were wrong (weak or tautological assertions).',
+    '4. Tests that would pass if the behaviour were wrong.',
     '5. Boundary violations: framework imports in domain code, cross-context reads, missing authorization.',
-    '6. Anything a second implementer would have built differently, and whether that difference matters.',
     '',
-    'For each finding: file, line, the spec line it violates, and the smallest fix. If there are no findings in a category, say "none" rather than inventing one. Do not comment on style that the linter already covers.'
-  ].join('\n');
-
-  const report = [
-    '## Progress report',
-    '',
-    '- Requirement: REQ-xxx — status (done / partial / blocked)',
-    '- Tests: added, passing, and the anchor path',
-    '- Checks: lint, typecheck, tests, spec check — pass or fail',
-    '- Files changed: list, one line each',
-    '- Decisions: any ADR added or amended',
-    '- Uncertainties: what you would ask a reviewer',
-    '- Next: the next requirement you propose, and why that one'
+    'For each finding: file, line, the spec line it violates, and the smallest fix. Say "none" rather than inventing a finding.'
   ].join('\n');
 
   return [
@@ -894,59 +939,56 @@ export function agentHandoff(plan, d) {
     '',
     stamp(plan),
     '',
-    quote(
-      'This document exists because the difference between a junior and a senior engineer is not typing speed. It is what they refuse to do: invent scope, guess at requirements, weaken tests, and hide uncertainty.'
-    ),
+    `This is the working brief for **${d.project}**. ${plan.requirements.length} requirements, ${automated.length} of them proven by an anchored test, ${plan.gates.length} gates, ${plan.config.weeks} weeks, ${plan.config.team} ${plan.config.team === 1 ? 'person' : 'people'}.`,
     '',
-    h2('1. How to use this packet'),
-    '',
-    table(['You are', 'Start here'], [
-      ['A coding agent with repo access', '`AGENTS.md` in this folder, then `spec.json`, then the requirement you were given.'],
-      ['A chat-only builder', 'Section 2 below, then one requirement per message.'],
-      ['A human about to review', '`05-verification.md` section 8, then the diff.']
-    ]),
-    '',
-    h2('2. Copy-paste brief'),
-    '',
-    'This is the message that starts a build. It is short on purpose: the packet carries the detail, and a brief nobody reads is a longer prompt.',
+    h2('1. The message that starts a build'),
     '',
     code('text', d.brief),
     '',
-    h2('3. The loop'),
+    h2('2. Your queue'),
     '',
-    ordered(loop),
+    `Start with **${start.id}** — ${d.phrases.get(start.key) ?? start.title} It is the one everything else assumes. Then work down this list, one requirement per session.`,
     '',
-    h2('4. Hard rules'),
+    table(['Req', 'What it must do', 'Proven by', 'Anchor'], queue),
     '',
-    ordered(hardRules),
+    h2('3. What to read for your area'),
     '',
-    h2('5. Stop and escalate when'),
+    table(
+      ['If you are touching', 'Read'],
+      [
+        ['The rules of the product', '`02-domain-model.md` — terms, aggregates, invariants'],
+        ['Storage or an interface', '`04-contracts.md` — shapes, versions, error envelope'],
+        ['Module boundaries or a dependency', '`03-architecture.md` — what may import what'],
+        ['Anything at all, before reporting', '`05-verification.md` — the criteria and the gates']
+      ]
+    ),
+    '',
+    h2('4. Escalate instead of guessing'),
     '',
     bullets(escalate),
     '',
-    h2('6. Tool-specific notes'),
+    h2('5. Independent review prompt'),
     '',
-    table(['Tool', 'How to use this packet'], perTool),
-    '',
-    h2('7. Independent review prompt'),
-    '',
-    'Self-review shares the author\'s blind spots. Run this in a separate session, with no memory of writing the code.',
+    'Run this in a separate session with no memory of writing the code. Self-review shares the author\'s blind spots.',
     '',
     code('text', reviewPrompt),
     '',
-    h2('8. Progress report format'),
+    h2('6. The report that ends a session'),
     '',
-    'Ask for this at the end of every session. A report that cannot name a requirement is a report that did nothing.',
-    '',
-    code('markdown', report),
-    '',
-    h2('9. What good looks like'),
-    '',
-    bullets([
-      'The agent wrote the failing test first and can show it failing for the right reason.',
-      'Every claim in the final message can be checked by running one command.',
-      'Uncertainty appears in the report, and the next agent can continue without the chat history.'
-    ]),
+    code(
+      'markdown',
+      [
+        '## Progress report',
+        '',
+        `- Requirement: ${start.id} — done / partial / blocked`,
+        '- Tests: added, passing, anchor path',
+        '- Checks: lint, typecheck, tests, spec check — pass or fail',
+        '- Files changed',
+        '- Decisions and ADRs touched',
+        '- Uncertainties: what you would ask a reviewer',
+        '- Next: the next requirement you propose, and why'
+      ].join('\n')
+    ),
     ''
   ].join('\n');
 }
@@ -1048,72 +1090,88 @@ export function agentsMd(plan, d) {
     resolved ? resolved.join(' && ') : '# the real build and test commands go here — this stack has no built-in profile',
     'node specs/spec-check.mjs --repo .'
   ];
+  const start = d.start;
+  const automated = plan.requirements.filter((requirement) => requirement.verify === 'automated');
+  const areas = [...new Set(plan.requirements.map((requirement) => requirement.render))];
+
+  // The route table is this packet's own shape: which document answers which
+  // question for which area. It is generated, so it cannot go stale.
+  const routes = single
+    ? [
+        ['What to build', '`spec.md` section 4'],
+        ['Whether it is done', '`spec.md` section 5'],
+        ['The order of work', '`spec.md` section 6']
+      ]
+    : [
+        ['The rules you cannot break', '`00-constitution.md`'],
+        ['What this product is and is not', '`01-product-brief.md`'],
+        ['The nouns to use in code', '`02-domain-model.md`'],
+        ['What may import what', '`03-architecture.md`'],
+        ['Interface shapes', '`04-contracts.md`'],
+        ['How your work is judged', '`05-verification.md`']
+      ].filter(([, file]) => [...plan.docs, 'AGENTS.md'].includes(file.replace(/`/g, '')));
+
   return [
     h1('AGENTS.md'),
     '',
     stamp(plan),
     '',
-    'You are implementing a project from a specification. The specification is the contract; this file is how to work inside it.',
+    `You are implementing **${d.project}** — ${plan.profile.kind}, ${plan.profile.stage}, rigor tier ${plan.rigor.tier} (${plan.rigor.label}). The specification is the contract; this file is how to work inside it.`,
     '',
-    h2('Read order'),
+    h2('Start here'),
     '',
-    ordered(
-      single
-        ? [
-            'This file.',
-            '`spec.md` — the whole specification: scope, requirements, gates and build order.',
-            '`spec.json` — the same requirements, machine-readable. If it is not in here, it is not in scope.',
-            'Your assigned requirement, and nothing else, until it is implemented.'
-          ]
-        : [
-            'This file.',
-            '`spec.json` — the requirements and gates. If it is not in here, it is not in scope.',
-            '`05-verification.md` — how your work will be judged.',
-            '`02-domain-model.md` and `03-architecture.md` — the words you must use, and what may import what.',
-            'Your assigned requirement, and nothing else, until it is implemented.'
-          ]
-    ),
+    `First: **${start.id}** — ${d.phrases.get(start.key) ?? start.title} ${start.verify === 'automated' ? `Prove it with a test anchored \`@req ${start.id}\`.` : 'It is proven by hand for now.'} Then one requirement at a time; there are ${plan.requirements.length}, of which ${automated.length} need an anchor.`,
+    '',
+    h2('Where each answer lives'),
+    '',
+    table(['Question', 'Document'], routes),
     '',
     h2('Commands'),
     '',
     code('bash', ['# after setup, then keep this block accurate', ...commands].join('\n')),
     '',
-    'Replace with the real commands once Phase 0 exists, and keep this block accurate. An agent that cannot run the checks will claim success instead.',
+    'An agent that cannot run the checks will claim success instead.',
     '',
-    h2('Rules'),
+    h2('The rules that bite in this product'),
     '',
-    ordered([
-      'Implement only listed requirements, one at a time. Test first, anchored with `@req REQ-xxx`.',
-      'Never weaken a test to pass a check. No dependency without an ADR.',
-      'Domain code imports no framework, database or vendor SDK.',
-      'Report uncertainty; never fill a gap with a guess. Keep changes small and reversible.',
-      'Stop after your report and wait for the next instruction.'
+    bullets([
+      ...(plan.profile.traits.includes('payments') || plan.profile.risks.payments
+        ? ['Money is integer minor units; a correction is a new entry, never an edit.']
+        : []),
+      ...(plan.profile.risks.multiTenant
+        ? ['The tenant comes from the authenticated context. Never from the request body.']
+        : []),
+      ...(plan.profile.traits.includes('upload')
+        ? ['Validate type and size before storing; strip metadata; never serve from an executable path.']
+        : []),
+      ...(plan.profile.traits.includes('offline')
+        ? ['A write the interface confirmed is durable before the response returns.']
+        : []),
+      ...(plan.profile.traits.includes('ai') || plan.profile.kind === 'agent'
+        ? ['Every model call has a timeout, a response schema and a cost ceiling.']
+        : []),
+      `Implement only what \`spec.json\` lists about the ${d.primary}. A missing requirement is a question, not an invitation.`,
+      `Never weaken a test to pass a check: each of the ${automated.length} automated requirements carries an \`@req\` anchor in the test that proves it.`,
+      `Keep ${d.primary} rules out of transport code, and add no dependency to ${plan.config.stack === 'undecided' ? 'the default stack' : plan.config.stack} without an ADR.`
     ]),
     '',
     h2('Done means'),
     '',
     bullets([
-      'The acceptance criteria of your requirement have passing assertions.',
-      '`node specs/spec-check.mjs` passes.',
-      'The traceability row is updated.',
-      'The report lists what changed and what you are unsure about.'
+      `The criteria of your ${d.primary} requirement have passing assertions, not just a green run.`,
+      `\`node specs/spec-check.mjs\` passes against the ${plan.requirements.length} requirements in this packet.`,
+      single ? 'The anchor in `spec.json` matches the test file you wrote.' : 'The traceability row in `05-verification.md` names your test file.',
+      'You reported what changed, what you are unsure about, and stopped.'
     ]),
     '',
-    h2('Escalate'),
+    h2('Escalate rather than guess'),
     '',
     bullets([
-      'A requirement contradicts another document.',
-      'A check fails for reasons outside your change.',
-      'You need a decision the packet does not make.',
+      `${d.start.id} or another requirement contradicts a document in this packet.`,
+      `A gate fails for a reason outside the ${d.primary} change you made.`,
+      `The packet does not decide something about the ${d.secondary} — most often permissions or deletion.`,
       'You have tried the same fix three times.'
     ]),
-    '',
-    h2('Files in this packet'),
-    '',
-    table(
-      ['File', 'Purpose'],
-      plan.docs.map((doc) => [doc, doc === 'spec.json' ? 'machine-readable requirements and gates' : doc === 'AGENTS.md' ? 'this file' : 'the argument behind the requirements'])
-    ),
     ''
   ].join('\n');
 }

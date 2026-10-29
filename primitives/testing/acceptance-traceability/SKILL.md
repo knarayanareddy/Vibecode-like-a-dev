@@ -7,7 +7,7 @@ tier_min: 0
 cost: low
 priority: 1
 tags: [traceability, acceptance, anchors, drift, verification]
-triggers: [acceptance criteria, traceability, requirement coverage, spec drift, anchor]
+triggers: [acceptance criteria, traceability, requirement coverage, test to requirement, anchor]
 enforces: [spec.drift-guard]
 artifacts: [05-verification.md, spec.json]
 ---

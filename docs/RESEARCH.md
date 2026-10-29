@@ -2,6 +2,8 @@
 
 Research notes as of **October 2026**. Sources are linked; the numbers come from third-party write-ups and one published benchmark, so treat them as directional rather than precise. The point of this document is to justify the design choices in the compiler, not to win a comparison.
 
+> **Scope:** this document covers the problem and the design rationale. For the full competitive survey — 25+ projects across six families, the peer-reviewed evidence, our own measured position, and a prioritised gap analysis — read [`LANDSCAPE.md`](LANDSCAPE.md).
+
 ## The short version
 
 Spec-driven development (SDD) went from a novelty to a feature in about eighteen months. The idea won; the ceremony lost. The tools that survived are the ones that made specs cheap, and the unsolved problem is the same everywhere: **the spec and the code diverge, and nothing notices.**

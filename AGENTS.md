@@ -51,13 +51,14 @@ No dependencies, no build step, Node 22+. If a change requires a dependency, sto
 11. **A delta declares four things:** what changes, its blast radius, a probe, and a rollback. High risk without a probe and a rollback is invalid, not merely discouraged.
 12. **Suppression is reported, never silent.** `@req-ignore` and `anchors.exclude` exist because a document or a fixture may legitimately quote a marker. Every run prints how many anchors were ignored; a suppression path that hides work quietly defeats the purpose of the guard.
 13. **Progress is never regenerated.** A recompile carries `status` and `anchor` forward per requirement key and reports what it dropped. A no-op recompile must be byte-identical to a fresh compile, so `specs/` stays reviewable in a diff.
-14. **A generative input must never become document structure.** Idea text is user data: flatten it before embedding, bound its length, and never let it reach a line start that Markdown reads as a heading. The adversarial suite tests this.
-15. **Requirement ids are permanent.** `REQ-###` is an anchor target in product repositories. Ids are preserved per requirement key and retired when a requirement drops out — never renumbered, never recycled. This has a test; keep it.
-16. **The MCP server must not drift from the CLI.** Both call `buildPlan`. If you add a tool, it returns policy-derived data, never a second implementation of the selection rules.
+14. **Library metadata is measured, not judged.** `npm run eval` reports self-recall@1 for practice search, trigger collisions across practices, practices no profile ever selects, and catalogue requirements no practice enforces. A description or trigger change that breaks routing fails CI. `scripts/eval-specificity.mjs` does the same for the emitter: it compiles every committed profile and fails when two same-tier packets share too much content. The ratchet only moves down.
+15. **A generative input must never become document structure.** Idea text is user data: flatten it before embedding, bound its length, and never let it reach a line start that Markdown reads as a heading. The adversarial suite tests this.
+16. **Requirement ids are permanent.** `REQ-###` is an anchor target in product repositories. Ids are preserved per requirement key and retired when a requirement drops out — never renumbered, never recycled. This has a test; keep it.
+17. **The MCP server must not drift from the CLI.** Both call `buildPlan`. If you add a tool, it returns policy-derived data, never a second implementation of the selection rules.
 
 ## Definition of done
 
-- [ ] `npm run check` passes, including `index --check`, the example packet verification, this repository's own drift guard (`specs/spec-check.mjs --repo . --strict`) and both stress runs (ten representative ideas, twenty hostile ones, six refusals).
+- [ ] `npm run check` passes: `index --check`, tests, the example packet, this repository's own drift guard, the library eval, and both stress runs (ten representative ideas, twenty hostile ones, six refusals).
 - [ ] If a primitive changed, its body is still under 500 lines and its checklist items are falsifiable.
 - [ ] If policy or routing changed, `examples/retro-board/spec` **and** the self-spec packet (`npm run dogfood`) were regenerated and the diff was read, not just accepted.
 - [ ] If a new practice was added, it is routed, its `enforces` keys exist, and its behaviour is covered by a test.

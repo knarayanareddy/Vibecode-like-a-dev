@@ -7,7 +7,7 @@ tier_min: 0
 cost: low
 priority: 1
 tags: [handoff, agents, prompt, brief, agnostic]
-triggers: [handoff, prompt, brief, hand to agent, lovable, replit, claude code]
+triggers: [handoff, prompt, handoff brief, hand to agent, lovable, replit, claude code]
 enforces: []
 artifacts: [07-agent-handoff.md, AGENTS.md]
 ---

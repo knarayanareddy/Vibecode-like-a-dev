@@ -7,7 +7,7 @@ tier_min: 2
 cost: medium
 priority: 5
 tags: [security, threat-model, stride, trust-boundary, owasp]
-triggers: [security, threat model, attack, trust boundary, owasp, vulnerability]
+triggers: [security, threat model, attack, trust boundary, stride, vulnerability]
 enforces: [auth.authorization, ops.rate-limits]
 artifacts: [04-contracts.md, 05-verification.md]
 ---

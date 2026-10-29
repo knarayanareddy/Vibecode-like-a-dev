@@ -6,22 +6,22 @@
 
 **Hexagonal single artifact.** A CLI is a thin adapter over a pure core. Keeping IO at the edges is what makes the commands testable without spawning processes.
 
-- Rejected: microservices — no independent scaling or ownership boundary exists yet.
-- Rejected: serverless-per-endpoint — cold paths and split transactions for a product with a small domain.
-- Rejected: framework-shaped folders (controllers/services/repositories) — they hide the domain and invite an anaemic model.
+- Rejected: microservices — an engineering write would need a distributed transaction, and there is no team boundary to gain.
+- Rejected: serverless-per-endpoint — the engineering lifecycle crosses several calls, and cold starts would be paid by an agent.
+- Rejected: framework-shaped folders — they would put the engineering rules next to the transport code that is supposed to be the thinnest layer.
 
 ## 2. Shape
 
 ```text
-transport   http · cli · jobs          (thin, no rules)
+transport   argv · stdin                    (thin: parses, validates, maps errors)
      │ calls interfaces it does not own
-application use cases · authz · transactions
+application engineering use cases · input checks · transaction boundary
      │ domain types and errors only
-domain      aggregates · invariants · events   (pure, no imports)
+domain      core                    (pure: no PostgreSQL + Drizzle (forward-only SQL migrations), no framework)
      ▲ implemented by
-adapters    db · http clients · queue · mail
+adapters    PostgreSQL + Drizzle (forward-only SQL migrations) · http clients
 
-Imports point downward only. Anything pointing back up is a bug, not a shortcut.
+Imports point downward only. Anything pointing back up is a bug in Vibecode Like A Dev, not a shortcut.
 ```
 
 ## 3. Modules and import rules
@@ -52,37 +52,28 @@ This is the default. Override it only through an ADR that names the trade-off; t
 
 | Concern | Decision | Where it lives |
 | --- | --- | --- |
-| Configuration | Validated at startup; missing values fail fast and are named | `config` module, one schema |
-| Errors | One envelope, typed domain errors, no leaking internals | `errors` module + transport mapper |
-| Logging | Structured, with correlation ID and actor ID on every line | `observability` module |
-| Authorization | Policy check at the application layer, deny by default | `application` layer, one policy module |
-| Time and IDs | Injected clock; opaque sortable IDs (ULID) | shared kernel |
-| Feature flags | One mechanism, default off for new behaviour | `config` module |
+| Configuration | Validated at startup against Zod at every boundary (input, env, external API); a missing value fails fast and is named | `config` module, one schema |
+| Errors | Typed domain errors mapped to the envelope in `04-contracts.md`; internals never leak | `errors` module + transport mapper |
+| Logging | Structured, with correlation and actor id on every line | `observability` module |
+| Time and IDs | Injected clock; opaque sortable ids | shared kernel |
 
-## 6. Primary journey, in order
+## 6. The primary journey, in order
 
-1. Transport receives the request and validates input against a schema.
-2. Authentication resolves an actor; unauthenticated requests stop here.
-3. Application layer loads the aggregate, checks policy, and calls one domain operation.
-4. Domain operation enforces invariants and returns a result or a typed error.
-5. Adapters persist atomically and emit domain events after commit.
-6. Transport maps the result to the contract shape, including the correlation ID.
+Written for **REQ-001 Runnable from a clean clone** — the first requirement, and the one whose shape the rest copy.
+
+1. Transport receives the request and validates it against a schema.
+2. The actor, if any, is resolved and attached to the request context.
+3. The application layer loads the engineering, checks policy, and calls one domain operation.
+4. The domain operation enforces the invariants in `02-domain-model.md` and returns a result or a typed error.
+5. The adapter writes to PostgreSQL in one transaction and emits any domain event after commit.
+6. Transport maps the result to the contract shape in `04-contracts.md`, including the correlation id.
 
 ## 7. Decision records
 
 Non-functional targets go here too: latency, availability, recovery time. A number with no measurement method is a slogan, so write "not measured in v1" instead.
 
-**ADR-001 — Use Hexagonal single artifact**
-A single deployable with module boundaries keeps operational surface small while the product is still finding its shape. _Consequence:_ Boundaries are enforced by import rules and a fitness check, not by discipline alone.
-
-**ADR-002 — Language and runtime: TypeScript (strict)**
-One language for domain, transport and tests reduces context switching for both humans and agents. _Consequence:_ The ecosystem must support the chosen database and test tooling; revisit if a performance ceiling is measured.
-
-**ADR-003 — Persistence: PostgreSQL + Drizzle (forward-only SQL migrations)**
-Relational constraints express the invariants that matter, and migrations are reviewable artefacts. _Consequence:_ Schema changes need forward-only migrations and a restore path; revisit if access patterns become document-shaped.
-
-**ADR-004 — Validation at the boundary**
-Zod at every boundary (input, env, external API) validates input, environment and external responses at the edges; the domain then works with valid values and does not repeat checks. _Consequence:_ Proposed
+**ADR-001 — Architecture: Hexagonal single artifact**
+A CLI is a thin adapter over a pure core. Keeping IO at the edges is what makes the commands testable without spawning processes. _Consequence:_ Boundaries are checked by an import rule in CI, not by review.
 
 Add an ADR for every dependency that would take more than a day to remove, and for every boundary decision that a future reader would otherwise reverse-engineer from code.
 
@@ -92,12 +83,11 @@ Architecture that is not executable is decoration.
 
 | Property | Check | Automated how | Fails when |
 | --- | --- | --- | --- |
-| Domain purity | No framework, driver or SDK import in domain files | grep or dependency-cruiser rule in CI | A domain file imports infrastructure |
-| Module boundaries | Contexts import only their own domain and the shared kernel | import-boundary rule | A cross-context import appears |
-| Token usage | No raw colour or spacing literals | token lint | A hex colour appears in a component |
-| Contract agreement | Implementation matches the contract inventory | contract test | A response field is added or removed silently |
-| Requirement coverage | Every automated requirement has an anchor and a passing test | `node specs/spec-check.mjs` | A test is deleted or renamed |
-| Test quality | Assertion count per test | review | A test asserts only that no exception was thrown |
+| Domain purity | No framework, database driver or vendor SDK imported under `domain/` | import-boundary rule in CI | A domain file imports infrastructure |
+| Module boundaries | The 1 contexts import only their own domain and the shared kernel | import-boundary rule | A cross-context import appears |
+| Contract agreement | Implementation matches the shapes in 04-contracts.md | contract test | A response field is added or removed silently |
+| Requirement coverage | 3 anchored requirements have a passing test | `node specs/spec-check.mjs` | A test is deleted or renamed |
+| Assertion density | Every test asserts an outcome, not just absence of a throw | review | A test would pass if the behaviour were wrong |
 
 ## 10. When this architecture should change
 

@@ -8,65 +8,63 @@
 
 ## Problem and primary user
 
-Write this in one paragraph each, from the user's side. The prompt is deliberately harder than the code.
+Answer from the board side, in the user's words. These four answers are what an agent will otherwise invent.
 
-| Question | Answer |
+| Question | Answer for Retro Board |
 | --- | --- |
-| Who exactly is the user? | _confirm_ |
-| What do they do today instead? | _confirm_ |
-| What does the product remove from their day? | _confirm_ |
-| What makes them stop using it? | _confirm_ |
+| Who handles the board today? | _confirm_ |
+| What do they do instead — a spreadsheet, a chat thread, a teams in another tool? | _confirm_ |
+| What does Retro Board remove from that day? | _confirm_ |
+| What makes them abandon it after one use? | _confirm_ |
 
 ## In scope for v1
 
-Derived from the selected requirements. Every capability below exists in `spec.json` with acceptance criteria.
+14 requirements, each with acceptance criteria in `spec.json`. They were selected by what the idea asks for, not by what a template ships.
 
 **Foundation**
 
-- `REQ-001` Runnable from a clean clone
-- `REQ-002` The primary journey works end to end
-- `REQ-003` Explicit non-goals
-- `REQ-014` The product's own rules are named and pinned
+- `REQ-001` A clean clone of Retro Board runs with one documented command, and a missing setting is named rather than guessed. _(runnable from a clean clone)_
+- `REQ-002` A board goes from creation to completion end to end, through the documented interface only. _(the primary journey works end to end)_
+- `REQ-003` The three things Retro Board will not do are written down and reviewed before the first sprint. _(explicit non-goals)_
+- `REQ-014` The rules that make a board valid are written down, and each one has a test that would fail if it broke. _(the product's own rules are named and pinned)_
 
 **Data**
 
-- `REQ-004` Durable state with forward-only migrations
+- `REQ-004` State about a board survives a restart in PostgreSQL, and every schema change is a forward-only migration. _(durable state with forward-only migrations)_
 
 **Security**
 
-- `REQ-005` Authentication with explicit session lifecycle
-- `REQ-006` Server-side authorization with deny-by-default
-- `REQ-013` Abuse limits on public entry points
+- `REQ-005` A team signs in and out, and a revoked session stops working server-side. _(authentication with explicit session lifecycle)_
+- `REQ-006` Reading or changing someone else's board is refused by the server, not hidden by the client. _(server-side authorization with deny-by-default)_
+- `REQ-013` Public entry points that create or change board data are limited per identity and per address. _(abuse limits on public entry points)_
 
 **Interface**
 
-- `REQ-007` Accessible primary journey
-- `REQ-008` Every screen has loading, empty, error and success states
-- `REQ-009` One design token source
-- `REQ-010` Errors are classified before they are rendered
+- `REQ-007` The main board journey is completable with a keyboard and a screen reader. _(accessible primary journey)_
+- `REQ-008` Every board screen has loading, empty, error and success states — not only success. _(every screen has loading, empty, error and success states)_
+- `REQ-009` Colour and spacing come from one token source, so rebranding the board view is one file. _(one design token source)_
+- `REQ-010` A board error is classified before it is rendered, so the message tells teams what to do next. _(errors are classified before they are rendered)_
 
 **Interface & contracts**
 
-- `REQ-011` Versioned machine-readable interface contract
-- `REQ-012` One error envelope and one identifier scheme
+- `REQ-011` The board interface has a versioned, machine-readable contract that a test enforces. _(versioned machine-readable interface contract)_
+- `REQ-012` Every failure on the board interface returns the same envelope, and every id in it is opaque. _(one error envelope and one identifier scheme)_
 
 ## Out of scope
 
-A starter set, confirmed or replaced before Phase 2. The value is in writing it down, not in the specific items.
+Written for Retro Board specifically. Confirm or replace before Phase 2 — the list is worth more than any single line on it.
 
-- Anything not listed under "In scope" in the product brief. When in doubt, it is out of scope.
-- A general-purpose platform, plugin system or public extension API. v1 ships one product.
-- Multi-region deployment and horizontal scale-out beyond the stated user scale.
-- A native mobile client or desktop wrapper unless "mobile" is the declared kind.
-- Single sign-on, SCIM provisioning and enterprise procurement features.
-- A migration path from an existing system. v1 starts clean and imports nothing.
-- Model-backed features, chat interfaces and semantic search.
-- Email, push and digest notification delivery.
-- A public API for third parties, SDKs and published integrations.
+- Any board capability the idea does not name. When in doubt, it is out of scope and gets its own version.
+- Importing board data from an existing system: v1 starts empty and the first teams enters it by hand.
+- Any generated or summarised board content. Every word in v1 is written by a team.
+- Notifying teams outside the product: no email, no push, no digest.
+- A public board API for third parties, SDKs and published integrations.
+- A native client for the board. If teams need it offline, that is a v2 decision with its own sync contract.
+- Custom reporting and exports over board data beyond what one screen shows.
 
 ## Success measures
 
-If a measure cannot be observed, it is a wish. One instrumented measure beats five untracked ones.
+Every measure below must be observable from PostgreSQL + Drizzle (forward-only SQL migrations) or the logs without a new tool. One instrumented measure beats five wishes.
 
 | Measure | Target for v1 | Observed how |
 | --- | --- | --- |
@@ -86,12 +84,12 @@ Assumptions: the idea paragraph is a complete statement of intent, tier 1 matche
 
 ## Open questions
 
-Unanswered questions do not block Phase 0. They block the slice they belong to. Answering them in the spec is cheaper than discovering the answer in production.
+These do not block Phase 0; they block the board slice they belong to. An answered question here is a decision you do not discover in production.
 
-1. Who is the single primary user of v1, and what do they do today instead of using this?
-2. What is the one action that must never fail, and what does failure cost the user?
-3. Which in-scope capability could be removed without destroying the core value?
-4. What is the expected order of magnitude of data — rows, events per day, concurrent users?
-5. Who notices first when this breaks, and through which channel?
+1. Who creates the first board, and what do they use today instead?
+2. What must never happen to a board — and what does it cost when it does?
+3. Which part of the board workflow could be dropped without losing the reason teams open it?
+4. How many board records exist in year one, and how many teams touch them at once?
+5. Who notices first when a board is wrong, and how do they find out?
 6. Which fields are personal data, and what is the retention period and lawful basis for each?
 7. Which sign-in methods are in scope for v1 — password, magic link, OAuth provider?

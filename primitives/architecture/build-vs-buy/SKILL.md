@@ -7,7 +7,7 @@ tier_min: 1
 cost: low
 priority: 5
 tags: [build-vs-buy, auth, payments, vendors, risk]
-triggers: [auth, payment provider, email, queue, build or buy, vendor]
+triggers: [auth, payment provider, email, build or buy, vendor, dependency choice]
 enforces: []
 artifacts: [03-architecture.md]
 ---

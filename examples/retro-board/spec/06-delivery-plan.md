@@ -16,12 +16,12 @@ Build the smallest end-to-end slice of **The primary journey works end to end** 
 
 _A running, tested, documented empty box. Nothing built on a broken foundation._
 
-- [ ] Initialise the repository with the chosen stack; commit the lockfile.
-- [ ] Add the CI workflow with lint, typecheck and test jobs. Make it required on the default branch.
-- [ ] Add environment validation that names every missing variable at startup.
-- [ ] Write the README runbook: install, run, test, deploy, known limitations.
+- [ ] Initialise the repository with TypeScript (strict) and PostgreSQL; commit the lockfile.
+- [ ] Add the CI workflow with lint, typecheck and test jobs, and make it required on the default branch.
+- [ ] Add configuration validation that names every missing variable before the first board is created.
+- [ ] Write the runbook: install, run, test, deploy, and what teams see when the board service is down.
 - [ ] Copy the specification packet into specs/ and wire the spec check into CI.
-- [ ] Resolve open questions that block in-scope work (see product brief). Unresolved questions block only their area.
+- [ ] Answer the open questions that block the board slice; the rest can wait for their phase.
 
 **Exit:** A new contributor can clone, run and test with the documented commands. CI is green on an empty suite.
 
@@ -29,11 +29,11 @@ _A running, tested, documented empty box. Nothing built on a broken foundation._
 
 _The rules of the product, expressed in code, before any framework is chosen for them._
 
-- [ ] Fill the ubiquitous language table: one term, one meaning, no synonyms.
-- [ ] Write failing tests for each invariant in the domain model.
-- [ ] Implement the aggregates as pure code with no framework, network or database imports.
-- [ ] Define typed domain errors; no exception control flow across module boundaries.
-- [ ] Review assertion quality manually; every test must fail if the rule is inverted.
+- [ ] Fill the language table around a board: one term, one meaning, no synonyms.
+- [ ] Write failing tests for each rule a board must satisfy, including the ones the idea states in its own words.
+- [ ] Implement the board aggregates as pure code with no framework, network or database imports.
+- [ ] Define typed errors for the ways a board can be rejected; no exception control flow across module boundaries.
+- [ ] Review assertion quality by hand: every board test must fail if its rule is inverted.
 
 **Exit:** Domain tests pass and the domain layer imports nothing from infrastructure.
 
@@ -41,23 +41,23 @@ _The rules of the product, expressed in code, before any framework is chosen for
 
 _Every boundary is fixed while changing it is still free._
 
-- [ ] Finalise each interface shape in the contract inventory: REQ-011, REQ-012.
-- [ ] Write acceptance tests that encode the criteria in the verification plan. They must fail.
-- [ ] Write contract tests for external dependencies, or record the stub and the reason.
-- [ ] Record an ADR for each chosen library that could plausibly be replaced.
+- [ ] Fix each shape in the contract inventory: REQ-011, REQ-012.
+- [ ] Write the acceptance tests for a board first; they must fail for missing behaviour, not missing setup.
+- [ ] Record a real response for every external dependency, or write down the stub and why.
+- [ ] Record an ADR for each library that a reviewer could plausibly want removed.
 
 **Exit:** Acceptance tests exist and fail for the right reason (missing behaviour, not missing setup).
 
 ### Phase 3 — Vertical slices · week 4-4
 
-_Working software end to end, one requirement at a time._
+_Working board behaviour end to end, one requirement at a time._
 
-- [ ] REQ-004 Durable state with forward-only migrations — test, implement, trace, repeat.
-- [ ] REQ-005 Authentication with explicit session lifecycle — test, implement, trace, repeat.
-- [ ] REQ-006 Server-side authorization with deny-by-default — test, implement, trace, repeat.
-- [ ] REQ-013 Abuse limits on public entry points — test, implement, trace, repeat.
-- [ ] REQ-011 Versioned machine-readable interface contract — test, implement, trace, repeat.
-- [ ] REQ-012 One error envelope and one identifier scheme — test, implement, trace, repeat.
+- [ ] REQ-004 State about a board survives a restart in PostgreSQL, and every schema change is a forward-only migration. Test first, then implement, then trace.
+- [ ] REQ-005 A team signs in and out, and a revoked session stops working server-side. Test first, then implement, then trace.
+- [ ] REQ-006 Reading or changing someone else's board is refused by the server, not hidden by the client. Test first, then implement, then trace.
+- [ ] REQ-013 Public entry points that create or change board data are limited per identity and per address. Test first, then implement, then trace.
+- [ ] REQ-011 The board interface has a versioned, machine-readable contract that a test enforces. Test first, then implement, then trace.
+- [ ] REQ-012 Every failure on the board interface returns the same envelope, and every id in it is opaque. Test first, then implement, then trace.
 
 **Exit:** Each requirement is traceable from criterion to test, and its anchor is green in CI.
 
@@ -65,10 +65,10 @@ _Working software end to end, one requirement at a time._
 
 _The product feels finished and fails predictably._
 
-- [ ] REQ-007 Accessible primary journey.
-- [ ] REQ-008 Every screen has loading, empty, error and success states.
-- [ ] REQ-009 One design token source.
-- [ ] REQ-010 Errors are classified before they are rendered.
+- [ ] REQ-007 The main board journey is completable with a keyboard and a screen reader.
+- [ ] REQ-008 Every board screen has loading, empty, error and success states — not only success.
+- [ ] REQ-009 Colour and spacing come from one token source, so rebranding the board view is one file.
+- [ ] REQ-010 A board error is classified before it is rendered, so the message tells teams what to do next.
 - [ ] Bind every component to design tokens; remove raw values.
 - [ ] Exercise every failure path in the requirements, manually or by test.
 - [ ] Mutation testing is deferred; keep assertions specific anyway.
@@ -79,39 +79,36 @@ _The product feels finished and fails predictably._
 
 _Ship with a way back._
 
-- [ ] Write the release checklist and the rollback procedure.
-- [ ] Deploy to a staging environment and run the primary journey there.
-- [ ] Observe for one window: error rate, latency, and one real user journey.
+- [ ] Write the release checklist and the rollback procedure for a PostgreSQL migration.
+- [ ] Deploy to staging and take one board through the primary journey there.
+- [ ] Observe for one window: error rate, latency, and one board created by a real team.
 - [ ] Record what changed in the spec as a result, then archive the changed requirements.
 
 **Exit:** A release has been observed and a rollback has been rehearsed or explicitly accepted as untested.
 
 ## 3. Commit and branch protocol
 
-- One commit, one intention. Reference the requirement: `feat(REQ-004): erase a subject across all tables`.
-- A commit that only adds tests is fine and encouraged; a commit that only weakens tests is not.
-- Run the full check locally before pushing: lint, typecheck, tests, spec check.
-- One branch (or worktree) per vertical slice. Never two people in the same requirement.
+- One commit, one intention, prefixed with the requirement: `feat(REQ-001): runnable from a clean clone`.
+- A commit that only adds tests is welcome; a commit that only weakens tests is rejected.
+- Run npm run lint && npm run typecheck && npm test before pushing — TypeScript (strict) will not tell you in CI either.
+- One branch per vertical slice, and never two people inside the same board requirement.
 
 ## 4. Stop rules
 
 Rules for humans and agents alike. The point is to stop the loop where the model of the problem is wrong, instead of paying for the same mistake repeatedly.
 
 1. Three failed attempts at the same failing check: stop, write down what was tried, escalate with the evidence.
-2. A test needs to be weakened to proceed: stop. That is either a wrong test or a wrong design.
-3. A requirement turns out to be ambiguous: stop that requirement, not the whole phase. Record the question in the brief.
-4. A dependency needs a second framework to work: stop and write the ADR before writing the code.
-5. The phase gate cannot pass within twice its allotted time: cut scope, do not extend the phase silently.
+2. A test needs weakening to proceed: stop — that is either a wrong test or a wrong design.
+3. A requirement about the board turns out to be ambiguous: stop that requirement, record the question, keep going elsewhere.
+4. The phase gate cannot pass within twice its allotted time: cut scope; do not extend the phase silently.
 
 ## 5. Risk register
 
 | Risk | Likelihood | Mitigation |
 | --- | --- | --- |
-| Scope creep from plausible extra features | high | Non-goals are listed and reviewed; anything unlisted is rejected in review. |
-| Spec drift as implementation reveals constraints | high | Review each requirement against its criteria before starting the next. |
-| Agent invents an abstraction or a dependency | medium | ADR rule plus a review checklist item; new dependencies are visible in the lockfile. |
-| Test suite grows faster than the product | medium | Test budget: most tests at the domain layer, one journey test, no framework tests. |
-| Environment and configuration drift | medium | Environment schema validated at startup; documented in the runbook. |
-| Insecure default in generated auth or upload handling | low | Threat model and denial-path tests; ASVS baseline items checked before release. |
+| Scope creep past the 14 listed requirements | high | The non-goals table is the answer: anything unlisted is rejected in review rather than debated. |
+| An invented abstraction around the board | medium | One context per owned noun; a new layer needs a reason a reviewer can check. |
+| Environment and configuration drift | medium | Configuration is validated at startup and fails by naming the missing variable. |
+| The 4-week calendar slipping | high | Cut a requirement, never a gate; the phase order is already cheapest-first. |
 
-A version is finished when every gate in `05-verification.md` passes, every manual check has been run and dated, and the spec reflects what was actually built including the decisions that changed.
+v1 is finished when all 8 gates in `05-verification.md` pass, every manual check is dated, and `spec.json` describes what was actually built — including the decisions that changed on the way.
