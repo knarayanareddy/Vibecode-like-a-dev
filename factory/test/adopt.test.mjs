@@ -408,4 +408,25 @@ test('remote Git repository URLs parse safely, reject flag injection, redact cre
   assert.doesNotMatch(report.profile.$comment, /vld-remote-/, 'temporary clone path must not leak into $comment');
 });
 
+test('single-line PEP 621 pyproject.toml arrays with bracketed extras parse without dropping trailing packages', (t) => {
+  const repo = fixture({
+    'services/parts-predictor/pyproject.toml': `[project]
+name = "parts-predictor"
+version = "0.2.0"
+dependencies = ["fastapi[standard]>=0.115.0", "psycopg[binary]>=3.1", "anthropic>=0.39.0", "celery>=5.4.0"]
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0", "hypothesis>=6.100.0"]
+`,
+    'services/parts-predictor/app/rul.py': 'def run():\n    return True\n'
+  });
+  t.after(repo.cleanup);
+
+  const report = adoptRepo(repo.root);
+  assert.equal(report.profile.kind, 'api');
+  for (const trait of ['persistence', 'ai', 'background-jobs']) {
+    assert.ok(report.profile.traits.includes(trait), `single-line pyproject.toml missed trait "${trait}"; got ${report.profile.traits.join(', ')}`);
+  }
+  assert.ok(report.facts.tests.some((entry) => /pytest/.test(entry)), 'single-line dev optional-dependencies must detect pytest');
+});
+
 

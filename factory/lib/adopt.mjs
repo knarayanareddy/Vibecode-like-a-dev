@@ -92,13 +92,34 @@ function discoverManifests(scan) {
 }
 
 function pythonBlocks(text) {
-  // pyproject arrays: dependencies = [ "pkg>=1" ] · dev = [ "pytest" ]
-  // The closing bracket must be on its own line: dependency specs contain extras
-  // like "psycopg[binary]", and a naive non-greedy match stops inside them.
-  return [...text.matchAll(/^[ \t]*([a-z0-9_-]+)[ \t]*=[ \t]*\[([\s\S]*?)^[ \t]*\]/gim)].map((match) => ({
-    name: match[1].toLowerCase(),
-    body: match[2]
-  }));
+  // Quote- and comment-aware TOML array scanner so both single-line and multi-line
+  // PEP 621 arrays (`dependencies = ["psycopg[binary]>=3.1", "anthropic>=0.39"]`)
+  // parse cleanly without stopping on bracketed extras inside quoted specifiers.
+  const blocks = [];
+  for (const header of text.matchAll(/^[ \t]*([a-z0-9_-]+)[ \t]*=[ \t]*\[/gim)) {
+    const name = header[1].toLowerCase();
+    const start = header.index + header[0].length;
+    let quote = null;
+    let inComment = false;
+    let end = -1;
+    for (let i = start; i < text.length; i += 1) {
+      const ch = text[i];
+      if (inComment) {
+        if (ch === '\n') inComment = false;
+        continue;
+      }
+      if (quote) {
+        if (ch === '\\') { i += 1; continue; }
+        if (ch === quote) quote = null;
+        continue;
+      }
+      if (ch === '"' || ch === "'") { quote = ch; continue; }
+      if (ch === '#') { inComment = true; continue; }
+      if (ch === ']') { end = i; break; }
+    }
+    if (end !== -1) blocks.push({ name, body: text.slice(start, end) });
+  }
+  return blocks;
 }
 
 function namesIn(block) {
