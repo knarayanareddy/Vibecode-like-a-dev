@@ -45,7 +45,7 @@ const RULES = {
     "check": {
       "kind": "ci",
       "patterns": [
-        "lint|typecheck|tsc|ruff|eslint|golangci|clippy",
+        "lint|typecheck|tsc|biome|ruff|flake8|mypy|pyright|eslint|golangci|go vet|staticcheck|clippy|cargo check|rubocop|phpstan|psalm|flutter analyze|dart analyze|credo|dialyzer",
         "pull_request"
       ]
     },
@@ -70,7 +70,7 @@ const RULES = {
     "check": {
       "kind": "ci",
       "patterns": [
-        "test|pytest|go test|vitest|jest|rspec|dotnet test"
+        "test|pytest|go test|vitest|jest|rspec|dotnet test|phpunit|gradle|mvn"
       ]
     },
     "how": "A CI workflow runs the test command.",
@@ -130,7 +130,7 @@ const JSON_OUT = flag('--json');
 const REPO = path.resolve(option('--repo', process.cwd()));
 
 const IGNORED = new Set(['node_modules', '.git', 'dist', 'build', 'out', 'coverage', 'vendor', '.next', '.nuxt', '.venv', 'venv', '__pycache__', 'target', '.turbo']);
-const SOURCE = /\.(ts|tsx|js|jsx|mjs|cjs|py|go|rb|java|kt|cs|php|rs|sh|yml|yaml|json|toml|tf|exs|env|ini|conf)$/;
+const SOURCE = /\.(ts|tsx|js|jsx|mjs|cjs|py|go|rb|java|kt|cs|php|rs|dart|ex|exs|swift|sh|yml|yaml|json|toml|tf|env|ini|conf)$/;
 const TEST_PATH = /(^|\/)(tests?|__tests__|spec|e2e)\//i;
 
 function walk(dir, out = []) {

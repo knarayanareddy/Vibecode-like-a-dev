@@ -20,7 +20,7 @@
       "check": {
         "kind": "ci",
         "patterns": [
-          "lint|typecheck|tsc|ruff|eslint|golangci|clippy",
+          "lint|typecheck|tsc|biome|ruff|flake8|mypy|pyright|eslint|golangci|go vet|staticcheck|clippy|cargo check|rubocop|phpstan|psalm|flutter analyze|dart analyze|credo|dialyzer",
           "pull_request"
         ]
       },
@@ -45,7 +45,7 @@
       "check": {
         "kind": "ci",
         "patterns": [
-          "test|pytest|go test|vitest|jest|rspec|dotnet test"
+          "test|pytest|go test|vitest|jest|rspec|dotnet test|phpunit|gradle|mvn"
         ]
       },
       "how": "A CI workflow runs the test command.",
@@ -105,6 +105,9 @@
           "**/*.spec.*",
           "**/test_*.*",
           "**/*_test.*",
+          "**/*Test.*",
+          "**/*Tests.*",
+          "**/test/**/*",
           "**/tests/**/*",
           "**/__tests__/**/*",
           "**/spec/**/*"
@@ -162,7 +165,9 @@
         "kind": "contains",
         "glob": [
           "**/*.ts",
+          "**/*.tsx",
           "**/*.js",
+          "**/*.jsx",
           "**/*.mjs",
           "**/*.cjs",
           "**/*.py",
@@ -171,7 +176,11 @@
           "**/*.cs",
           "**/*.java",
           "**/*.kt",
-          "**/*.rs"
+          "**/*.rs",
+          "**/*.php",
+          "**/*.dart",
+          "**/*.ex",
+          "**/*.exs"
         ],
         "patterns": [
           "(?i)correlation[_-]?id|request[_-]?id|trace[_-]?id"
@@ -243,15 +252,23 @@
           "**/*.spec.*",
           "**/test_*.*",
           "**/*_test.*",
+          "**/*Test.*",
+          "**/*Tests.*",
+          "**/test/**/*",
           "**/tests/**/*",
           "**/__tests__/**/*",
           "**/spec/**/*",
           "**/package.json",
           "**/pyproject.toml",
-          "**/requirements*.txt"
+          "**/requirements*.txt",
+          "**/Cargo.toml",
+          "**/go.mod",
+          "**/Gemfile",
+          "**/composer.json",
+          "**/pubspec.yaml"
         ],
         "patterns": [
-          "fast-check|hypothesis|proptest|jqwik|fscheck"
+          "fast-check|hypothesis|proptest|quickcheck|jqwik|fscheck|rapid|gopter|rantly|glados"
         ]
       },
       "how": "A property-based testing library is present and used by a test.",

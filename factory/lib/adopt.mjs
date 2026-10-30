@@ -78,7 +78,11 @@ function matches(name, patterns) {
 }
 
 const MANIFEST_PATTERN = /(^|\/)(package\.json|pyproject\.toml|requirements(-[\w.]+)?\.txt|go\.mod|Cargo\.toml|Gemfile|composer\.json|pubspec\.yaml)$/;
-const TEST_TOOL_DEPS = ['vitest', 'jest', 'mocha', 'ava', 'pytest', 'playwright', '@playwright/test', 'cypress', 'coverage', 'uvu', 'tap'];
+const TEST_TOOL_DEPS = [
+  'vitest', 'jest', 'mocha', 'ava', 'pytest', 'hypothesis', 'playwright', '@playwright/test',
+  'cypress', 'coverage', 'uvu', 'tap', 'phpunit', 'flutter_test', 'rspec', 'rspec-rails',
+  'minitest', 'testify'
+];
 
 /**
  * Manifests live at the root in small projects and up to three levels down in
@@ -209,7 +213,21 @@ function collectDependencies(scan) {
     }
 
     if (base === 'Gemfile') {
-      for (const match of scan.contents(file).matchAll(/^\s*gem\s+["']([^"']+)["']/gm)) add(runtime, match[1], file);
+      let scope = runtime;
+      for (const line of scan.contents(file).split('\n')) {
+        const trimmed = line.trim();
+        if (/^group\b/.test(trimmed)) {
+          scope = /:test\b/.test(trimmed) ? dev : runtime;
+          continue;
+        }
+        if (trimmed === 'end') { scope = runtime; continue; }
+        const gemMatch = trimmed.match(/^gem\s+["']([^"']+)["']/);
+        if (gemMatch) {
+          const gemName = gemMatch[1];
+          const bucket = /^(rspec|rspec-rails|minitest|capybara)$/i.test(gemName) ? dev : scope;
+          add(bucket, gemName, file);
+        }
+      }
       continue;
     }
 
@@ -252,9 +270,11 @@ function detectDeployment(scan) {
   for (const entry of DEPLOY_FILES) {
     if (scan.has(entry) || scan.hasDir(entry)) found.push(entry);
   }
+  const composeFiles = scan.filesMatching(/^(docker-)?compose([.-][\w-]+)?\.ya?ml$/);
+  found.push(...composeFiles);
   const deployWorkflows = scan.filesMatching(/^\.github\/workflows\/.*\.ya?ml$/).filter((file) => /deploy|release|publish/i.test(file));
   found.push(...deployWorkflows);
-  return found;
+  return [...new Set(found)];
 }
 
 function detectCi(scan) {
@@ -271,7 +291,9 @@ function detectTests(scan, { devDeps = [], manifests = [] } = {}) {
     if (scan.hasDir(dir)) found.push(`${dir}/`);
   }
 
-  const testFiles = scan.filesMatching(/(^|\/)(test_[^/]+\.py|[^/]+\.(test|spec)\.[a-z]+|_test\.go)$/);
+  const testFiles = scan.filesMatching(
+    /(^|\/)(test_[^/]+\.[a-z]+|[^/]+\.(test|spec)\.[a-z]+|[^/]+_test\.(go|rs|rb|py|dart|exs)|[^/]+Tests?\.(java|kt|cs|php))$/
+  );
   if (testFiles.length > 0) found.push(`${testFiles.length} test file(s)`);
 
   const tooling = devDeps.filter((dep) => matches(dep, TEST_TOOL_DEPS));
@@ -290,10 +312,10 @@ function detectTests(scan, { devDeps = [], manifests = [] } = {}) {
 }
 
 const DOCKER_SERVICE_TRAITS = [
-  { trait: 'persistence', pattern: /(^|\/)(postgres|postgis|mysql|mariadb|mongo|mongodb|cockroach|clickhouse|timescale)/i },
-  { trait: 'background-jobs', pattern: /(^|\/)(redis|valkey|rabbitmq|nats|kafka|redpanda|temporal)/i },
-  { trait: 'search', pattern: /(^|\/)(elasticsearch|opensearch|meilisearch|typesense|qdrant|weaviate)/i },
-  { trait: 'upload', pattern: /(^|\/)(minio|localstack)/i }
+  { trait: 'persistence', pattern: /(^|\/|-)(postgres|postgis|mysql|mariadb|mongo|mongodb|cockroach|clickhouse|timescale)/i },
+  { trait: 'background-jobs', pattern: /(^|\/|-)(redis|valkey|rabbitmq|nats|kafka|redpanda|temporal)/i },
+  { trait: 'search', pattern: /(^|\/|-)(elasticsearch|opensearch|meilisearch|typesense|qdrant|weaviate)/i },
+  { trait: 'upload', pattern: /(^|\/|-)(minio|localstack)/i }
 ];
 
 const ENV_KEY_RULES = [

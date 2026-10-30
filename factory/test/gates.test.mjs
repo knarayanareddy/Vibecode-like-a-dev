@@ -406,4 +406,36 @@ test('polyglot Go, Rust and Java test files outside tests/ satisfy anchor gates 
   }
 });
 
+test('polyglot CI static checks (go vet), *Test.php authz denial tests, and .dart/.php observability & secret scans work in gates.mjs', () => {
+  const p = packet({
+    stage: 'production',
+    traits: ['auth', 'persistence'],
+    risks: { pii: true, multiTenant: true, publicFacing: true }
+  });
+  try {
+    const repo = satisfyingRepo(p, path.join(p.root, 'repo'));
+    write(repo, '.github/workflows/ci.yml', 'on:\n  pull_request:\njobs:\n  ci:\n    steps:\n      - run: go vet ./...\n      - run: vendor/bin/phpunit\n');
+    rmSync(path.join(repo, 'tests'), { recursive: true, force: true });
+    const automated = p.spec.requirements.filter((requirement) => requirement.verify === 'automated');
+    const anchors = automated.map((r) => `// @req ${r.id}`).join('\n');
+    write(repo, 'api/src/TriageAuthzTest.php', `<?php\n${anchors}\nclass TriageAuthzTest { public function testDeny() { assert(403 === 403); } }\n`);
+    write(repo, 'mobile/lib/sync.dart', 'String header(String traceId) => "x-request-id=$traceId";\n');
+
+    const summary = JSON.parse(run(p.outDir, ['--repo', repo, '--json']).stdout);
+    for (const gateId of ['G0-CHECK', 'G1-CI', 'G2-AUTHZ', 'G2-OBSERVABILITY']) {
+      const res = summary.results.find((entry) => entry.id === gateId);
+      assert.equal(res?.status, 'pass', `${gateId} failed on polyglot repo: ${JSON.stringify(res)}`);
+    }
+
+    // Secret leaked inside a .dart file must trip G1-SECRETS
+    write(repo, 'mobile/lib/leak.dart', `const awsKey = "${'AKIA' + '9X7ZQ2M4PL8NR5TW'}";\n`);
+    const leakSummary = JSON.parse(run(p.outDir, ['--repo', repo, '--json']).stdout);
+    const secretsGate = leakSummary.results.find((entry) => entry.id === 'G1-SECRETS');
+    assert.equal(secretsGate.status, 'fail', 'hardcoded AWS key in .dart file must fail G1-SECRETS');
+  } finally {
+    p.cleanup();
+  }
+});
+
+
 
