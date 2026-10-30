@@ -174,9 +174,18 @@ vld store assets team-playbook --project .
 vld store copy team-playbook review-guidance --project .
 # A declared artifact-template must match the selected artifact type; the result records source provenance.
 vld artifact init product-brief --from-store team-playbook/product-brief-template --project .
-vld store update team-playbook --project .  # explicit refresh after review
+# Preview contacts the remote and validates it, but never changes this project.
+vld store diff team-playbook --project .
+# Copy the exact remote commit printed by diff only after review; update re-fetches it
+# and refuses a changed remote rather than moving the pin silently.
+vld store update team-playbook --acknowledge <full-40-character-commit> --project .
 
 vld module verify --project .
+
+# Export a bounded, one-way view for an already-adopted ecosystem. These files are
+# never compiler inputs: profile, overlays, packet and change manifests stay authoritative.
+vld export spec-kit specs --out integrations/spec-kit
+vld export kiro specs --out integrations/kiro
 
 # Generate handoffs for a local coding-agent environment. This installs files;
 # it does not invoke a model or use credentials.
@@ -198,6 +207,8 @@ vld workflow run discovery --execute
 | **Bundles** | `startup-saas` and `regulated-payments` starting points | May add traits, true risk signals and modules; cannot silently lower risk or replace a scalar decision. |
 | **Agent adapters** | Generated Codex, Claude Code and GitHub Copilot handoffs | Generated files and enabled module set are drift-checked; the adapter never runs a model. |
 | **Workflows** | Discovery, feature delivery and release readiness | Typed/resumable DAG; human and agent steps require explicit evidence; command steps can only run an allowlisted VLD argv, and artifact validation is an in-process typed gate—not a shell escape hatch. |
+| **Shared stores** | Pin advisory Markdown and typed artifact templates from Git | `diff` fetches a validated candidate without mutating the project; an update requires the exact reviewed 40-character commit acknowledgement, records it in the lock, and cannot affect compiler or workflow state. |
+| **Interoperability exports** | Bounded Spec Kit and Kiro layouts from a compiled packet | Generated one-way views carry source digest/provenance and state plainly that packet/change manifests remain authoritative. |
 
 The result is one repository and one `vld` CLI, while the packet remains portable and small. Use the agent-facing modules where they help; use the compiler and generated gates as the authority. See [ADR-0002](docs/adr/0002-optional-platform-extensions.md) for the extension boundary and security model.
 
@@ -406,6 +417,12 @@ node scripts/eval-outcome.mjs --runner openai --model gpt-4o --out /tmp/outcome-
 node scripts/eval-outcome.mjs --runner anthropic --out /tmp/outcome-sonnet.json
 ```
 
+#### Optional live-run protocol (never normal CI)
+
+Run one provider/model/configuration at a time from the same commit, retain the complete `--out` JSON for each run, and compare its three paired arms—not a live run against calibration fixtures. Start with a bounded pilot such as `--tasks brownfield`, then run all 24 tasks only after setting a spend/time budget. The `cmd` runner executes `--agent-cmd` in each isolated workspace, pipes `TASK.md` to standard input, and sets `VLD_TASK_ID`, `VLD_ARM` and `VLD_TASK_FILE`; it is the right path for a locally authenticated CLI agent. The direct runners require `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` (optional `OPENAI_BASE_URL`, `ANTHROPIC_BASE_URL`, or `EVAL_MODEL`). Export credentials in your own shell or secret manager—never place them in a profile, packet, export, artifact, report committed to Git, or this repository's CI.
+
+Live output is empirical evidence for the exact agent version, command, model and date that produced it; it is not a deterministic release gate. Preserve the raw JSON plus a short human-authored run note naming that configuration and any retries/failures. The generated Spec Kit/Kiro exports are portability aids, not a fourth benchmark arm or competing requirement source.
+
 ## Does it hold up? Ten ideas, judged
 
 `npm run stress` runs two suites: ten representative ideas, then twenty adversarial ones plus six profiles that must be **refused** cleanly. Together they score packets for things `verify` cannot see: does a Python service get pytest, does a library get told to rate-limit endpoints, does a packet point at a document it does not ship, can an idea forge a heading in a generated document, does a Rust project get handed `npm run lint`, how much of the idea actually reached the requirements.
@@ -524,7 +541,7 @@ npm run check   # lint + index + tests + verify + self-guard + gates + eval + st
 - **The catalog knows classes, not businesses.** Measured over ten ideas, 50% of the idea's distinctive vocabulary reaches the requirements or the domain model — up from 21%, because the domain model now leads with the idea's own nouns and its own stated rules. The other half is genuinely absent: a log shipper's packet now lists `position`, `shipper` and `dead-letter` as terms (the vocabulary comes from the idea), but no requirement covers redaction or acknowledged-after-acceptance, because no catalog obligation says "log shipper". Naming a thing is not specifying it. Payments, tenancy, pipelines and public libraries are well covered because they are heavily conventional; a log shipper or a standup bot is a scaffold plus a checklist of the author's own rules. The packet says so out loud rather than pretending otherwise.
 - **Tier 1 has very little headroom.** The tightest packet in the stress set sits at 872 of 900 lines. The ceiling is deliberate — length is this category's main failure — but it means a new tier-1 obligation requires trimming prose first.
 - **Self-consistency is not effectiveness.** This repository passes its own guard, which shows the pipeline is coherent, not that the resulting software is better. The packet also describes a tool whose requirements are unusually easy to anchor because the tool is tested; other products will find that step harder, and nothing here measures that difficulty.
-- **Not published to npm yet.** Clone and use `node factory/cli.mjs`. The `bin` entry is ready.
+- **Distribution is tested, publication is still a release decision.** CI packs the exact tarball, installs it into an empty prefix, invokes its `vld` bin, then compiles/verifies/exports a packet and exercises a reviewed shared-store template flow. This catches omitted package files and bin drift without publishing or needing registry credentials.
 
 ## Roadmap
 
@@ -532,11 +549,12 @@ Shipped in v0.2: `vld adopt`, `vld change` (delta specs), `vld mcp`.
 Shipped in v0.3: progress that survives recompiles, anchor suppression (`@req-ignore`, `anchors.exclude`), stable requirement ids across catalog changes, unmapped-obligation reporting, Go stack support, the always-on `core.domain-invariants` requirement, a self-spec packet guarded in CI, and a ten-idea stress run in `npm run check`.
 Shipped in v0.4: per-product obligations and red-flag/anti-rationalization tables on all 34 practices, EARS-shaped requirement statements enforced by `verify` and `spec-check`, org → domain → team overlays with provenance, `vld change archive`, and `enforcement/gates.mjs` plus config fragments per gate (see [`docs/LANDSCAPE.md`](docs/LANDSCAPE.md) §8).
 Shipped in v0.5: calibrated `search_primitives({ activate: true })` MCP routing + 68-prompt precision/recall & ablation benchmark (`eval-routing.mjs`, 94.3% precision / 100.0% recall in CI, plus live LLM drivers), and the 24-task × 3-arm outcome evaluation harness (`eval-outcome.mjs`, hidden acceptance oracles, review-defect probes, post-merge drift mutations, and live `cmd`/`openai`/`anthropic` agent runners).
+Shipped in v0.6–v0.9: locked capability modules and bundles, agent handoffs, typed delivery workflows, verified Git-store templates, strict artifact evidence gates, and evidence-linked change archives.
+Shipped in v0.10: a packed-install CI journey, reviewable Git-store refresh previews with exact-commit acknowledgement, and bounded `spec-kit` / `kiro` exports from a verified packet.
 
-1. **Published live-agent comparison runs** — run `eval-outcome.mjs --runner cmd` across Claude Code, Codex and open-weight coding agents, plus head-to-head arms exported into Spec Kit and Kiro layouts, and commit the raw JSON run logs.
-2. **Exports** — `spec-kit` and `kiro` formats from one source of truth, so the packet is portable rather than a new ecosystem.
-3. **`vld change --quick`** — for one-line changes that do not deserve a delta: an explicit, labelled path with no probe, for teams that accept the trade.
-4. **Semantic drift detection** — `eval-outcome.mjs` now measures the gap directly (`0/24` co-mutated semantic weakenings caught by `@req` anchors alone); closing it requires wiring lightweight per-requirement mutation or property checks into `gates.mjs`.
+1. **Published live-agent comparison runs** — use the optional protocol above across Claude Code, Codex and open-weight coding agents, preserving raw JSON logs and configuration notes; do not treat an export as a competing source of requirements.
+2. **`vld change --quick`** — for one-line changes that do not deserve a delta: an explicit, labelled path with no probe, for teams that accept the trade.
+3. **Semantic drift detection** — `eval-outcome.mjs` now measures the gap directly (`0/24` co-mutated semantic weakenings caught by `@req` anchors alone); closing it requires wiring lightweight per-requirement mutation or property checks into `gates.mjs`.
 
 ## Prior art and reading
 

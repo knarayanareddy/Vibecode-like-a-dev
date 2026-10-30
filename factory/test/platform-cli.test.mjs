@@ -126,8 +126,39 @@ test('public store journey pins a file-backed Git snapshot and reports clean fai
   assert.equal(assets.code, 0, assets.stderr); assert.equal(JSON.parse(assets.stdout).stores[0].assets[0].id, 'review-guidance');
   const copied = await cli(['store', 'copy', 'team-playbook', 'review-guidance', '--project', consumer, '--json']);
   assert.equal(copied.code, 0, copied.stderr); assert.match(JSON.parse(copied.stdout).output, /docs\/shared\/team-playbook\/review-guidance\.md$/);
+
+  writeFileSync(path.join(source, 'review.md'), '# Review\n\nReview changed evidence before release.\n');
+  execFileSync('git', ['add', '.'], { cwd: source }); execFileSync('git', ['commit', '-q', '-m', 'refresh candidate'], { cwd: source });
+  const preview = await cli(['store', 'diff', 'team-playbook', '--project', consumer, '--json']);
+  assert.equal(preview.code, 0, preview.stderr);
+  const previewJson = JSON.parse(preview.stdout);
+  assert.equal(previewJson.changes.changed, true);
+  const missingAcknowledgement = await cli(['store', 'update', 'team-playbook', '--project', consumer]);
+  assert.equal(missingAcknowledgement.code, 2); assert.match(missingAcknowledgement.stderr, /--acknowledge/);
+  const updated = await cli(['store', 'update', 'team-playbook', '--acknowledge', previewJson.next.commit, '--project', consumer, '--json']);
+  assert.equal(updated.code, 0, updated.stderr); assert.equal(JSON.parse(updated.stdout).store.acknowledgedCommit, previewJson.next.commit);
+
   const unsafe = await cli(['store', 'add', 'unsafe', '--bad', '--project', consumer]);
   assert.equal(unsafe.code, 2); assert.match(unsafe.stderr, /safe Git URL|Usage/); assert.equal(unsafe.stdout, '');
+});
+
+test('public export journey emits a bounded Spec Kit and Kiro view without replacing packet authority', async (t) => {
+  const workspace = mkdtempSync(path.join(os.tmpdir(), 'vld-export-cli-'));
+  t.after(() => rmSync(workspace, { recursive: true, force: true }));
+  const packet = path.join(ROOT, 'examples', 'retro-board', 'spec');
+
+  const specKit = await cli(['export', 'spec-kit', packet, '--out', path.join(workspace, 'spec-kit'), '--json']);
+  assert.equal(specKit.code, 0, specKit.stderr);
+  assert.equal(JSON.parse(specKit.stdout).source.project, 'retro-board');
+  assert.ok(existsSync(path.join(workspace, 'spec-kit', '.specify', 'memory', 'constitution.md')));
+
+  const kiro = await cli(['export', 'kiro', packet, '--out', path.join(workspace, 'kiro')]);
+  assert.equal(kiro.code, 0, kiro.stderr);
+  assert.match(kiro.stdout, /generated, one-way interoperability/);
+  assert.ok(existsSync(path.join(workspace, 'kiro', '.kiro', 'specs', 'vld-packet', 'requirements.md')));
+
+  const invalid = await cli(['export', 'made-up', packet, '--out', path.join(workspace, 'invalid')]);
+  assert.equal(invalid.code, 2); assert.match(invalid.stderr, /unknown export format/);
 });
 
 test('public platform failures are clean usage/input errors, not agent invocations or stack traces', async (t) => {
