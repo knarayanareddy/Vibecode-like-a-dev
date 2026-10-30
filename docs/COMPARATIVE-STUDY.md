@@ -10,7 +10,9 @@ VLD is not a general-purpose agent platform or an IDE. It is best understood as 
 profile + policy + overlays -> verified packet -> requirement/test anchors + gates
 ```
 
-That makes it unusually strong when a team needs a reviewable answer to *which engineering obligations apply, why, and what repository evidence must remain linked to them*. It is comparatively weak at the things an agent runtime normally owns: rich interactive authoring, agent execution, parallel-work coordination, worktree scheduling, and a large extension marketplace.
+That makes it unusually strong when a team needs a reviewable answer to *which engineering obligations apply, why, and what repository evidence must remain linked to them*. It deliberately does not **own** a rich interactive IDE, an agent/task scheduler, worktree allocation, merge-lane control, or a marketplace-scale extension catalog. That boundary is different from being unable to interoperate with agent workflows.
+
+Recent VLD work materially narrowed the interoperability gap: PR #13 added version-locked optional modules/bundles, typed resumable workflows and agent handoffs; PR #14 added strict artifact validation and reviewed evidence lifecycle; PR #15 added governed shared-store refreshes and one-way, digest-marked Spec Kit/Kiro exports. Those changes make VLD a usable control plane and handoff point. They do not turn it into a hosted agent runtime or an IDE, which remains the meaningful distinction below.
 
 There is therefore no honest overall winner. The right tool depends on the bottleneck:
 
@@ -57,7 +59,7 @@ Legend: **Strong** = a central documented capability; **Present** = available bu
 | Change/delta artifact and archive lifecycle | **Strong** | Present | **Strong** | Present | **Strong** | Present | Present | Not primary |
 | Human review/evidence record as a first-class state | **Strong** | Present | Present | Present | **Strong** | Present | Present | Present |
 | Multi-agent work packages / worktree orchestration | Not primary | Limited | Limited | Present | **Strong** | Present | Present | Present |
-| Broad agent/tool integrations and customizable process surface | Limited | **Strong** | **Strong** | **Strong** within its product | **Strong** | **Strong** | Present | **Strong** |
+| Broad agent/tool integrations and customizable process surface | Present (targeted) | **Strong** | **Strong** | **Strong** within its product | **Strong** | **Strong** | Present | **Strong** |
 | Model/provider independence of planning/verification core | **Strong** | Present | Present | Limited | Present | Present | Present | Present |
 | Bounded packet/ceremony enforced mechanically | **Strong** | Limited | Limited | Limited | Limited | Limited | Limited | Not primary |
 | Structural drift guard after implementation | **Strong** | Limited | Present | Present | Present | Present | Present | Present |
@@ -68,13 +70,15 @@ Legend: **Strong** = a central documented capability; **Present** = available bu
 
 Likewise, “Limited” for another product must not be read as “incapable.” Spec Kit's extensions and Kiro's hooks can run checks; OpenSpec and Spec Kitty have validation and review mechanisms. The distinction is whether a deterministic, requirement-ID-to-test structural guard is a **shipped VLD baseline** rather than a user-built extension or an agent convention.
 
+VLD's **Present (targeted)** integration rating counts its optional locked modules/bundles, typed agent handoffs, workflow commands, MCP surface, read-only shared stores and one-way Spec Kit/Kiro exports. It is not a claim of parity with a marketplace/catalog or with a runtime that schedules agents itself.
+
 ## Head-to-head assessments
 
 ### VLD vs GitHub Spec Kit
 
 **Spec Kit is the broader platform.** Its current documentation describes composable integrations, extensions, presets, workflows, workflow overlays/steps, bundles, catalogs and local/offline sources alongside SDD, bug-fix and idea-assessment processes. That is substantially more configuration and ecosystem surface than VLD has.
 
-**VLD is the narrower compiler.** It begins from a typed profile and policy, computes rigor from declared risks, emits a bounded packet, and verifies requirement anchors and gates without a model call. That makes the initial selection reproducible and reviewable. Spec Kit's authoring flow is deliberately agent-mediated and customizable; it is better for organizations that need their process to evolve through presets and extensions.
+**VLD is the narrower compiler with a targeted workflow boundary.** It begins from a typed profile and policy, computes rigor from declared risks, emits a bounded packet, and verifies requirement anchors and gates without a model call. Optional locked modules/bundles, typed resumable workflows and agent handoffs cover the handoff into execution; the current Spec Kit export preserves VLD authority as a generated view. Spec Kit's authoring flow remains more agent-mediated and customizable, and is better for organizations that need their process to evolve through a broad preset/extension/catalog surface.
 
 **Choose VLD when:** the main concern is “will this regulated/payments/multi-tenant change keep its stated test and gate evidence?”
 
@@ -106,7 +110,7 @@ Likewise, “Limited” for another product must not be read as “incapable.”
 
 **Spec Kitty is materially stronger at parallel execution governance.** Its documented mission/work-package lanes, review/accept/merge states, agent task status and isolated Git worktrees address an explicit VLD gap: coordinating multiple agents and branches without losing lifecycle state.
 
-**VLD is simpler and more deterministic at the specification boundary.** It does not orchestrate agents or branches; it computes and verifies a bounded requirements packet. Its store locks, module locks and change evidence links keep optional process material separate from the compiler's authority.
+**VLD is simpler and more deterministic at the specification boundary.** Its typed workflows and agent handoffs can direct a bounded process, but it does not assign or schedule agents, allocate worktrees, arbitrate branch contention or perform merge-lane control. Its store locks, module locks and change evidence links keep optional process material separate from the compiler's authority.
 
 **Choose VLD when:** you need a lightweight, audit-friendly compiler and can use your existing PR/worktree workflow.
 
@@ -143,9 +147,9 @@ A pragmatic combination is: use VLD to compile the authoritative requirements/ga
 
 ## VLD's real disadvantages and gaps
 
-1. **No worktree/agent scheduler.** VLD does not assign work packages, manage concurrent agent sessions, arbitrate branch contention or merge work. Spec Kitty and several skill ecosystems are better here.
-2. **Smaller integration ecosystem.** VLD has selected adapters, MCP and bounded exports, not the catalog/preset/workflow surface of Spec Kit or the broad command coverage of OpenSpec.
-3. **Authoring is not a polished interactive product.** Kiro's IDE flow and Spec Kit's mature process UX reduce friction for teams that want guided authoring.
+1. **No native worktree/agent scheduler.** VLD can provide typed workflow steps and agent handoffs, but it does not assign work packages, manage concurrent agent sessions, allocate worktrees, arbitrate branch contention or merge work. Spec Kitty and several skill ecosystems are better here.
+2. **Targeted interoperability, not ecosystem breadth.** Recent modules/bundles, stores, MCP and bounded Spec Kit/Kiro exports address real handoff needs. VLD still does not offer the marketplace/catalog/preset breadth of Spec Kit or the broad command coverage of OpenSpec.
+3. **Authoring is not a polished interactive product.** Human-authored artifacts, templates and exports make VLD usable in a repository workflow, but Kiro's IDE flow and Spec Kit's mature process UX reduce friction for teams that want guided authoring.
 4. **Structural checks are not semantic proof.** An anchor can remain while an assertion is weakened. This is VLD's highest-priority technical gap.
 5. **No independent comparative outcome result yet.** VLD's deterministic harness establishes task/oracle behavior and records live-run instructions, but it has not run a controlled, same-model comparison against these alternatives. It must not claim a merge-rate advantage.
 6. **Profile truth remains a human input.** If a project understates regulation, tenancy or payments risk, VLD can deterministically choose the wrong tier. Adoption can infer evidence, but cannot infer organizational truth.
@@ -166,7 +170,7 @@ A pragmatic combination is: use VLD to compile the authoritative requirements/ga
 ## Recommended VLD roadmap, informed by this comparison
 
 1. **Keep the compiler boundary.** Do not respond to richer ecosystems by making plan/compile call a model or by treating exported files as compiler input.
-2. **Add an optional work-package handoff, not an orchestrator first.** Emit a stable, read-only work-package manifest with `REQ-` links; let existing Git/CI/agent systems schedule it. Revisit worktrees only after a real parallel-team use case.
+2. **Extend the existing agent handoff before adding an orchestrator.** If users need parallel execution, add a stable, read-only work-package manifest with `REQ-` links to the typed workflow/handoff boundary; let existing Git/CI/agent systems schedule it. Revisit native worktrees only after a real parallel-team use case.
 3. **Improve semantic evidence.** Prioritize per-requirement mutation/property-test hooks and human review evidence over more prose templates.
 4. **Publish a fair live-agent study.** Fix the agent/model, task corpus, budgets and repetitions; compare VLD, a generic prompt and one process incumbent; publish raw JSON and failures. Do not compare vendor marketing claims.
 5. **Add integrations only with authority boundaries.** Spec Kit/Kiro exports should stay generated views. A future OpenSpec/Spec Kitty bridge should carry source digest and requirement links, never silently merge external prose back into VLD authority.
