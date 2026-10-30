@@ -597,16 +597,29 @@ const HANDLERS = {
   },
 
   get_anchor_convention() {
+    const tag = '@' + 'req';
     return {
-      marker: '@req',
-      syntax: '@req REQ-xxx in TypeScript/JS/Go/Java, or # @req REQ-xxx in Python/Ruby/Shell: one marker per anchor line',
-      countedIn: 'test files only: tests/, test/, __tests__/, spec/, *.test.*, *.spec.*, test_*.py, *_test.go',
+      marker: tag,
+      syntax: `${tag} REQ-xxx in TypeScript/JS/Go/Rust/Java, or # ${tag} REQ-xxx in Python/Ruby/Shell: strictly ONE requirement ID per anchor comment line`,
+      countedIn: 'test files only: tests/, test/, __tests__/, spec/, *.test.*, *.spec.*, test_*.py, *_test.{py,go,rb,rs,exs}, *Test.{java,kt,cs,php}',
       ratchet: 'requirements start as "todo" (pending notice); marking one "done" without an anchor in a test is an error',
       checks: [
-        'node specs/spec-check.mjs --repo .           # pending is a notice',
-        'node specs/spec-check.mjs --repo . --strict  # release CI: pending fails'
+        'node specs/spec-check.mjs --repo .                       # pending is a notice',
+        'node specs/spec-check.mjs --repo . --strict              # release CI: pending fails',
+        'node specs/spec-check.mjs --repo . --require-assertions  # reject hollow test files with no assertions'
       ],
-      examples: ['// @req REQ-004  // @req-ignore: documentation example', "test('erasing a subject removes every owned row (AC-01)', ...)"]
+      examples: [
+        `// ${tag} REQ-004`,
+        "test('erasing a subject removes every owned row (AC-01)', ...)"
+      ],
+      examplesByLanguage: {
+        ts: `// ${tag} REQ-004\ntest('erasing a subject removes every owned row', () => { expect(rows).toEqual([]); });`,
+        py: `# ${tag} REQ-004\ndef test_erase_subject():\n    assert rows == []`,
+        go: `// ${tag} REQ-004\nfunc TestEraseSubject(t *testing.T) { if len(rows) != 0 { t.Fatalf("expected 0") } }`,
+        rs: `// ${tag} REQ-004\n#[test]\nfn erase_subject_removes_rows() { assert!(rows.is_empty()); }`,
+        rb: `# ${tag} REQ-004\nit 'removes every owned row' do expect(rows).to be_empty end`,
+        java: `// ${tag} REQ-004\n@Test void eraseSubjectRemovesRows() { assertTrue(rows.isEmpty()); }`
+      }
     };
   }
 };

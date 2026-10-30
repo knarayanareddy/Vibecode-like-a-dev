@@ -6,11 +6,12 @@
  */
 
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { adoptRepo, writeAdoptedProfile } from '../lib/adopt.mjs';
+import { adoptRepo, isRemoteRepo, parseRemoteRepo, writeAdoptedProfile } from '../lib/adopt.mjs';
 import { validateProfile } from '../lib/profile.mjs';
 
 function fixture(files) {
@@ -311,6 +312,100 @@ test('adoptRepo accepts explicit name and idea overrides and drops the placehold
   const nameEv = report.evidence.find((e) => e.field === 'name');
   assert.deepEqual(nameEv.evidence, ['supplied via --name']);
   assert.deepEqual(validateProfile(report.profile), []);
+});
+
+test('polyglot monorepo detects @-scoped npm packages, Go /vN modules, raw SQL ON DELETE CASCADE, docker-compose and .env.example without reading live .env', (t) => {
+  const repo = fixture({
+    'services/customs-core/go.mod': `module github.com/portclear/customs-core/v2
+
+go 1.23
+
+require (
+\tgithub.com/gin-gonic/gin v1.10.0
+\tgithub.com/golang-jwt/jwt/v5 v5.2.1
+\tgithub.com/jackc/pgx/v5 v5.7.1
+\tgithub.com/acme/apgx v0.1.0
+)
+`,
+    'services/customs-core/migrations/0001_init.sql': `CREATE TABLE consignments (
+  id UUID PRIMARY KEY,
+  organization_workspace_id UUID NOT NULL,
+  consignee_passport_number TEXT NOT NULL
+);
+CREATE TABLE excursion_events (
+  id UUID PRIMARY KEY,
+  consignment_id UUID NOT NULL REFERENCES consignments(id) ON DELETE CASCADE
+);
+`,
+    'services/customs-core/cmd/server/main.go': 'package main\nfunc main() {}\n',
+    'apps/portal/web/package.json': {
+      name: '@portclear/web',
+      dependencies: {
+        react: '19.0.0',
+        '@anthropic-ai/sdk': '0.32.0',
+        '@stripe/stripe-js': '4.8.0',
+        '@aws-sdk/client-s3': '3.700.0',
+        'next-intl': '3.22.0'
+      }
+    },
+    'apps/portal/web/src/App.tsx': 'export function App() { return null; }\n',
+    'docker-compose.yml': `services:
+  cache:
+    image: redis:7-alpine
+  search:
+    image: getmeili/meilisearch:v1.9
+`,
+    '.env.example': 'RESEND_API_KEY=\n',
+    '.env': 'STRIPE_SECRET_KEY=do_not_read_live_env\nOPENAI_API_KEY=do_not_read_live_env\n'
+  });
+  t.after(repo.cleanup);
+
+  const report = adoptRepo(repo.root);
+  for (const trait of ['auth', 'persistence', 'ai', 'payments', 'upload', 'i18n', 'background-jobs', 'search', 'notifications']) {
+    assert.ok(report.profile.traits.includes(trait), `missing trait ${trait} from polyglot/compose/.env.example signals; got ${report.profile.traits.join(', ')}`);
+  }
+  assert.equal(report.profile.risks.multiTenant, true);
+  assert.equal(report.profile.risks.pii, true, 'passport column must infer PII');
+  assert.equal(report.profile.risks.destructiveWrites, true, 'raw SQL ON DELETE CASCADE must infer destructiveWrites');
+
+  // Ensure apgx did not false-match pgx and live .env was never cited in evidence.
+  const allEvidenceText = JSON.stringify(report.evidence);
+  assert.doesNotMatch(allEvidenceText, /apgx/);
+  assert.doesNotMatch(allEvidenceText, /do_not_read_live_env|OPENAI_API_KEY/);
+});
+
+test('remote Git repository URLs parse safely, reject flag injection, redact credentials, and clone end-to-end via file://', (t) => {
+  assert.equal(isRemoteRepo('https://github.com/acme/widget'), true);
+  assert.equal(isRemoteRepo('github:acme/widget#release/v2'), true);
+  assert.equal(isRemoteRepo('-oProxyCommand=evil'), false);
+  assert.throws(() => parseRemoteRepo('--upload-pack=evil'), { code: 'INVALID_REMOTE_URL' });
+  assert.throws(() => parseRemoteRepo('https://github.com/acme/widget/tree/--bad-branch'), { code: 'INVALID_REMOTE_URL' });
+
+  const parsed = parseRemoteRepo('https://user:supersecret@github.com/acme/widget/tree/feat/coldchain');
+  assert.equal(parsed.displayUrl, 'https://github.com/acme/widget');
+  assert.equal(parsed.branch, 'feat/coldchain');
+  assert.equal(parsed.name, 'widget');
+
+  const sourceRepo = fixture({
+    'go.mod': 'module github.com/acme/coldchain-api\n\ngo 1.23\n\nrequire github.com/gin-gonic/gin v1.10.0\n',
+    'main.go': 'package main\nfunc main() {}\n'
+  });
+  t.after(sourceRepo.cleanup);
+
+  execFileSync('git', ['init', '-q'], { cwd: sourceRepo.root });
+  execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: sourceRepo.root });
+  execFileSync('git', ['config', 'user.name', 'Test'], { cwd: sourceRepo.root });
+  execFileSync('git', ['add', '.'], { cwd: sourceRepo.root });
+  execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: sourceRepo.root });
+
+  const fileUrl = `file://${sourceRepo.root}`;
+  const report = adoptRepo(fileUrl);
+  assert.equal(report.remote, true);
+  assert.equal(report.repo, fileUrl);
+  assert.equal(report.profile.name, 'coldchain-api', 'Go module path last segment used as project name');
+  assert.equal(report.profile.kind, 'api');
+  assert.equal(report.profile.constraints.stack, 'go');
+  assert.doesNotMatch(report.profile.$comment, /vld-remote-/, 'temporary clone path must not leak into $comment');
 });
 
 

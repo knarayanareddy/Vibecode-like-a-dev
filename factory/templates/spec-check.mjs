@@ -36,6 +36,7 @@ const option = (name, fallback) => {
 };
 
 const STRICT = flag('--strict');
+const REQUIRE_ASSERTIONS = flag('--require-assertions');
 const REPO = path.resolve(option('--repo', process.cwd()));
 
 const IGNORED_DIRS = new Set([
@@ -45,7 +46,10 @@ const IGNORED_DIRS = new Set([
 
 const TEST_FILE = /(^|\/)(tests?|__tests__|specs?)\//;
 const SUPPRESSED = /@req-ignore/i;
-const TEST_NAME = /\.(test|spec)\.[a-z]+$|(^|\/)test_[^/]+\.py$|_test\.(py|go|rb)$/;
+const TEST_NAME = /\.(test|spec)\.[a-z]+$|(^|\/)test_[^/]+\.py$|_test\.(py|go|rb|rs|exs)$|Tests?\.(java|kt|cs|php)$/;
+const CLARIFY_MARKER = /\[(?:CLARIFY|NEEDS CLARIFICATION)(?::[^\]]*)?\]/i;
+const ASSERTION_SIGNAL =
+  /\b(?:assert[A-Za-z0-9_.]*|expect\s*\(|should\b|require\.[A-Z]\w*|t\.(?:Fatal|Fatalf|Error|Errorf|Fail|FailNow)|pytest\.raises|raises\s*\(|rejects\b|throws\b)\b|!==|===|!=|==|<=|>=/;
 
 const errors = [];
 const notices = [];
@@ -143,6 +147,12 @@ for (const requirement of requirements) {
   if (!Array.isArray(requirement.acceptance) || requirement.acceptance.length === 0) {
     errors.push(`${requirement.id}: no acceptance criteria`);
   }
+  const fullReqText = `${requirement.statement ?? ''} ${(requirement.acceptance ?? []).map((a) => (typeof a === 'string' ? a : a?.text ?? '')).join(' ')}`;
+  if (CLARIFY_MARKER.test(fullReqText)) {
+    const msg = `${requirement.id}: contains unresolved [CLARIFY] marker`;
+    if (STRICT) errors.push(msg);
+    else notices.push(`${msg} (will fail under --strict)`);
+  }
   if (!['automated', 'manual', 'gate'].includes(requirement.verify)) {
     errors.push(`${requirement.id}: verify must be automated, manual or gate`);
   }
@@ -176,6 +186,7 @@ for (const file of walk(REPO)) {
   if (isExcluded(rel(file))) continue;
 
   const isTest = TEST_FILE.test(rel(file)) || TEST_NAME.test(rel(file));
+  const fileReqIds = [];
   for (const line of source.split('\n')) {
     if (!line.includes('@req')) continue;
     const match = line.match(/@req\s+(REQ-\d{3})/);
@@ -189,8 +200,14 @@ for (const file of walk(REPO)) {
       strayAnchors.push(`${rel(file)} cites unknown requirement ${id}`);
       continue;
     }
+    fileReqIds.push(id);
     if (!anchored.has(id)) anchored.set(id, []);
     anchored.get(id).push({ file: rel(file), isTest });
+  }
+  if (isTest && fileReqIds.length > 0 && !ASSERTION_SIGNAL.test(source)) {
+    const hollowMsg = `${rel(file)} carries @req anchor(s) (${[...new Set(fileReqIds)].join(', ')}) with no visible assertion`;
+    if (REQUIRE_ASSERTIONS) errors.push(hollowMsg);
+    else notices.push(`${hollowMsg} (pass --require-assertions to fail CI on hollow tests)`);
   }
 }
 

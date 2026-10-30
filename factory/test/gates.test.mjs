@@ -325,7 +325,7 @@ test('G2-AUTHZ does not self-satisfy against specs/spec.json or changes/*/spec.a
   }
 });
 
-test('every attestation gate (including G3-RESTORE and G3-ROLLBACK) ships a starter template containing its required fields', () => {
+test('every attestation gate ships a starter template, rejects unfilled placeholders, and passes once filled in (with code spans preserved)', () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'vld-gates-all-attest-'));
   try {
     const profile = normalizeProfile({
@@ -356,14 +356,53 @@ test('every attestation gate (including G3-RESTORE and G3-ROLLBACK) ships a star
       write(repo, relTarget, content);
     }
 
-    const summary = JSON.parse(run(specsDir, ['--repo', repo, '--json']).stdout);
+    // 1. Copying a starter template verbatim must fail specifically on unfilled placeholders,
+    // never on missing required headings (OpenSpec purpose-placeholder defense).
+    const unfilledSummary = JSON.parse(run(specsDir, ['--repo', repo, '--json']).stdout);
     for (const [gateId] of attestGates) {
-      const res = summary.results.find((entry) => entry.id === gateId);
+      const res = unfilledSummary.results.find((entry) => entry.id === gateId);
       assert.ok(res, `${gateId} missing from gate results`);
-      assert.equal(res.status, 'pass', `${gateId} starter template did not satisfy its own required fields: ${JSON.stringify(res)}`);
+      assert.equal(res.status, 'fail', `${gateId} must reject an unedited template copy`);
+      assert.match(res.detail, /unfilled template placeholder/, `${gateId} failed for wrong reason: ${res.detail}`);
+    }
+
+    // 2. Filling in <...> and YYYY-MM-DD while keeping inline code like `pkg@<previous>` must pass.
+    for (const [, entry] of attestGates) {
+      const relTarget = entry.check.file;
+      const filled = readFileSync(path.join(repo, relTarget), 'utf8')
+        .replace(/YYYY-MM-DD/g, '2026-10-30')
+        .replace(/<[a-z][^>\n]{2,}>/gi, 'verified-value') +
+        '\n\nRollback CLI example: `npm i -g pkg@<previous>`\n';
+      write(repo, relTarget, filled);
+    }
+
+    const filledSummary = JSON.parse(run(specsDir, ['--repo', repo, '--json']).stdout);
+    for (const [gateId] of attestGates) {
+      const res = filledSummary.results.find((entry) => entry.id === gateId);
+      assert.equal(res.status, 'pass', `${gateId} did not pass once filled in: ${JSON.stringify(res)}`);
     }
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('polyglot Go, Rust and Java test files outside tests/ satisfy anchor gates in gate-runner.mjs', () => {
+  const p = packet();
+  try {
+    const repo = satisfyingRepo(p, path.join(p.root, 'repo'));
+    rmSync(path.join(repo, 'tests'), { recursive: true, force: true });
+    const automated = p.spec.requirements.filter((requirement) => requirement.verify === 'automated');
+    const half = Math.ceil(automated.length / 2);
+    const goAnchors = automated.slice(0, half).map((r) => `// @req ${r.id}`).join('\n');
+    const javaAnchors = automated.slice(half).map((r) => `// @req ${r.id}`).join('\n');
+    write(repo, 'internal/escrow/release_test.go', `package escrow\n${goAnchors}\nfunc TestRelease(t *testing.T) {}\n`);
+    write(repo, 'src/main/EscrowTest.java', `class EscrowTest {\n${javaAnchors}\nvoid testIt() {}\n}\n`);
+
+    const summary = JSON.parse(run(p.outDir, ['--repo', repo, '--json']).stdout);
+    const trace = summary.results.find((entry) => entry.id === 'G1-AC-TRACE');
+    assert.equal(trace.status, 'pass', `Go/Java tests outside tests/ were not recognised: ${JSON.stringify(trace)}`);
+  } finally {
+    p.cleanup();
   }
 });
 

@@ -151,11 +151,16 @@ test('plan_project returns a compact plan with a next step', () => {
   assert.match(result.next, /documents|spec\.md/);
 });
 
-test('get_anchor_convention states the ratchet and the commands', () => {
+test('get_anchor_convention states the ratchet, polyglot examples, and assertion guard', () => {
   const result = payload(call('get_anchor_convention', {}));
   assert.equal(result.marker, '@req');
   assert.match(result.checks.join(' '), /--strict/);
+  assert.match(result.checks.join(' '), /--require-assertions/);
   assert.match(result.ratchet, /done/);
+  for (const lang of ['ts', 'py', 'go', 'rs', 'rb', 'java']) {
+    assert.ok(result.examplesByLanguage?.[lang], `missing examplesByLanguage.${lang}`);
+    assert.match(result.examplesByLanguage[lang], /@req REQ-004/);
+  }
 });
 
 test('invalid input is reported as a tool error, not a crash', () => {
