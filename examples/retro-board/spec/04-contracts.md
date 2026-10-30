@@ -21,7 +21,7 @@ These are the four that other code will be written against. Naming them now is c
 | Shape | Behaviour | Why it is on this list |
 | --- | --- | --- |
 | `POST /v1/boards` | creates a board; returns the created id and its version | the web-app surface described in the brief |
-| `POST /v1/sessions` | exchanges credentials for a short-lived token tied to a facilitator | authenticate, refresh, revoke |
+| `POST /v1/sessions` | exchanges credentials for a short-lived token tied to a team | authenticate, refresh, revoke |
 | `Realtime channel` | ordering and reconnect semantics stated explicitly | documented before implementation |
 
 ## 3. Conventions that bind you
@@ -47,7 +47,7 @@ One shape for every failure. A caller must be able to handle an unknown route wi
     "correlationId": "01J8Z9W3Q4K5M6N7P8R9S0T1V2",
     "details": [
       {
-        "field": "facilitator",
+        "field": "board",
         "reason": "conflict"
       }
     ]
@@ -58,7 +58,7 @@ One shape for every failure. A caller must be able to handle an unknown route wi
 | Status | Meaning | When |
 | --- | --- | --- |
 | 401 | No valid session | Missing, expired or revoked credential. No board is created and no state changes. |
-| 403 | Authenticated but not permitted | Policy denied for this a facilitator. Never reveal whether the board exists. |
+| 403 | Authenticated but not permitted | Policy denied for this a team. Never reveal whether the board exists. |
 | 404 | Not found, or not visible to this actor | One response for both cases, so a board id cannot be used to probe. |
 | 409 | Conflict with current state | The board would be left in a state `02-domain-model.md` calls illegal, or a replay carries a different payload. |
 | 422 | Semantically invalid | Well-formed but breaks a rule that makes a board valid. |
@@ -66,7 +66,7 @@ One shape for every failure. A caller must be able to handle an unknown route wi
 ## 5. Contract tests
 
 - Each of the 3 surfaces gets one test for its success shape and one for the board failure it is most likely to hit.
-- Anything this product consumes is tested against a recorded response; a hand-written mock of a a facilitator drifts silently.
+- Anything this product consumes is tested against a recorded response; a hand-written mock of a a team drifts silently.
 - Changing a shape in section 2 fails the build before review, because the test that pins it lives beside the board it serialises.
 
 Before implementing any row above: shape written, error code chosen, one failure example recorded.

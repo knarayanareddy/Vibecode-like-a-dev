@@ -137,4 +137,51 @@ test('cli contract: data on stdout, diagnostics on stderr, non-zero exit on misu
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }
+
+  // A broken overlay stack (missing parent `org-baseline`) exits 2 with a clean stderr diagnostic and no stack trace.
+  const badOverlay = path.join(os.tmpdir(), `vld-bad-overlay-${process.pid}.json`);
+  writeFileSync(badOverlay, JSON.stringify({ ...PROFILE, overlays: ['health-data'] }));
+  try {
+    const res = await cli(['plan', badOverlay]);
+    assert.equal(res.code, 2);
+    assert.equal(res.stdout.trim(), '');
+    assert.match(res.stderr, /overlay stack is not valid[\s\S]*org-baseline/);
+    assert.ok(!/^\s+at\s/m.test(res.stderr), 'missing parent overlay must not print a stack trace');
+  } finally {
+    rmSync(badOverlay, { force: true });
+  }
+});
+
+test('compile and verify report identical core packet markdown line counts even with enforcement templates', async () => {
+  const workspace = mkdtempSync(path.join(os.tmpdir(), 'vld-linecount-'));
+  try {
+    const profilePath = path.join(workspace, 'profile.json');
+    const specsDir = path.join(workspace, 'specs');
+    writeFileSync(
+      profilePath,
+      JSON.stringify({
+        name: 'trialbridge-reimburse',
+        idea: 'A multi-tenant clinical trial stipend and travel reimbursement platform for pharmaceutical sponsors and enrolled participants.',
+        kind: 'web-app',
+        stage: 'production',
+        users: { scale: 'medium' },
+        traits: ['auth', 'admin', 'payments', 'persistence', 'webhooks', 'upload', 'ai', 'offline', 'background-jobs'],
+        risks: { pii: true, payments: true, regulated: true, multiTenant: true, destructiveWrites: true, publicFacing: true, integrations: true },
+        constraints: { team: 4, weeks: 12, stack: 'python' },
+        overlays: ['two-person-review', 'health-data', 'org-baseline']
+      })
+    );
+
+    const compiled = await cli(['compile', profilePath, '-o', specsDir]);
+    assert.equal(compiled.code, 0, compiled.stderr);
+    assert.doesNotMatch(compiled.stdout, /Over the tier ceiling/, 'enforcement templates must not push compile over the tier ceiling');
+    const compileCount = Number(compiled.stdout.match(/markdown total\s+(\d+)\s+lines/)?.[1]);
+
+    const verified = await cli(['verify', specsDir, '--json']);
+    assert.equal(verified.code, 0, verified.stderr);
+    const verifyReport = JSON.parse(verified.stdout);
+    assert.equal(compileCount, verifyReport.stats.lines, 'compile and verify must agree on packet markdown line count');
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
 });

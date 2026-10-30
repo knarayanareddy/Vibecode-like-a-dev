@@ -139,7 +139,16 @@ function loadPlanOrFail(profilePath, { previousIds = {} } = {}) {
 
   // Overlays resolve beside the profile first, so a team can keep its own layers in
   // the same directory as the profile instead of editing the tool.
-  const plan = buildPlan(profile, { index, previousIds, profileDir: path.dirname(path.resolve(profilePath)) });
+  let plan;
+  try {
+    plan = buildPlan(profile, { index, previousIds, profileDir: path.dirname(path.resolve(profilePath)) });
+  } catch (error) {
+    if (error.code === 'INVALID_OVERLAY' || error.code === 'INVALID_PROFILE') {
+      console.error(`\n✗ ${error.message}\n`);
+      process.exit(2);
+    }
+    throw error;
+  }
   // Recorded in spec.json so an archive can find the source of truth later. As typed,
   // so two compiles of the same profile produce the same manifest.
   plan.profileLabel = profilePath.split(path.sep).join('/');
@@ -313,8 +322,10 @@ function runCompile(profilePath) {
 
   const budgets = loadPolicy().budgets;
   const limit = budgets.maxLinesByTier[String(plan.rigor.tier)];
+  // Match `verifyPacket`: count the packet's core markdown documents (`00`..`07`,
+  // `AGENTS.md`, or `spec.md`), not nested `enforcement/` templates and READMEs.
   const markdownLines = result.written
-    .filter((file) => file.name.endsWith('.md'))
+    .filter((file) => !file.name.includes('/') && file.name.endsWith('.md'))
     .reduce((sum, file) => sum + file.lines, 0);
 
   console.log(`\n✓ wrote ${result.written.length} files to ${result.outDir}\n`);

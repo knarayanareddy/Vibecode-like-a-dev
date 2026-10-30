@@ -290,3 +290,38 @@ test('every gate the planner can emit has a registered mechanism', () => {
   }
   assert.ok(loadGateRegistry().gates);
 });
+
+test('G2-AUTHZ does not self-satisfy against specs/spec.json or changes/*/spec.after.json inside the repository', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'vld-gates-noself-'));
+  try {
+    const repo = path.join(root, 'repo');
+    mkdirSync(repo, { recursive: true });
+    write(repo, 'tests/smoke.test.ts', "import { test } from 'vitest';\ntest('loads', () => {});\n");
+
+    const profile = normalizeProfile({
+      name: 'trialbridge',
+      idea: 'Coordinators submit participant reimbursement claims with strict tenant isolation.',
+      kind: 'web-app',
+      stage: 'production',
+      traits: ['auth', 'persistence', 'payments'],
+      risks: { pii: true, payments: true, regulated: true, multiTenant: true, publicFacing: true }
+    });
+    const plan = buildPlan(profile, { index });
+    const specsDir = path.join(repo, 'specs');
+    emitPacket(plan, specsDir, { force: true });
+    write(repo, 'changes/sample/spec.after.json', '{"note":"requests from wrong tenant are denied with 403 forbidden"}\n');
+
+    const beforeSummary = JSON.parse(run(specsDir, ['--repo', repo, '--json']).stdout);
+    const authzBefore = beforeSummary.results.find((entry) => entry.id === 'G2-AUTHZ');
+    assert.equal(authzBefore.status, 'fail', `expected G2-AUTHZ to fail before writing a real denial test, got: ${JSON.stringify(authzBefore)}`);
+
+    write(repo, 'tests/authz.test.ts', "import { test } from 'vitest';\ntest('cross-tenant read is denied with 403 forbidden', () => {});\n");
+    const afterSummary = JSON.parse(run(specsDir, ['--repo', repo, '--json']).stdout);
+    const authzAfter = afterSummary.results.find((entry) => entry.id === 'G2-AUTHZ');
+    assert.equal(authzAfter.status, 'pass');
+    assert.match(authzAfter.detail, /tests\/authz\.test\.ts/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+

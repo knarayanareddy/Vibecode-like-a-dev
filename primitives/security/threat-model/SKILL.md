@@ -7,8 +7,8 @@ obligation: "In {project}, every way into {aPrimary} — its endpoints, uploads,
 tier_min: 2
 cost: medium
 priority: 5
-tags: [security, threat-model, stride, trust-boundary, owasp]
-triggers: [threat model, prompt injection, abuse case, untrusted upload, attack surface, trust boundary, stride, vulnerability]
+tags: [security, threat-model, stride, trust-boundary, owasp, llm-guardrails]
+triggers: [threat model, prompt injection, abuse case, untrusted upload, attack surface, trust boundary, stride, vulnerability, llm guardrails, token spend, external model, structured json output]
 enforces: [auth.authorization, ops.rate-limits, data.uploads, ai.guardrails]
 artifacts: [04-contracts.md, 05-verification.md]
 ---

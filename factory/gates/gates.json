@@ -101,8 +101,13 @@
       "check": {
         "kind": "contains",
         "glob": [
-          "**/*test*",
-          "**/*spec*"
+          "**/*.test.*",
+          "**/*.spec.*",
+          "**/test_*.*",
+          "**/*_test.*",
+          "**/tests/**/*",
+          "**/__tests__/**/*",
+          "**/spec/**/*"
         ],
         "patterns": [
           "(?i)denied|forbidden|403|unauthori[sz]ed|not allowed"
@@ -234,8 +239,13 @@
       "check": {
         "kind": "contains",
         "glob": [
-          "**/*test*",
-          "**/*spec*",
+          "**/*.test.*",
+          "**/*.spec.*",
+          "**/test_*.*",
+          "**/*_test.*",
+          "**/tests/**/*",
+          "**/__tests__/**/*",
+          "**/spec/**/*",
           "**/package.json",
           "**/pyproject.toml",
           "**/requirements*.txt"

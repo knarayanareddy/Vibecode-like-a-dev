@@ -66,6 +66,17 @@ function walk(dir, out = []) {
 
 const files = walk(REPO);
 const relative = files.map((file) => path.relative(REPO, file).split(path.sep).join('/'));
+// Exclude the packet directory itself (e.g. `specs/`) and `changes/` deltas from
+// repository checks so `specs/spec.json`, `changes/*/spec.after.json` or shipped
+// enforcement skeletons never self-satisfy a gate meant for the product repository.
+const packetRel = path.relative(REPO, PACKET).split(path.sep).join('/');
+const packetInsideRepo = packetRel && !packetRel.startsWith('..') && !path.isAbsolute(packetRel);
+const isPacketOrDelta = (file) =>
+  (packetInsideRepo && (file === packetRel || file.startsWith(`${packetRel}/`))) ||
+  file === 'changes' ||
+  file.startsWith('changes/');
+const repoFiles = relative.filter((file) => !isPacketOrDelta(file));
+
 const globToRegExp = (glob) =>
   new RegExp(
     `^${glob
@@ -79,7 +90,7 @@ const matches = (glob) => {
   if (!matchers.has(glob)) matchers.set(glob, globToRegExp(glob));
   return matchers.get(glob);
 };
-const pick = (globs) => relative.filter((file) => globs.some((glob) => matches(glob).test(file)));
+const pick = (globs) => repoFiles.filter((file) => globs.some((glob) => matches(glob).test(file)));
 const read = (file) => {
   try {
     return readFileSync(path.join(REPO, file), 'utf8');
@@ -102,7 +113,7 @@ try {
 /** Requirement ids proven by a test file carrying an @req anchor. */
 function anchored() {
   const found = new Map();
-  for (const file of relative) {
+  for (const file of repoFiles) {
     if (!SOURCE.test(file)) continue;
     const text = read(file);
     if (!text.includes('@req')) continue;

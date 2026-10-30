@@ -415,6 +415,18 @@
       "kind": "colloquial",
       "prompt": "Propagate one correlation ID across structured logs and two alert metrics so we can trace failures across background workers.",
       "expected": ["reliability.observability-baseline"]
+    },
+    {
+      "id": "rt-69-distractor-llm-token-spend-guardrails",
+      "kind": "distractor",
+      "prompt": "AI receipt extraction pipeline must validate structured JSON output, cap token spend, and never send patient names or IBANs to OpenAI.",
+      "expected": ["security.threat-model"]
+    },
+    {
+      "id": "rt-70-colloq-domain-site-scoping",
+      "kind": "colloquial",
+      "prompt": "Blinded sponsor auditors can view anonymized trial totals while site coordinators only see patients at their own hospital site.",
+      "expected": ["security.authz-model"]
     }
   ]
 }

@@ -51,11 +51,42 @@ const NEVER_A_NOUN = new Set([
  * Suffixes that make a word a noun in English. Scored, not required: a word with
  * one still needs another signal, but two noun-ish words beat one.
  */
-const NOUN_SUFFIX = /(tion|sion|ment|ness|ity|ance|ence|ship|age|ery|ist|ism|logy|graphy)$/;
+const NOUN_SUFFIX = /(tion|sion|ment|ness|ity|ance|ence|ship|age|ery|ist|ism|logy|graphy)s?$/;
 /** Suffixes that make the word a verb, participle or adverb. Veto, unless anchored. */
 const VERBISH = /(ly|ed|ise|ize|ises|izes|ised|ized|ating|ising|izing|ates|ifies)$/;
 /** German and Dutch nouns, since ideas arrive in those languages too. */
 const NON_ENGLISH_NOUN = /(ung|heit|keit|schaft|ismus|iteiten|ingen|ungen)$/;
+
+/**
+ * Genuine person/actor and domain entity nouns whose spelling happens to end in
+ * `-ant`, `-ent` or `-al`. Without this exemption, `ADJECTIVE` vetoes `participant`,
+ * `patient`, `tenant`, `merchant`, `client`, `trial` and `hospital` — and `ANCHOR`
+ * treats `"a participant"` as `"a <adjective>"` and anchors the verb after it
+ * (`"a participant exercises"` -> `"exercises"` -> `"exercis"`).
+ */
+const KNOWN_NOUN_STEMS = new Set([
+  'participant', 'patient', 'tenant', 'client', 'merchant', 'student', 'recipient', 'claimant',
+  'applicant', 'accountant', 'resident', 'attendant', 'consultant', 'defendant', 'agent', 'parent',
+  'incident', 'document', 'payment', 'settlement', 'shipment', 'appointment', 'reimbursement',
+  'agreement', 'statement', 'installment', 'entitlement', 'instrument', 'department', 'comment',
+  'trial', 'hospital', 'portal', 'journal', 'referral', 'approval', 'withdrawal', 'proposal',
+  'credential', 'terminal', 'signal', 'material', 'deal', 'meal', 'goal'
+]);
+
+/**
+ * Human/organisational actor stems so `vocabularyFor` can place the thing acted upon
+ * in `primary` ("claim", "booking", "payout") and the actor in `secondary`
+ * ("coordinator", "participant", "therapist", "seller") when both are present.
+ */
+const ACTOR_STEMS = new Set([
+  'participant', 'patient', 'coordinator', 'therapist', 'clinician', 'doctor', 'nurse', 'sponsor',
+  'auditor', 'reviewer', 'approver', 'operator', 'admin', 'administrator', 'moderator', 'member',
+  'tenant', 'seller', 'buyer', 'merchant', 'vendor', 'supplier', 'shopper', 'subscriber', 'reader',
+  'author', 'writer', 'editor', 'creator', 'owner', 'manager', 'staff', 'receptionist', 'driver',
+  'rider', 'courier', 'student', 'teacher', 'instructor', 'applicant', 'claimant', 'accountant',
+  'analyst', 'consumer', 'client', 'partner', 'team', 'organisation', 'organization', 'clinic',
+  'hospital', 'site', 'company', 'enterprise', 'institution', 'agency', 'bank'
+]);
 
 /**
  * Adjectives, which are not nouns however often they precede one. This is a
@@ -66,7 +97,7 @@ const ADJECTIVE = /(al|ive|ous|able|ible|ary|est|ish|less|ful|ent|ant|ic|side|le
 const ADJECTIVE_WORDS = new Set([
   'tiny', 'large', 'small', 'simple', 'basic', 'single', 'multiple', 'several', 'entire', 'whole',
   'full', 'empty', 'long', 'short', 'fast', 'slow', 'high', 'low', 'new', 'old', 'real', 'actual',
-  'correct', 'wrong', 'right', 'correct', 'clean', 'safe', 'private', 'public', 'custom', 'standard',
+  'correct', 'wrong', 'right', 'clean', 'safe', 'private', 'public', 'custom', 'standard',
   'modern', 'main', 'primary', 'secondary', 'extra', 'open', 'closed', 'free', 'paid', 'live', 'dead'
 ]);
 
@@ -84,30 +115,35 @@ const ABSTRACT = new Set([
   // Number words read as determiners but are not nouns.
   'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'hundred',
   'thousand', 'million', 'second', 'minute', 'hour', 'week', 'month', 'year', 'per', 'times',
-  // Reporting verbs that a sentence uses in the third person and that a naive
-  // singulariser turns into a noun ("copies" -> "copy").
+  // Reporting and policy verbs that a sentence uses in the third person ("a participant
+  // exercises GDPR...", "approves", "withdraws") and that a naive singulariser turns into a noun.
   'copy', 'copies', 'send', 'sends', 'email', 'emails', 'create', 'creates', 'update', 'updates',
   'delete', 'deletes', 'import', 'imports', 'export', 'exports', 'sync', 'syncs', 'read', 'reads',
   'write', 'writes', 'list', 'lists', 'count', 'counts', 'print', 'prints', 'fetch', 'fetches',
   'depend', 'depends', 'appear', 'appears', 'remain', 'remains', 'exist', 'exists', 'occur',
-  'occurs', 'contain', 'contains', 'require', 'requires', 'return', 'returns', 'accept', 'accepts'
+  'occurs', 'contain', 'contains', 'require', 'requires', 'return', 'returns', 'accept', 'accepts',
+  'exercise', 'exercises', 'withdraw', 'withdraws', 'parse', 'parses', 'disburse', 'disburses',
+  'approve', 'approves', 'enforce', 'enforces', 'replace', 'replaces', 'retain', 'retains',
+  'capture', 'captures', 'submit', 'submits', 'handle', 'handles', 'exceed', 'exceeds'
 ]);
 
 /**
  * Determiners: a word right after one of these is a noun with high probability.
  * One optional adjective is allowed between them, so "a specific therapist"
- * yields "therapist" rather than "specific".
+ * yields "therapist" rather than "specific" — unless the first word is itself a
+ * known noun (`"a participant exercises"` must anchor `"participant"`, not `"exercises"`).
  */
 const DETERMINER = String.raw`(?:the|a|an|each|every|any|no|some|their|its|our|your|his|her|this|these|those)`;
-const ANCHOR = new RegExp(
-  String.raw`\b${DETERMINER}\s+(?:[a-z][a-z0-9-]*(?:al|ive|ous|able|ible|ary|est|ish|less|ful|ent|ant|ic)\s+)?([a-z][a-z0-9-]{3,})`,
+const ADJ_MODIFIER = /(?:al|ive|ous|able|ible|ary|est|ish|less|ful|ent|ant|ic)$/;
+const DET_PAIR = new RegExp(
+  String.raw`\b${DETERMINER}\s+([a-z][a-z0-9-]{3,})(?:\s+([a-z][a-z0-9-]{3,}))?`,
   'gi'
 );
 
 const SINGULAR_RULES = [
-  [/ies$/, 'y'],
-  [/([sxz]|[cs]h)es$/, '$1'],
-  [/(ss|us|is)es$/, '$1'],
+  [/([^aeiou])ies$/, '$1y'],
+  [/(sses|xes|zzes|[cs]hes)$/, (m) => m.slice(0, -2)],
+  [/\b(status|bus|gas|alias|canvas|campus|focus|virus|lens|bonus|corpus|census|nexus)es$/, '$1'],
   [/(ss|us|is)$/, null], // already singular
   [/s$/, '']
 ];
@@ -154,6 +190,16 @@ const KIND_FALLBACK = {
  *
  * Vetoes: adverbs and participles, and anything in NEVER_A_NOUN.
  */
+const isKnownNoun = (word) => {
+  const s = singularOf(word);
+  return KNOWN_NOUN_STEMS.has(s) || /ments?$/.test(word);
+};
+
+const isActorWord = (word) => {
+  const s = singularOf(word);
+  return ACTOR_STEMS.has(s) || /(?:ist|ian)s?$/.test(word);
+};
+
 function scoreCandidates(text) {
   const words = String(text ?? '').toLowerCase();
   const tokens = words.split(/[^a-z0-9-]+/).filter((token) => token.length >= 4 && !/^\d+$/.test(token));
@@ -161,61 +207,78 @@ function scoreCandidates(text) {
   for (const token of tokens) counts.set(token, (counts.get(token) ?? 0) + 1);
 
   const anchored = new Set();
-  for (const match of words.matchAll(ANCHOR)) {
-    const token = match[1].toLowerCase();
-    anchored.add(token);
+  for (const match of words.matchAll(DET_PAIR)) {
+    const first = match[1].toLowerCase();
+    const second = match[2]?.toLowerCase() ?? null;
+    const firstIsModifier = (ADJECTIVE_WORDS.has(first) || ADJ_MODIFIER.test(first)) && !isKnownNoun(first);
+    const chosen = firstIsModifier && second ? second : first;
+    const endOffset = firstIsModifier && second ? match.index + match[0].length : match.index + match[0].length - (match[2] ? match[2].length + 1 : 0);
+    anchored.add(chosen);
     // "the customer's order": the possessive marks the *next* word, not this one.
-    if (words.slice(match.index + match[0].length, match.index + match[0].length + 2) === "'s") {
-      anchored.delete(token);
+    if (words.slice(endOffset, endOffset + 2) === "'s") {
+      anchored.delete(chosen);
+      if (second && chosen === first) anchored.add(second);
+    }
+  }
+
+  // Collapse singular/plural (and German -en plurals) BEFORE computing repetition and
+  // anchor scores, so "a claim" (1x, anchored) + "claims" (2x) earns both its anchor
+  // and its 3x repetition instead of losing to a 1x hyphenated failure term like
+  // "double-disbursement".
+  const groups = new Map();
+  for (const [token, count] of counts) {
+    if (NEVER_A_NOUN.has(token) || ABSTRACT.has(token) || ADJECTIVE_WORDS.has(token)) continue;
+    if (/^\d+$/.test(token)) continue;
+    if (/ed$/.test(token)) continue;
+    const isAnchor = anchored.has(token);
+    const knownNoun = isKnownNoun(token);
+    if (VERBISH.test(token) && !isAnchor) continue;
+    if (ADJECTIVE.test(token) && !knownNoun) continue;
+
+    const stem = singularOf(token).replace(/en$/, '');
+    const canonical = singularOf(token);
+    const prev = groups.get(stem);
+    if (!prev) {
+      groups.set(stem, {
+        word: canonical,
+        rawTokens: [token],
+        count,
+        anchored: isAnchor,
+        knownNoun,
+        nounSuffix: NOUN_SUFFIX.test(token) || NOUN_SUFFIX.test(canonical),
+        nonEnglishNoun: NON_ENGLISH_NOUN.test(token)
+      });
+    } else {
+      prev.count += count;
+      prev.anchored = prev.anchored || isAnchor;
+      prev.knownNoun = prev.knownNoun || knownNoun;
+      prev.nounSuffix = prev.nounSuffix || NOUN_SUFFIX.test(token) || NOUN_SUFFIX.test(canonical);
+      prev.nonEnglishNoun = prev.nonEnglishNoun || NON_ENGLISH_NOUN.test(token);
+      prev.rawTokens.push(token);
     }
   }
 
   const scored = [];
-  for (const [token, count] of counts) {
-    if (NEVER_A_NOUN.has(token) || ABSTRACT.has(token) || ADJECTIVE_WORDS.has(token)) continue;
-    if (/^\d+$/.test(token)) continue;
-
-    const isAnchor = anchored.has(token);
-    // A participle is only a noun when a determiner vouches for it: "a booking"
-    // is a noun, "duplicating" is not. Likewise an adjective.
-    // A determiner vouching for a participle is evidence ("a booking"); a
-    // determiner vouching for an adjective is not ("the highest bidder").
-    // A participle is never a noun, however it is anchored: nothing in a product
-    // is called "a scheduled".
-    if (/ed$/.test(token)) continue;
-    if (VERBISH.test(token) && !isAnchor) continue;
-    if (ADJECTIVE.test(token)) continue;
-
+  for (const entry of groups.values()) {
+    const { word, count, anchored: isAnchor, knownNoun, nounSuffix, nonEnglishNoun } = entry;
+    const hyphenated = word.includes('-');
     let score = 0;
     if (isAnchor) score += 3;
-    if (NOUN_SUFFIX.test(token)) score += 2;
-    if (NON_ENGLISH_NOUN.test(token)) score += 2;
+    if (nounSuffix || knownNoun) score += 2;
+    if (nonEnglishNoun) score += 2;
     if (count > 1) score += 1;
-    if (token.includes('-')) score += 1; // "double-entry", "dead-letter": deliberate terms
-    if (token.length >= 7) score += 1;
-    // A word that appears once, has no noun marker and is not anchored is kept as
-    // a *weak* candidate: it may still be the only noun a one-line idea gives us,
-    // but it never outranks a word the sentence actually used as a noun.
-    if (!isAnchor && count < 2 && !NOUN_SUFFIX.test(token) && !NON_ENGLISH_NOUN.test(token)) score = 1;
-    scored.push({ word: token, count, score, anchored: isAnchor });
-  }
-
-  // Collapse the same concept in two grammatical numbers, including the German
-  // plurals that -s rules do not catch ("mahnung" / "mahnungen").
-  const byStem = new Map();
-  for (const candidate of scored) {
-    const stem = singularOf(candidate.word).replace(/en$/, '');
-    const existing = byStem.get(stem);
-    if (!existing || candidate.score > existing.score) {
-      byStem.set(stem, { ...candidate, count: (existing?.count ?? 0) + candidate.count });
-    } else {
-      existing.count += candidate.count;
-    }
+    if (count >= 3) score += 1;
+    // Hyphenated terms ("double-entry", "dead-letter") are great glossary candidates,
+    // so give +1 when anchored or repeated, not on a 1x unanchored negative ("double-disbursement").
+    if (hyphenated && (isAnchor || count > 1)) score += 1;
+    if (!hyphenated && word.length >= 7) score += 1;
+    if (!isAnchor && count < 2 && !nounSuffix && !nonEnglishNoun && !knownNoun) score = 1;
+    scored.push({ word, count, score, anchored: isAnchor });
   }
 
   // On a tie, the longer word is the more specific one ("order" over "copy",
   // "inventory" over "sync"), which is the opposite of the previous tiebreak.
-  return [...byStem.values()].sort(
+  return scored.sort(
     (a, b) => b.score - a.score || b.count - a.count || b.word.length - a.word.length
   );
 }
@@ -236,10 +299,17 @@ export function vocabularyFor(profile) {
   //   idea   — the sentence used this word as a noun, twice or with a marker;
   //   weak   — a single plausible noun and nothing better;
   //   kind   — the idea gave us nothing nameable, so we use what the kind implies.
-  const primaryPick = confident[0] ?? candidates[0] ?? null;
+  // Prefer a domain object ("claim", "booking", "reimbursement") for `primary` and a
+  // human/org role ("participant", "coordinator", "therapist") for `secondary` when
+  // the confident pool contains both, so sentences like "a participant's claim" read
+  // naturally instead of "an exercis's sponsor".
+  const primaryPool = confident.length > 0 ? confident : candidates;
+  const topObject = primaryPool.find((candidate) => !isActorWord(candidate.word)) ?? null;
+  const primaryPick = topObject ?? primaryPool[0] ?? null;
   const primary = primaryPick ? singularOf(primaryPick.word) : fallback[0];
-  const secondaryPick =
-    [...confident, ...candidates].find((candidate) => singularOf(candidate.word) !== primary) ?? null;
+  const restPool = [...confident, ...candidates].filter((candidate) => singularOf(candidate.word) !== primary);
+  const topActor = confident.find((candidate) => singularOf(candidate.word) !== primary && isActorWord(candidate.word)) ?? null;
+  const secondaryPick = topActor ?? restPool[0] ?? null;
   const secondary = secondaryPick ? singularOf(secondaryPick.word) : fallback[1];
   const source = primaryPick ? (confident.length > 0 ? 'idea' : 'weak') : 'kind';
 

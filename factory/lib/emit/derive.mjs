@@ -6,7 +6,7 @@
  */
 
 import { aggregatesFor, contextsFor, termsFor } from '../domain-hints.mjs';
-import { articleFor, ideaNouns, singularOf, vocabularyFor } from './vocabulary.mjs';
+import { articleFor, ideaNouns, pluralOf, singularOf, vocabularyFor } from './vocabulary.mjs';
 
 export const FACTORY_VERSION = '0.3.0';
 
@@ -196,31 +196,41 @@ export function anchorPath(profile, requirement) {
 
 export function nonGoalsFor(profile, words = []) {
   const primary = words[0] ?? 'the primary object';
-  const secondary = words[1] ?? 'the people who use it';
-  const aPrimary = `${articleFor(primary)} ${primary}`;
+  const secondaryRaw = words[1] ?? 'user';
+  const secondarySingular = singularOf(secondaryRaw);
+  const secondaryPlural = secondaryRaw === 'the people who use it' ? secondaryRaw : pluralOf(secondarySingular);
   const goals = [
     `Any ${primary} capability the idea does not name. When in doubt, it is out of scope and gets its own version.`,
-    `Importing ${primary} data from an existing system: v1 starts empty and the first ${secondary} enters it by hand.`
+    `Importing ${primary} data from an existing system: v1 starts empty and the first ${secondarySingular} enters it by hand.`
   ];
 
   if (!profile.traits.includes('realtime')) goals.push('Live collaboration on the same ' + primary + ', presence and cursors.');
-  if (!profile.traits.includes('ai')) goals.push(`Any generated or summarised ${primary} content. Every word in v1 is written by ${articleFor(secondary.replace(/s$/, ''))} ${secondary.replace(/s$/, '')}.`);
-  if (!profile.traits.includes('notifications')) goals.push(`Notifying ${secondary} outside the product: no email, no push, no digest.`);
+  if (!profile.traits.includes('ai')) goals.push(`Any generated or summarised ${primary} content. Every word in v1 is written by ${articleFor(secondarySingular)} ${secondarySingular}.`);
+  if (!profile.traits.includes('notifications')) goals.push(`Notifying ${secondaryPlural} outside the product: no email, no push, no digest.`);
   if (profile.kind === 'web-app' || profile.kind === 'api') goals.push(`A public ${primary} API for third parties, SDKs and published integrations.`);
-  if (profile.kind !== 'mobile') goals.push(`A native client for the ${primary}. If ${secondary} need it offline, that is a v2 decision with its own sync contract.`);
+  if (profile.kind !== 'mobile') {
+    if (profile.traits.includes('offline')) {
+      goals.push(
+        `A separate native app-store binary for the ${primary}: v1 offline capture and replay run through the web client's sync contract.`
+      );
+    } else {
+      goals.push(`A native client for the ${primary}. If ${secondaryPlural} need it offline, that is a v2 decision with its own sync contract.`);
+    }
+  }
   goals.push(`Custom reporting and exports over ${primary} data beyond what one screen shows.`);
   return goals;
 }
 
 export function openQuestionsFor(profile, rigor, words = []) {
   const primary = words[0] ?? 'the primary object';
-  const secondary = words[1] ?? 'users';
+  const secondaryRaw = words[1] ?? 'users';
+  const secondaryPlural = secondaryRaw === 'users' ? 'users' : pluralOf(singularOf(secondaryRaw));
   const aPrimary = `${articleFor(primary)} ${primary}`;
   const questions = [
     `Who creates the first ${primary}, and what do they use today instead?`,
     `What must never happen to ${aPrimary} — and what does it cost when it does?`,
-    `Which part of the ${primary} workflow could be dropped without losing the reason ${secondary} open it?`,
-    `How many ${primary} records exist in year one, and how many ${secondary} touch them at once?`,
+    `Which part of the ${primary} workflow could be dropped without losing the reason ${secondaryPlural} open it?`,
+    `How many ${primary} records exist in year one, and how many ${secondaryPlural} touch them at once?`,
     `Who notices first when ${aPrimary} is wrong, and how do they find out?`
   ];
 
@@ -775,8 +785,8 @@ export function derive(plan) {
     terms: termsFor(plan.requirements),
     aggregates,
     groups: groupRequirements(plan.requirements),
-    nonGoals: nonGoalsFor(plan.profile, words),
-    questions: openQuestionsFor(plan.profile, plan.rigor, words),
+    nonGoals: nonGoalsFor(plan.profile, [vocab.primary, vocab.secondary]),
+    questions: openQuestionsFor(plan.profile, plan.rigor, [vocab.primary, vocab.secondary]),
     stack: stackFor(plan.profile),
     commands: commandsFor(plan.profile),
     phases: buildPhases(plan, phrases),

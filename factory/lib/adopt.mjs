@@ -268,10 +268,14 @@ function detectSchemaSignals(scan) {
 
   for (const file of new Set(sources)) {
     const text = scan.contents(file).toLowerCase();
-    if (/\b(tenant_id|tenantid|organisation_id|organization_id|org_id|workspace_id|account_id)\b/.test(text)) {
+    if (
+      /\b([a-z0-9]+_)?(tenant|organisation|organization|workspace)(_[a-z0-9]+)*_id\b|\b(tenantid|org_id|org_[a-z0-9]+_id|account_id)\b/.test(
+        text
+      )
+    ) {
       signals.multiTenant.push(`${file}: tenant/org scoping column`);
     }
-    if (/\b(email|phone|first_name|last_name|full_name|date_of_birth|address|ssn|tax_id)\b/.test(text)) {
+    if (/\b([a-z0-9]+_)?(email|phone|first_name|last_name|full_name|date_of_birth|address|ssn|tax_id|iban)\b/.test(text)) {
       signals.pii.push(`${file}: personal data column`);
     }
     if (/ondelete:\s*cascade|delete from|hard delete/i.test(text)) {

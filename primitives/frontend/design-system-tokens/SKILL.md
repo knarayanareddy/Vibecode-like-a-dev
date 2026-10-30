@@ -7,8 +7,8 @@ obligation: "In {project}, colour, spacing and type for every {primary} screen c
 tier_min: 1
 cost: medium
 priority: 4
-tags: [frontend, design-system, tokens, css, consistency, ui]
-triggers: [design system, tokens, styling, css variables, consistent ui, theme]
+tags: [frontend, design-system, design-tokens, css, consistency, ui]
+triggers: [design system, design tokens, styling, css variables, consistent ui, theme]
 enforces: [ui.design-tokens]
 artifacts: [03-architecture.md, 05-verification.md]
 ---

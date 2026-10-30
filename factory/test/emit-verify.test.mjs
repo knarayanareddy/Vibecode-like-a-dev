@@ -515,3 +515,38 @@ test('a tier-0 sketch compiles to one file and passes its own smaller ceiling', 
   assert.equal(report.ok, true);
   assert.ok(report.stats.lines <= 140);
 });
+
+test('out-of-scope section does not defer offline to v2 when the offline trait is enabled', (t) => {
+  const withOffline = compileTemp(
+    normalizeProfile({
+      name: 'clinic-tablet',
+      idea: 'Study coordinators capture participant mileage claims offline on clinic tablets and sync when Wi-Fi returns.',
+      kind: 'web-app',
+      stage: 'mvp',
+      traits: ['auth', 'persistence', 'offline'],
+      risks: { pii: true }
+    })
+  );
+  t.after(withOffline.cleanup);
+
+  const briefWithOffline = readFileSync(path.join(withOffline.outDir, '01-product-brief.md'), 'utf8');
+  assert.match(briefWithOffline, /REQ-\d+.*offline/i, 'offline requirement is in scope');
+  assert.doesNotMatch(briefWithOffline, /need it offline, that is a v2 decision/i);
+  assert.match(briefWithOffline, /v1 offline capture and replay run through the web client/i);
+
+  const withoutOffline = compileTemp(
+    normalizeProfile({
+      name: 'clinic-desk',
+      idea: 'Study coordinators capture participant mileage claims at the hospital desk.',
+      kind: 'web-app',
+      stage: 'mvp',
+      traits: ['auth', 'persistence'],
+      risks: { pii: true }
+    })
+  );
+  t.after(withoutOffline.cleanup);
+
+  const briefWithoutOffline = readFileSync(path.join(withoutOffline.outDir, '01-product-brief.md'), 'utf8');
+  assert.match(briefWithoutOffline, /need it offline, that is a v2 decision/i);
+});
+

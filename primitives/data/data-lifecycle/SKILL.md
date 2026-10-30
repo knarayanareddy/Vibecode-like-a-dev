@@ -7,8 +7,8 @@ obligation: "In {project}, every personal field of {aPrimary} has a stated purpo
 tier_min: 2
 cost: medium
 priority: 5
-tags: [privacy, gdpr, retention, deletion, pii, compliance]
-triggers: [pii, gdpr, delete account, retention, data export, privacy]
+tags: [privacy, gdpr, retention, deletion, pii, compliance, redaction]
+triggers: [pii, gdpr, delete account, retention, data export, privacy, right to erasure, crypto-shred, patient names]
 enforces: [data.lifecycle]
 artifacts: [04-contracts.md, 02-domain-model.md]
 ---

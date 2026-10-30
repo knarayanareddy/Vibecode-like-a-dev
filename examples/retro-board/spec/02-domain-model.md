@@ -10,10 +10,10 @@ The 6 words below come from your idea; the rest from the requirements you select
 
 | Term | Working definition | Source | Confirmed |
 | --- | --- | --- | --- |
+| **team** | from your idea — confirm the exact meaning of team before it appears in code | the idea | no |
 | **board** | from your idea — confirm the exact meaning of board before it appears in code | the idea | no |
 | **facilitator** | from your idea — confirm the exact meaning of facilitator before it appears in code | the idea | no |
 | **history** | from your idea — confirm the exact meaning of history before it appears in code | the idea | no |
-| **team** | from your idea — confirm the exact meaning of team before it appears in code | the idea | no |
 | **vote** | from your idea — confirm the exact meaning of vote before it appears in code | the idea | no |
 | **engineering** | from your idea — confirm the exact meaning of engineering before it appears in code | the idea | no |
 | **Record** | A row that outlives the request that created it; candidate name to be replaced with the domain term. | REQ-004 | no |

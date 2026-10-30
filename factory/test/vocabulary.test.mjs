@@ -87,12 +87,48 @@ test('the tense adverbs that broke v1 of this extractor are not nouns', () => {
   assert.ok(vocab.candidates.some((candidate) => candidate.word === 'order'), JSON.stringify(vocab.candidates));
 });
 
-test('singular and plural round-trip on the words ideas actually use', () => {
-  const cases = { bookings: 'booking', entries: 'entry', flags: 'flag', statuses: 'status', addresses: 'address', photos: 'photo' };
+test('singular and plural round-trip on the words ideas actually use, including silent-e -ses/-ces/-zes', () => {
+  const cases = {
+    bookings: 'booking',
+    entries: 'entry',
+    flags: 'flag',
+    statuses: 'status',
+    addresses: 'address',
+    photos: 'photo',
+    expenses: 'expense',
+    leases: 'lease',
+    invoices: 'invoice',
+    exercises: 'exercise',
+    warehouses: 'warehouse',
+    cases: 'case'
+  };
   for (const [plural, singular] of Object.entries(cases)) {
     assert.equal(singularOf(plural), singular, plural);
     assert.equal(pluralOf(singular), plural, singular);
   }
+});
+
+test('agentive -ant/-ent nouns and third-person verbs after them do not produce mangled stems like "exercis"', () => {
+  const vocab = vocabularyFor({
+    name: 'trialbridge-reimburse',
+    idea:
+      'A multi-tenant clinical trial stipend and travel reimbursement platform for pharmaceutical sponsors, hospital study coordinators, and enrolled trial participants replacing manual spreadsheets and wire transfers. Coordinators capture mileage, hotel, and meal receipts—including offline on clinic tablets—while an AI extraction pipeline parses receipt line items and flags duplicate or out-of-protocol claims without ever sending patient names or IBANs to external model providers. Approved claims debit pre-funded sponsor escrow balances in integer minor currency units. When a participant exercises GDPR right-to-erasure or withdraws consent, personal identifiers and uploaded receipt images must be crypto-shredded within 30 days.',
+    kind: 'web-app',
+    traits: ['auth', 'payments', 'offline'],
+    risks: { pii: true, payments: true, regulated: true, multiTenant: true }
+  });
+
+  assert.notEqual(vocab.primary, 'exercis');
+  assert.notEqual(vocab.secondary, 'exercis');
+  assert.notEqual(vocab.primary, 'exercise');
+  assert.notEqual(vocab.secondary, 'exercise');
+  assert.ok(!vocab.candidates.some((c) => c.word === 'exercis' || c.word === 'exercise'), JSON.stringify(vocab.candidates));
+  assert.ok(vocab.candidates.some((c) => c.word === 'participant'), 'participant (-ant) must not be vetoed as an adjective');
+  assert.equal(vocab.secondary, 'participant', 'actor role lands in secondary');
+  assert.ok(
+    ['claim', 'reimbursement', 'trial', 'receipt', 'stipend'].includes(vocab.primary),
+    `expected domain object in primary (not a 1x hyphenated anti-pattern), got "${vocab.primary}"`
+  );
 });
 
 test('idea nouns are candidates with counts, not conclusions', () => {

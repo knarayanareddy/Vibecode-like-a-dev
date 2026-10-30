@@ -14,52 +14,52 @@ Build the smallest end-to-end slice of **The primary journey works end to end** 
 
 ### Phase 0 — Skeleton and guardrails · week 1-1
 
-_A running, tested, documented box that can create and delete a specification and nothing else._
+_A running, tested, documented box that can create and delete an agent and nothing else._
 
 - [ ] Initialise the repository with TypeScript (strict) and PostgreSQL; commit the lockfile.
 - [ ] Add the CI workflow with lint, typecheck and test jobs, and make it required on the default branch.
-- [ ] Add configuration validation that names every missing variable before the first specification is created.
-- [ ] Write the runbook: install, run, test, deploy, and what developers see when the specification service is down.
+- [ ] Add configuration validation that names every missing variable before the first agent is created.
+- [ ] Write the runbook: install, run, test, deploy, and what specifications see when the agent service is down.
 - [ ] Copy the specification packet into specs/ and wire the spec check into CI.
-- [ ] Answer the open questions that block the specification slice; the rest can wait for their phase.
+- [ ] Answer the open questions that block the agent slice; the rest can wait for their phase.
 
-**Exit:** The documented command creates and deletes a specification through PostgreSQL, and CI is green on that alone.
+**Exit:** The documented command creates and deletes an agent through PostgreSQL, and CI is green on that alone.
 
 ### Phase 1 — Domain core · week 2-3
 
-_The rules that make a specification valid, in code, before any framework is chosen for them._
+_The rules that make an agent valid, in code, before any framework is chosen for them._
 
-- [ ] Fill the language table around a specification: one term, one meaning, no synonyms.
-- [ ] Write failing tests for each rule a specification must satisfy, including the ones the idea states in its own words.
-- [ ] Implement the specification aggregates as pure code with no framework, network or database imports.
-- [ ] Define typed errors for the ways a specification can be rejected; no exception control flow across module boundaries.
-- [ ] Review assertion quality by hand: every specification test must fail if its rule is inverted.
+- [ ] Fill the language table around an agent: one term, one meaning, no synonyms.
+- [ ] Write failing tests for each rule an agent must satisfy, including the ones the idea states in its own words.
+- [ ] Implement the agent aggregates as pure code with no framework, network or database imports.
+- [ ] Define typed errors for the ways an agent can be rejected; no exception control flow across module boundaries.
+- [ ] Review assertion quality by hand: every agent test must fail if its rule is inverted.
 
-**Exit:** A specification rules pass their tests with no infrastructure imported — no PostgreSQL, no framework.
+**Exit:** An agent rules pass their tests with no infrastructure imported — no PostgreSQL, no framework.
 
 ### Phase 2 — Contracts before implementation · week 4-4
 
-_Every boundary around a specification fixed while changing it is still free._
+_Every boundary around an agent fixed while changing it is still free._
 
 - [ ] Fix each shape in the contract inventory: REQ-004.
-- [ ] Write the acceptance tests for a specification first; they must fail for missing behaviour, not missing setup.
+- [ ] Write the acceptance tests for an agent first; they must fail for missing behaviour, not missing setup.
 - [ ] Record a real response for every external dependency, or write down the stub and why.
 - [ ] Record an ADR for each library that a reviewer could plausibly want removed.
 
-**Exit:** The a specification acceptance tests exist and fail because the behaviour is missing, not because the setup is.
+**Exit:** The an agent acceptance tests exist and fail because the behaviour is missing, not because the setup is.
 
 ### Phase 3 — Vertical slices · week 5-6
 
-_Working specification behaviour end to end, one requirement at a time._
+_Working agent behaviour end to end, one requirement at a time._
 
-- [ ] REQ-004 Every command that touches a specification documents its flags and exit codes, rejects unknown input, and supports a dry run that changes nothing. Test first, then implement, then trace.
-- [ ] REQ-006 Someone owns failure, and knows what to do first holds for a specification. Test first, then implement, then trace.
+- [ ] REQ-004 Every command that touches an agent documents its flags and exit codes, rejects unknown input, and supports a dry run that changes nothing. Test first, then implement, then trace.
+- [ ] REQ-006 Someone owns failure, and knows what to do first holds for an agent. Test first, then implement, then trace.
 
 **Exit:** Each of the 6 requirements is traceable from criterion to test, with its anchor green in CI.
 
 ### Phase 4 — Interface and hardening · week 7-7
 
-_Vibecode Like A Dev feels finished to a developer and fails predictably._
+_Vibecode Like A Dev feels finished to a specification and fails predictably._
 
 - [ ] Exercise every failure path in the requirements, manually or by test.
 - [ ] Mutation testing is deferred; keep assertions specific anyway.
@@ -68,14 +68,14 @@ _Vibecode Like A Dev feels finished to a developer and fails predictably._
 
 ### Phase 5 — Release and first observation · week 8-8
 
-_Ship a specification change with a way back._
+_Ship an agent change with a way back._
 
 - [ ] Write the release checklist and the rollback procedure for a PostgreSQL migration.
-- [ ] Deploy to staging and take one specification through the primary journey there.
-- [ ] Observe for one window: error rate, latency, and one specification created by a real developer.
+- [ ] Deploy to staging and take one agent through the primary journey there.
+- [ ] Observe for one window: error rate, latency, and one agent created by a real specification.
 - [ ] Record what changed in the spec as a result, then archive the changed requirements.
 
-**Exit:** A release has been observed with real developers data, and the rollback has been rehearsed or explicitly accepted as untested.
+**Exit:** A release has been observed with real specifications data, and the rollback has been rehearsed or explicitly accepted as untested.
 
 ## 3. Commit and branch protocol
 
@@ -90,7 +90,7 @@ Rules for humans and agents alike. The point is to stop the loop where the model
 
 1. Three failed attempts at the same failing check: stop, write down what was tried, escalate with the evidence.
 2. A test needs weakening to proceed: stop — that is either a wrong test or a wrong design.
-3. A requirement about the specification turns out to be ambiguous: stop that requirement, record the question, keep going elsewhere.
+3. A requirement about the agent turns out to be ambiguous: stop that requirement, record the question, keep going elsewhere.
 4. The phase gate cannot pass within twice its allotted time: cut scope; do not extend the phase silently.
 
 ## 5. Risk register
@@ -98,7 +98,7 @@ Rules for humans and agents alike. The point is to stop the loop where the model
 | Risk | Likelihood | Mitigation |
 | --- | --- | --- |
 | Scope creep past the 6 listed requirements | high | The non-goals table is the answer: anything unlisted is rejected in review rather than debated. |
-| An invented abstraction around the specification | medium | One context per owned noun; a new layer needs a reason a reviewer can check. |
+| An invented abstraction around the agent | medium | One context per owned noun; a new layer needs a reason a reviewer can check. |
 | Environment and configuration drift | medium | Configuration is validated at startup and fails by naming the missing variable. |
 | The 8-week calendar slipping | medium | Cut scope in the brief, never a gate. |
 
