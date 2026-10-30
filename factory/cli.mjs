@@ -13,6 +13,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { adoptRepo, isRemoteRepo, writeAdoptedProfile } from './lib/adopt.mjs';
+import { artifactStatus, initArtifact, listArtifacts, validateArtifact } from './lib/artifacts.mjs';
 import { agentStatus, installAgent, listAdapters } from './lib/agents.mjs';
 import { applyBundle, getBundle, listBundles } from './lib/bundles.mjs';
 import { CHANGE_TEMPLATE, applyChange, archiveChange, emitChange, planChange, verifyChange } from './lib/change.mjs';
@@ -38,7 +39,7 @@ const option = (name, fallback) => {
 };
 const VALUE_FLAGS = new Set([
   '-o', '--out', '--repo', '--name', '--idea', '--profile', '--packet',
-  '--project', '--modules', '--evidence'
+  '--project', '--modules', '--evidence', '--file'
 ]);
 const positional = rest.filter((item, index) => !item.startsWith('-') && !(index > 0 && VALUE_FLAGS.has(rest[index - 1])));
 
@@ -59,6 +60,8 @@ Usage
   vld change archive <change-dir> <packet-dir> [--profile <p>]
                                      fold an applied change into the profile's overlay stack
   vld change init <dir>              write change.json to fill in
+  vld artifact list|init|validate|status <type> [id] [--project <dir>]
+                                     generate and validate product, architecture, delivery, review and QA artifacts
   vld module list|enable|status|verify [ids] [--project <dir>] [--json]
                                      manage version-locked optional delivery modules
   vld bundle list|show|apply <id> [--profile <file>] [--project <dir>] [--dry-run]
@@ -543,6 +546,42 @@ function reportModuleStatus(status, { json = false, verify = false } = {}) {
   if (!status.ok) process.exit(1);
 }
 
+function runArtifact() {
+  const [action = 'list', kind, id] = positional;
+  const project = option('--project', '.');
+  const common = { projectDir: project, packetDir: option('--packet', null), profilePath: option('--profile', null), id: id ?? null, file: option('--file', null) };
+  try {
+    if (action === 'list') {
+      const types = listArtifacts();
+      if (hasFlag('--json')) console.log(JSON.stringify(types, null, 2));
+      else { console.log('\nVLD validated artifacts\n'); for (const type of types) console.log(`  ${type.id.padEnd(24)} ${type.module.padEnd(14)} ${type.title}`); console.log(''); }
+      return;
+    }
+    if (action === 'init') {
+      if (!kind) fail('Usage: vld artifact init <type> [id] [--project <dir>] [--packet <dir>]');
+      const result = initArtifact({ ...common, kind, out: option('--out', null), force: hasFlag('--force') });
+      if (hasFlag('--json')) console.log(JSON.stringify(result, null, 2));
+      else console.log(`\n✓ wrote ${displayPath(result.file)}\n\n  Fill the artifact, then run:\n  vld artifact validate ${kind}${id ? ` ${id}` : ''} --project ${displayPath(result.project)} --strict\n`);
+      return;
+    }
+    if (action === 'validate') {
+      if (!kind) fail('Usage: vld artifact validate <type> [id] [--strict] [--project <dir>]');
+      const report = validateArtifact({ ...common, kind, strict: hasFlag('--strict') });
+      if (hasFlag('--json')) console.log(JSON.stringify(report, null, 2));
+      else { console.log(`\nartifact validate · ${displayPath(report.file)}\n`); for (const e of report.errors) console.log(`  ✗ ${e}`); for (const w of report.warnings) console.log(`  ! ${w}`); console.log(`\n${hasFlag('--strict') ? report.strictOk ? 'PASS' : 'FAIL' : report.ok ? 'PASS' : 'FAIL'}\n`); }
+      if (hasFlag('--strict') ? !report.strictOk : !report.ok) process.exit(1);
+      return;
+    }
+    if (action === 'status') {
+      const report = artifactStatus({ projectDir: project, packetDir: option('--packet', null) });
+      if (hasFlag('--json')) console.log(JSON.stringify(report, null, 2));
+      else { console.log('\nartifacts\n'); for (const entry of report) console.log(`  ${entry.exists && entry.ok ? '✓' : entry.exists ? '!' : '·'} ${entry.id.padEnd(24)} ${entry.exists ? displayPath(entry.file) : 'not created'}`); console.log(''); }
+      return;
+    }
+    fail('Usage: vld artifact list|init|validate|status');
+  } catch (error) { fail(error.message); }
+}
+
 function runModule() {
   const [action = 'list', ids] = positional;
   const project = option('--project', '.');
@@ -801,6 +840,9 @@ switch (command) {
     break;
   case 'change':
     runChange();
+    break;
+  case 'artifact':
+    runArtifact();
     break;
   case 'module':
     runModule();

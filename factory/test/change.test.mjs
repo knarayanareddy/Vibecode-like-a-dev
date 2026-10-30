@@ -211,7 +211,7 @@ test('emitting a change writes a reviewable packet and verifies', (t) => {
   const result = emitChange(plan, out);
 
   const names = result.written.map((file) => file.name).sort();
-  assert.deepEqual(names, ['delta.json', 'proposal.md', 'spec.after.json', 'tasks.md']);
+  assert.deepEqual(names, ['delta.json', 'design.md', 'proposal.md', 'spec.after.json', 'tasks.md']);
 
   const proposal = readFileSync(path.join(out, 'proposal.md'), 'utf8');
   assert.match(proposal, /## ADDED/);
@@ -221,7 +221,12 @@ test('emitting a change writes a reviewable packet and verifies', (t) => {
   assert.match(proposal, /## Probe/);
   assert.match(proposal, /## Rollback/);
 
+  const design = readFileSync(path.join(out, 'design.md'), 'utf8');
+  assert.match(design, /## Decisions/);
+  assert.match(design, /## Alternatives Considered/);
+
   const tasks = readFileSync(path.join(out, 'tasks.md'), 'utf8');
+  assert.match(tasks, /design\.md/);
   assert.match(tasks, /spec-check\.mjs/);
   assert.match(tasks, /@req REQ-\d{3}/);
 

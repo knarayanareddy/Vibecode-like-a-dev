@@ -154,6 +154,12 @@ vld bundle apply startup-saas --profile profile.json
 # Inspect or opt into the version-locked delivery disciplines.
 vld module list
 vld module enable product,architecture,delivery,review,qa --project .
+
+# Generate validated, human-authored artifacts. Templates start as drafts;
+# strict validation rejects placeholders, draft status and missing requirement evidence.
+vld artifact init product-brief --project . --packet specs
+vld artifact init architecture-decision auth-boundary --project . --packet specs
+vld artifact validate product-brief --project . --packet specs --strict
 vld module verify --project .
 
 # Generate handoffs for a local coding-agent environment. This installs files;
@@ -465,7 +471,7 @@ factory/
     gate-runner.mjs    the gate checker shipped into every packet
   schema/
     spec.schema.json   the manifest contract
-  test/                172 tests: data integrity, planning, reproducibility, adoption,
+  test/                173 tests: data integrity, planning, reproducibility, adoption,
                        delta specs, overlays, gates, EARS, MCP protocol, routing & outcome evals
 profile.json           this repository's own profile
 specs/                 this repository's own compiled packet, guarded in CI
@@ -483,7 +489,7 @@ docs/                  research notes, authoring guide, stress test, landscape s
 ```
 
 ```bash
-npm test        # 172 tests
+npm test        # 173 tests
 npm run eval    # library health + packet specificity + 74-prompt routing + 24-task outcome calibration
 npm run stress  # 10 representative + 24 hostile ideas, and 6 refusals; scored on soundness
 npm run check   # lint + index + tests + verify + self-guard + gates + eval + stress
