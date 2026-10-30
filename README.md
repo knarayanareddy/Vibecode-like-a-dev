@@ -160,6 +160,14 @@ vld module enable product,architecture,delivery,review,qa --project .
 vld artifact init product-brief --project . --packet specs
 vld artifact init architecture-decision auth-boundary --project . --packet specs
 vld artifact validate product-brief --project . --packet specs --strict
+
+# Share advisory, reviewable delivery guidance without changing the compiler.
+vld store init ../team-playbook --id team-playbook
+# Commit ../team-playbook with Git, then pin its resolved commit in this project:
+vld store add team-playbook https://github.com/acme/team-playbook.git --ref main --project .
+vld store status --project .
+vld store update team-playbook --project .  # explicit refresh after review
+
 vld module verify --project .
 
 # Generate handoffs for a local coding-agent environment. This installs files;
@@ -471,7 +479,7 @@ factory/
     gate-runner.mjs    the gate checker shipped into every packet
   schema/
     spec.schema.json   the manifest contract
-  test/                173 tests: data integrity, planning, reproducibility, adoption,
+  test/                176 tests: data integrity, planning, reproducibility, adoption,
                        delta specs, overlays, gates, EARS, MCP protocol, routing & outcome evals
 profile.json           this repository's own profile
 specs/                 this repository's own compiled packet, guarded in CI
@@ -489,7 +497,7 @@ docs/                  research notes, authoring guide, stress test, landscape s
 ```
 
 ```bash
-npm test        # 173 tests
+npm test        # 176 tests
 npm run eval    # library health + packet specificity + 74-prompt routing + 24-task outcome calibration
 npm run stress  # 10 representative + 24 hostile ideas, and 6 refusals; scored on soundness
 npm run check   # lint + index + tests + verify + self-guard + gates + eval + stress

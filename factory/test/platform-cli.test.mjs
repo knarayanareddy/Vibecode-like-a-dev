@@ -5,8 +5,8 @@
  */
 
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFile, execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -100,6 +100,30 @@ test('public platform journey: bundle, module lock, Codex handoff and discovery 
   const status = await cli(['workflow', 'status', 'discovery', '--project', project, '--json']);
   assert.equal(status.code, 0, status.stderr);
   assert.ok(JSON.parse(status.stdout).steps.every((step) => step.status === 'complete'));
+});
+
+test('public store journey pins a file-backed Git snapshot and reports clean failures', async (t) => {
+  const workspace = mkdtempSync(path.join(os.tmpdir(), 'vld-store-cli-'));
+  t.after(() => rmSync(workspace, { recursive: true, force: true }));
+  const source = path.join(workspace, 'source'); const consumer = path.join(workspace, 'consumer');
+  const initialized = await cli(['store', 'init', source, '--id', 'team-playbook', '--title', 'Team playbook', '--json']);
+  assert.equal(initialized.code, 0, initialized.stderr);
+  writeFileSync(path.join(source, 'review.md'), '# Review\n\nKeep evidence linked to the reviewed requirements.\n');
+  const manifest = JSON.parse(readFileSync(path.join(source, 'vld-store.json'), 'utf8'));
+  manifest.assets.push({ id: 'review-guidance', kind: 'guidance', file: 'review.md' });
+  writeFileSync(path.join(source, 'vld-store.json'), JSON.stringify(manifest));
+  execFileSync('git', ['init', '-q'], { cwd: source });
+  execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: source });
+  execFileSync('git', ['config', 'user.name', 'Test'], { cwd: source });
+  execFileSync('git', ['add', '.'], { cwd: source }); execFileSync('git', ['commit', '-q', '-m', 'store'], { cwd: source });
+  mkdirSync(consumer);
+  const added = await cli(['store', 'add', 'team-playbook', `file://${source}`, '--project', consumer, '--json']);
+  assert.equal(added.code, 0, added.stderr);
+  assert.equal(JSON.parse(added.stdout).store.assets.length, 1);
+  const status = await cli(['store', 'status', 'team-playbook', '--project', consumer, '--json']);
+  assert.equal(status.code, 0, status.stderr); assert.equal(JSON.parse(status.stdout).ok, true);
+  const unsafe = await cli(['store', 'add', 'unsafe', '--bad', '--project', consumer]);
+  assert.equal(unsafe.code, 2); assert.match(unsafe.stderr, /safe Git URL|Usage/); assert.equal(unsafe.stdout, '');
 });
 
 test('public platform failures are clean usage/input errors, not agent invocations or stack traces', async (t) => {

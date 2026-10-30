@@ -20,6 +20,7 @@ import { CHANGE_TEMPLATE, applyChange, archiveChange, emitChange, planChange, ve
 import { emitPacket } from './lib/emit/index.mjs';
 import { buildIndex, loadIndex, writeIndex } from './lib/indexer.mjs';
 import { enableModules, listModules, moduleStatus } from './lib/modules.mjs';
+import { addStore, initStore, readStoreState, refreshStore, storeStatus } from './lib/stores.mjs';
 import { buildPlan, loadPolicy } from './lib/planner.mjs';
 import { loadProfile, KINDS, STAGES, SCALES, TRAITS, RISK_FLAGS } from './lib/profile.mjs';
 import { completeWorkflowStep, getWorkflow, listWorkflows, runWorkflow, workflowStatus } from './lib/workflows.mjs';
@@ -39,7 +40,7 @@ const option = (name, fallback) => {
 };
 const VALUE_FLAGS = new Set([
   '-o', '--out', '--repo', '--name', '--idea', '--profile', '--packet',
-  '--project', '--modules', '--evidence', '--file'
+  '--project', '--modules', '--evidence', '--file', '--ref', '--title'
 ]);
 const positional = rest.filter((item, index) => !item.startsWith('-') && !(index > 0 && VALUE_FLAGS.has(rest[index - 1])));
 
@@ -62,6 +63,8 @@ Usage
   vld change init <dir>              write change.json to fill in
   vld artifact list|init|validate|status <type> [id] [--project <dir>]
                                      generate and validate product, architecture, delivery, review and QA artifacts
+  vld store init <dir> [--id <id>] | add <id> <git-url> | update|status [id]
+                                     fetch, pin and verify read-only Git-backed shared delivery stores
   vld module list|enable|status|verify [ids] [--project <dir>] [--json]
                                      manage version-locked optional delivery modules
   vld bundle list|show|apply <id> [--profile <file>] [--project <dir>] [--dry-run]
@@ -582,6 +585,49 @@ function runArtifact() {
   } catch (error) { fail(error.message); }
 }
 
+function runStore() {
+  const [action = 'status', id, repository] = positional;
+  const project = option('--project', '.');
+  try {
+    if (action === 'init') {
+      if (!id) fail('Usage: vld store init <directory> [--id <store-id>] [--title <title>]');
+      const result = initStore({ directory: id, id: option('--id', null), title: option('--title', null), force: hasFlag('--force') });
+      if (hasFlag('--json')) console.log(JSON.stringify(result, null, 2));
+      else console.log(`\n✓ wrote shared store skeleton in ${displayPath(result.directory)}\n\n  Add reviewed assets, commit it with Git, then consume it with:\n  vld store add ${result.manifest.id} <git-url> --project <project>\n`);
+      return;
+    }
+    if (action === 'add') {
+      if (!id || !repository) fail('Usage: vld store add <id> <git-url> [--ref <branch-or-tag>] [--project <dir>]');
+      const result = addStore({ projectDir: project, id, repository, ref: option('--ref', null), refresh: hasFlag('--refresh') });
+      if (hasFlag('--json')) console.log(JSON.stringify(result, null, 2));
+      else console.log(`\n✓ ${result.refreshed ? 'refreshed' : 'locked'} store ${result.store.id}\n\n  commit    ${result.store.commit}\n  assets    ${result.store.assets.length}\n  cache     ${displayPath(path.join(result.project, '.vld', 'stores', result.store.id))}\n  lock      ${displayPath(result.file)}\n`);
+      return;
+    }
+    if (action === 'update') {
+      if (!id) fail('Usage: vld store update <id> [--project <dir>]');
+      const result = refreshStore({ projectDir: project, id });
+      if (hasFlag('--json')) console.log(JSON.stringify(result, null, 2));
+      else console.log(`\n✓ refreshed store ${result.store.id} at ${result.store.commit}\n`);
+      return;
+    }
+    if (action === 'status' || action === 'list') {
+      const report = action === 'list' ? readStoreState(project) : storeStatus(project, id ?? null);
+      if (hasFlag('--json')) console.log(JSON.stringify(action === 'list' ? { ...report, stores: report.state?.stores ?? [] } : report, null, 2));
+      else {
+        const stores = action === 'list' ? report.state?.stores ?? [] : report.stores;
+        console.log(`\nshared stores · ${displayPath(report.project)}\n`);
+        for (const store of stores) console.log(`  ${store.ok === false ? '!' : '✓'} ${store.id.padEnd(20)} ${(store.title ?? '').slice(0, 45)}${store.commit ? ` · ${store.commit.slice(0, 12)}` : ''}`);
+        for (const error of report.errors ?? []) console.log(`  ✗ ${error}`);
+        if (action === 'status') for (const store of stores) for (const drift of store.drift ?? []) console.log(`  ! ${store.id}: ${drift}`);
+        console.log(`\n${report.ok === false ? 'FAIL' : 'PASS'} · ${stores.length} locked store(s)\n`);
+      }
+      if (report.ok === false) process.exit(1);
+      return;
+    }
+    fail('Usage: vld store init|add|update|list|status');
+  } catch (error) { fail(error.message); }
+}
+
 function runModule() {
   const [action = 'list', ids] = positional;
   const project = option('--project', '.');
@@ -843,6 +889,9 @@ switch (command) {
     break;
   case 'artifact':
     runArtifact();
+    break;
+  case 'store':
+    runStore();
     break;
   case 'module':
     runModule();

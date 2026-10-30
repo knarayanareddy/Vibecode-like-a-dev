@@ -16,12 +16,13 @@ node factory/cli.mjs adopt <repo> -o <profile.json>   # infer a profile from cod
 node factory/cli.mjs change <packet> <change.json> -o <dir>
 node factory/cli.mjs change verify <dir>
 node factory/cli.mjs artifact list|init|validate|status
+node factory/cli.mjs store init|add|update|list|status
 node factory/cli.mjs module list|enable|status|verify
 node factory/cli.mjs bundle list|apply <id> --profile <profile.json>
 node factory/cli.mjs agent install codex|claude-code|github-copilot
 node factory/cli.mjs workflow list|lint|run|status|complete
 node factory/cli.mjs mcp                # MCP server over stdio (8 tools)
-npm test                                # 173 tests: integrity, planning, adoption, deltas, artifacts, modules, workflows, MCP, enforcement
+npm test                                # 176 tests: integrity, planning, adoption, deltas, artifacts, stores, modules, workflows, MCP, enforcement
 npm run check                           # index freshness + tests + verify the example packet
 ```
 
