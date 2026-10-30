@@ -113,6 +113,21 @@ test('cli contract: data on stdout, diagnostics on stderr, non-zero exit on misu
     rmSync(invalidProfile, { force: true });
   }
 
+  // Optional constraints are still untrusted input. A non-list `mustUse` used to
+  // reach the emitter and crash on `.join`; reject it during profile validation.
+  const malformedConstraint = path.join(os.tmpdir(), `vld-malformed-constraint-${process.pid}.json`);
+  writeFileSync(malformedConstraint, JSON.stringify({ ...PROFILE, constraints: { mustUse: 'postgres' } }));
+  try {
+    const invalid = await cli(['compile', malformedConstraint, '-o', path.join(os.tmpdir(), `vld-malformed-spec-${process.pid}`)]);
+    assert.equal(invalid.code, 2, invalid.stderr);
+    assert.equal(invalid.stdout.trim(), '', 'input errors never write a partial packet to stdout');
+    assert.match(invalid.stderr, /constraints\.mustUse: must be a list/);
+    assert.doesNotMatch(invalid.stderr, /^\s+at\s/m, 'a malformed optional field does not leak a stack trace');
+  } finally {
+    rmSync(malformedConstraint, { force: true });
+    rmSync(path.join(os.tmpdir(), `vld-malformed-spec-${process.pid}`), { recursive: true, force: true });
+  }
+
   // A target path that is a file, not a directory, is a mistake worth a sentence.
   const usable = path.join(os.tmpdir(), `vld-usable-${process.pid}.json`);
   writeFileSync(usable, JSON.stringify(PROFILE));

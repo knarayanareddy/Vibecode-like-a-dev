@@ -2,21 +2,28 @@
 /**
  * vld — vibecode like a dev.
  *
- * Four commands, one job each:
+ * One deterministic compiler with optional, separately locked platform layers:
  *   vld init <dir>                 write a profile to fill in
  *   vld plan <profile>             show what would be selected and why
  *   vld compile <profile> -o <dir> render the specification packet
  *   vld verify <packet> [--repo .] check the packet, optionally against real code
+ *   vld module|bundle|agent|workflow manage opt-in delivery extensions
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { adoptRepo, isRemoteRepo, writeAdoptedProfile } from './lib/adopt.mjs';
+import { artifactStatus, initArtifact, listArtifacts, validateArtifact } from './lib/artifacts.mjs';
+import { agentStatus, installAgent, listAdapters } from './lib/agents.mjs';
+import { applyBundle, getBundle, listBundles } from './lib/bundles.mjs';
 import { CHANGE_TEMPLATE, applyChange, archiveChange, emitChange, planChange, verifyChange } from './lib/change.mjs';
 import { emitPacket } from './lib/emit/index.mjs';
 import { buildIndex, loadIndex, writeIndex } from './lib/indexer.mjs';
+import { enableModules, listModules, moduleStatus } from './lib/modules.mjs';
+import { addStore, initStore, readStoreState, refreshStore, storeStatus } from './lib/stores.mjs';
 import { buildPlan, loadPolicy } from './lib/planner.mjs';
 import { loadProfile, KINDS, STAGES, SCALES, TRAITS, RISK_FLAGS } from './lib/profile.mjs';
+import { completeWorkflowStep, getWorkflow, listWorkflows, runWorkflow, workflowStatus } from './lib/workflows.mjs';
 import { verifyPacket } from './lib/verify.mjs';
 
 // Single source of truth for the version: a literal here drifted once already.
@@ -31,7 +38,10 @@ const option = (name, fallback) => {
   const index = rest.indexOf(name);
   return index === -1 || index === rest.length - 1 ? fallback : rest[index + 1];
 };
-const VALUE_FLAGS = new Set(['-o', '--out', '--repo', '--name', '--idea', '--profile', '--packet']);
+const VALUE_FLAGS = new Set([
+  '-o', '--out', '--repo', '--name', '--idea', '--profile', '--packet',
+  '--project', '--modules', '--evidence', '--file', '--ref', '--title'
+]);
 const positional = rest.filter((item, index) => !item.startsWith('-') && !(index > 0 && VALUE_FLAGS.has(rest[index - 1])));
 
 const USAGE = `vibecode like a dev — from one paragraph to a spec an agent can execute
@@ -51,6 +61,18 @@ Usage
   vld change archive <change-dir> <packet-dir> [--profile <p>]
                                      fold an applied change into the profile's overlay stack
   vld change init <dir>              write change.json to fill in
+  vld artifact list|init|validate|status <type> [id] [--project <dir>]
+                                     generate and validate product, architecture, delivery, review and QA artifacts
+  vld store init <dir> [--id <id>] | add <id> <git-url> | update|status [id]
+                                     fetch, pin and verify read-only Git-backed shared delivery stores
+  vld module list|enable|status|verify [ids] [--project <dir>] [--json]
+                                     manage version-locked optional delivery modules
+  vld bundle list|show|apply <id> [--profile <file>] [--project <dir>] [--dry-run]
+                                     apply a conservative profile/module starter bundle
+  vld agent list|install|status [id] [--project <dir>] [--force] [--json]
+                                     install or inspect generated Codex, Claude Code or Copilot handoffs
+  vld workflow list|lint|run|status|complete <id> [step] [--project <dir>]
+                                     typed resumable workflows; \`run\` previews unless --execute is supplied
   vld mcp                            run the MCP server over stdio
   vld index [--check]                rebuild primitives/index.json
 
@@ -511,6 +533,325 @@ Next
 `);
 }
 
+function reportModuleStatus(status, { json = false, verify = false } = {}) {
+  if (json) {
+    console.log(JSON.stringify(status, null, 2));
+  } else {
+    console.log(`\nmodules · ${displayPath(status.project)}\n`);
+    if (status.modules.length === 0) console.log('  · no optional modules enabled');
+    for (const module of status.modules) {
+      console.log(`  ${status.drift.some((entry) => entry.id === module.id) ? '!' : '✓'} ${module.id.padEnd(14)} ${module.version} · ${module.title}`);
+    }
+    for (const entry of status.drift) console.log(`  ! ${entry.id}: ${entry.reason}`);
+    for (const error of status.errors) console.log(`  ✗ ${error}`);
+    console.log(`\n${status.ok ? 'PASS' : 'FAIL'} · ${status.modules.length} enabled module(s)${verify ? ' · lock verification' : ''}\n`);
+  }
+  if (!status.ok) process.exit(1);
+}
+
+function runArtifact() {
+  const [action = 'list', kind, id] = positional;
+  const project = option('--project', '.');
+  const common = { projectDir: project, packetDir: option('--packet', null), profilePath: option('--profile', null), id: id ?? null, file: option('--file', null) };
+  try {
+    if (action === 'list') {
+      const types = listArtifacts();
+      if (hasFlag('--json')) console.log(JSON.stringify(types, null, 2));
+      else { console.log('\nVLD validated artifacts\n'); for (const type of types) console.log(`  ${type.id.padEnd(24)} ${type.module.padEnd(14)} ${type.title}`); console.log(''); }
+      return;
+    }
+    if (action === 'init') {
+      if (!kind) fail('Usage: vld artifact init <type> [id] [--project <dir>] [--packet <dir>]');
+      const result = initArtifact({ ...common, kind, out: option('--out', null), force: hasFlag('--force') });
+      if (hasFlag('--json')) console.log(JSON.stringify(result, null, 2));
+      else console.log(`\n✓ wrote ${displayPath(result.file)}\n\n  Fill the artifact, then run:\n  vld artifact validate ${kind}${id ? ` ${id}` : ''} --project ${displayPath(result.project)} --strict\n`);
+      return;
+    }
+    if (action === 'validate') {
+      if (!kind) fail('Usage: vld artifact validate <type> [id] [--strict] [--project <dir>]');
+      const report = validateArtifact({ ...common, kind, strict: hasFlag('--strict') });
+      if (hasFlag('--json')) console.log(JSON.stringify(report, null, 2));
+      else { console.log(`\nartifact validate · ${displayPath(report.file)}\n`); for (const e of report.errors) console.log(`  ✗ ${e}`); for (const w of report.warnings) console.log(`  ! ${w}`); console.log(`\n${hasFlag('--strict') ? report.strictOk ? 'PASS' : 'FAIL' : report.ok ? 'PASS' : 'FAIL'}\n`); }
+      if (hasFlag('--strict') ? !report.strictOk : !report.ok) process.exit(1);
+      return;
+    }
+    if (action === 'status') {
+      const report = artifactStatus({ projectDir: project, packetDir: option('--packet', null) });
+      if (hasFlag('--json')) console.log(JSON.stringify(report, null, 2));
+      else { console.log('\nartifacts\n'); for (const entry of report) console.log(`  ${entry.exists && entry.ok ? '✓' : entry.exists ? '!' : '·'} ${entry.id.padEnd(24)} ${entry.exists ? displayPath(entry.file) : 'not created'}`); console.log(''); }
+      return;
+    }
+    fail('Usage: vld artifact list|init|validate|status');
+  } catch (error) { fail(error.message); }
+}
+
+function runStore() {
+  const [action = 'status', id, repository] = positional;
+  const project = option('--project', '.');
+  try {
+    if (action === 'init') {
+      if (!id) fail('Usage: vld store init <directory> [--id <store-id>] [--title <title>]');
+      const result = initStore({ directory: id, id: option('--id', null), title: option('--title', null), force: hasFlag('--force') });
+      if (hasFlag('--json')) console.log(JSON.stringify(result, null, 2));
+      else console.log(`\n✓ wrote shared store skeleton in ${displayPath(result.directory)}\n\n  Add reviewed assets, commit it with Git, then consume it with:\n  vld store add ${result.manifest.id} <git-url> --project <project>\n`);
+      return;
+    }
+    if (action === 'add') {
+      if (!id || !repository) fail('Usage: vld store add <id> <git-url> [--ref <branch-or-tag>] [--project <dir>]');
+      const result = addStore({ projectDir: project, id, repository, ref: option('--ref', null), refresh: hasFlag('--refresh') });
+      if (hasFlag('--json')) console.log(JSON.stringify(result, null, 2));
+      else console.log(`\n✓ ${result.refreshed ? 'refreshed' : 'locked'} store ${result.store.id}\n\n  commit    ${result.store.commit}\n  assets    ${result.store.assets.length}\n  cache     ${displayPath(path.join(result.project, '.vld', 'stores', result.store.id))}\n  lock      ${displayPath(result.file)}\n`);
+      return;
+    }
+    if (action === 'update') {
+      if (!id) fail('Usage: vld store update <id> [--project <dir>]');
+      const result = refreshStore({ projectDir: project, id });
+      if (hasFlag('--json')) console.log(JSON.stringify(result, null, 2));
+      else console.log(`\n✓ refreshed store ${result.store.id} at ${result.store.commit}\n`);
+      return;
+    }
+    if (action === 'status' || action === 'list') {
+      const report = action === 'list' ? readStoreState(project) : storeStatus(project, id ?? null);
+      if (hasFlag('--json')) console.log(JSON.stringify(action === 'list' ? { ...report, stores: report.state?.stores ?? [] } : report, null, 2));
+      else {
+        const stores = action === 'list' ? report.state?.stores ?? [] : report.stores;
+        console.log(`\nshared stores · ${displayPath(report.project)}\n`);
+        for (const store of stores) console.log(`  ${store.ok === false ? '!' : '✓'} ${store.id.padEnd(20)} ${(store.title ?? '').slice(0, 45)}${store.commit ? ` · ${store.commit.slice(0, 12)}` : ''}`);
+        for (const error of report.errors ?? []) console.log(`  ✗ ${error}`);
+        if (action === 'status') for (const store of stores) for (const drift of store.drift ?? []) console.log(`  ! ${store.id}: ${drift}`);
+        console.log(`\n${report.ok === false ? 'FAIL' : 'PASS'} · ${stores.length} locked store(s)\n`);
+      }
+      if (report.ok === false) process.exit(1);
+      return;
+    }
+    fail('Usage: vld store init|add|update|list|status');
+  } catch (error) { fail(error.message); }
+}
+
+function runModule() {
+  const [action = 'list', ids] = positional;
+  const project = option('--project', '.');
+  try {
+    if (action === 'list') {
+      const catalogue = listModules();
+      if (hasFlag('--json')) {
+        console.log(JSON.stringify(catalogue, null, 2));
+      } else {
+        console.log('\nVLD capability modules\n');
+        for (const module of catalogue.modules) {
+          console.log(`  ${module.id.padEnd(14)} ${module.version.padEnd(8)} ${module.title}`);
+          console.log(`  ${''.padEnd(14)} ${''.padEnd(8)} ${module.summary}`);
+        }
+        for (const error of catalogue.errors) console.log(`  ✗ ${error}`);
+        console.log('');
+      }
+      if (catalogue.errors.length > 0) process.exit(1);
+      return;
+    }
+    if (action === 'enable') {
+      const result = enableModules({ projectDir: project, ids: ids ?? option('--modules', '') });
+      if (hasFlag('--json')) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.log(`\n✓ modules ${result.changed ? 'updated' : 'already enabled'} in ${displayPath(result.project)}\n`);
+        console.log(`  enabled  ${result.enabled.join(', ')}`);
+        console.log(`  added    ${result.added.length ? result.added.join(', ') : 'none'}`);
+        console.log(`  refreshed ${result.updated.length ? result.updated.join(', ') : 'none'}`);
+        console.log(`  lock     ${displayPath(result.file)}\n`);
+      }
+      return;
+    }
+    if (action === 'status' || action === 'verify') {
+      reportModuleStatus(moduleStatus(project), { json: hasFlag('--json'), verify: action === 'verify' });
+      return;
+    }
+    fail('Usage: vld module list|enable <ids>|status|verify [--project <dir>]');
+  } catch (error) {
+    fail(error.message);
+  }
+}
+
+function runBundle() {
+  const [action = 'list', id] = positional;
+  try {
+    if (action === 'list') {
+      const catalogue = listBundles();
+      if (hasFlag('--json')) {
+        console.log(JSON.stringify(catalogue, null, 2));
+      } else {
+        console.log('\nVLD starter bundles\n');
+        for (const bundle of catalogue.bundles) {
+          console.log(`  ${bundle.id.padEnd(22)} ${bundle.title}`);
+          console.log(`  ${''.padEnd(22)} ${bundle.summary}`);
+        }
+        for (const error of catalogue.errors) console.log(`  ✗ ${error}`);
+        console.log('');
+      }
+      if (catalogue.errors.length > 0) process.exit(1);
+      return;
+    }
+    if (action === 'show') {
+      if (!id) fail('Usage: vld bundle show <id>');
+      console.log(JSON.stringify(getBundle(id), null, 2));
+      return;
+    }
+    if (action === 'apply') {
+      if (!id) fail('Usage: vld bundle apply <id> [--profile <file>] [--project <dir>] [--dry-run]');
+      const result = applyBundle({
+        id,
+        projectDir: option('--project', '.'),
+        profilePath: option('--profile', null),
+        dryRun: hasFlag('--dry-run')
+      });
+      if (hasFlag('--json')) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.log(`\n${result.dryRun ? '· would apply' : '✓ applied'} bundle ${result.bundle.id} to ${displayPath(result.project)}\n`);
+        console.log(`  profile   ${displayPath(result.profilePath)} ${result.changed ? (result.dryRun ? '(would update)' : '(updated)') : '(unchanged)'}`);
+        const additions = [
+          ...result.changes.traits.map((item) => `trait:${item}`),
+          ...result.changes.risks.map((item) => `risk:${item}=true`),
+          ...result.changes.overlays.map((item) => `overlay:${item}`),
+          ...result.changes.constraints.map((item) => `constraint:${item}`)
+        ];
+        console.log(`  additions ${additions.length ? additions.join(', ') : 'none'}`);
+        console.log(`  modules   ${result.dryRun ? result.bundle.modules.join(', ') : result.modules.state.modules.map((entry) => entry.id).join(', ')}`);
+        console.log(`  workflows ${result.workflows.join(', ')}`);
+        console.log(`\nNext\n  vld agent install codex --project ${displayPath(result.project)}\n  vld workflow run discovery --project ${displayPath(result.project)} --profile ${displayPath(result.profilePath)}\n`);
+      }
+      return;
+    }
+    fail('Usage: vld bundle list|show <id>|apply <id>');
+  } catch (error) {
+    fail(error.message);
+  }
+}
+
+function runAgent() {
+  const [action = 'list', id] = positional;
+  const project = option('--project', '.');
+  try {
+    if (action === 'list') {
+      const catalogue = listAdapters();
+      if (hasFlag('--json')) {
+        console.log(JSON.stringify(catalogue, null, 2));
+      } else {
+        console.log('\nVLD agent adapters\n');
+        for (const adapter of catalogue.adapters) console.log(`  ${adapter.id.padEnd(18)} ${adapter.title} → ${adapter.target}`);
+        for (const error of catalogue.errors) console.log(`  ✗ ${error}`);
+        console.log('');
+      }
+      if (catalogue.errors.length > 0) process.exit(1);
+      return;
+    }
+    if (action === 'install') {
+      if (!id) fail('Usage: vld agent install <codex|claude-code|github-copilot> [--project <dir>]');
+      const result = installAgent({ id, projectDir: project, force: hasFlag('--force') });
+      if (hasFlag('--json')) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.log(`\n✓ installed ${result.adapter.title} in ${displayPath(result.project)}\n`);
+        for (const file of result.files) console.log(`  ${file.changed ? 'written' : 'kept   '}  ${file.path}`);
+        console.log(`\n  modules  ${result.modules.length ? result.modules.join(', ') : 'none enabled'}`);
+        console.log(`  state    ${displayPath(result.stateFile)}\n`);
+      }
+      return;
+    }
+    if (action === 'status') {
+      const status = agentStatus(project, id ?? null);
+      if (hasFlag('--json')) {
+        console.log(JSON.stringify(status, null, 2));
+      } else {
+        console.log(`\nagents · ${displayPath(status.project)}\n`);
+        for (const adapter of status.adapters) {
+          console.log(`  ${adapter.drift.length ? '!' : adapter.installed ? '✓' : '·'} ${adapter.id.padEnd(18)} ${adapter.installed ? 'installed' : 'not installed'}`);
+          for (const drift of adapter.drift) console.log(`    ! ${drift}`);
+        }
+        for (const error of status.errors) console.log(`  ✗ ${error}`);
+        console.log(`\n${status.ok ? 'PASS' : 'FAIL'}\n`);
+      }
+      if (!status.ok) process.exit(1);
+      return;
+    }
+    fail('Usage: vld agent list|install <id>|status [id] [--project <dir>]');
+  } catch (error) {
+    fail(error.message);
+  }
+}
+
+function printWorkflow(result, { preview = false } = {}) {
+  console.log(`\nworkflow · ${result.workflow.id} — ${result.workflow.title}${preview ? ' (preview)' : ''}\n`);
+  for (const step of result.steps ?? []) {
+    const marker = step.status === 'complete' ? '✓' : step.status === 'ready' ? '→' : step.status === 'failed' ? '✗' : '·';
+    console.log(`  ${marker} ${step.id.padEnd(22)} ${step.type.padEnd(14)} ${step.status}`);
+    if (step.status === 'ready' && ['human-input', 'agent-handoff', 'approval'].includes(step.type)) {
+      console.log(`    evidence required: vld workflow complete ${result.workflow.id} ${step.id} --evidence "…" --project ${displayPath(result.project)}`);
+    }
+  }
+  for (const entry of result.executed ?? []) console.log(`  ${entry.status === 'complete' ? '✓' : '✗'} executed ${entry.id}: ${entry.evidence.type === 'command' ? entry.evidence.argv.join(' ') : entry.evidence.type}`);
+  console.log('');
+}
+
+function runWorkflowCommand() {
+  const [action = 'list', id, stepId] = positional;
+  const project = option('--project', '.');
+  const context = { profile: option('--profile', null), packet: option('--packet', null), repo: option('--repo', null) };
+  try {
+    if (action === 'list') {
+      const catalogue = listWorkflows();
+      if (hasFlag('--json')) console.log(JSON.stringify(catalogue, null, 2));
+      else {
+        console.log('\nVLD workflows\n');
+        for (const workflow of catalogue.workflows) console.log(`  ${workflow.id.padEnd(22)} ${workflow.title}`);
+        for (const error of catalogue.errors) console.log(`  ✗ ${error}`);
+        console.log('');
+      }
+      if (catalogue.errors.length > 0) process.exit(1);
+      return;
+    }
+    if (action === 'lint') {
+      if (id) {
+        const workflow = getWorkflow(id);
+        const result = { workflows: [workflow], errors: [] };
+        if (hasFlag('--json')) console.log(JSON.stringify(result, null, 2));
+        else console.log(`\nPASS · workflow ${workflow.id} is valid\n`);
+      } else {
+        const catalogue = listWorkflows();
+        if (hasFlag('--json')) console.log(JSON.stringify(catalogue, null, 2));
+        else console.log(`\n${catalogue.errors.length ? 'FAIL' : 'PASS'} · ${catalogue.workflows.length} workflow(s) checked\n`);
+        if (catalogue.errors.length > 0) process.exit(1);
+      }
+      return;
+    }
+    if (action === 'run') {
+      if (!id) fail('Usage: vld workflow run <id> [--execute] [--profile <file>] [--packet <dir>] [--project <dir>]');
+      const result = runWorkflow({ id, projectDir: project, context, execute: hasFlag('--execute'), reset: hasFlag('--reset') });
+      if (hasFlag('--json')) console.log(JSON.stringify(result, null, 2));
+      else printWorkflow(result, { preview: !hasFlag('--execute') });
+      if ((result.executed ?? []).some((entry) => entry.status === 'failed')) process.exit(1);
+      return;
+    }
+    if (action === 'status') {
+      if (!id) fail('Usage: vld workflow status <id> [--project <dir>]');
+      const result = workflowStatus({ id, projectDir: project });
+      if (hasFlag('--json')) console.log(JSON.stringify(result, null, 2));
+      else printWorkflow(result);
+      return;
+    }
+    if (action === 'complete') {
+      if (!id || !stepId) fail('Usage: vld workflow complete <id> <step> --evidence <note> [--project <dir>]');
+      const completed = completeWorkflowStep({ id, stepId, projectDir: project, evidence: option('--evidence', null) });
+      const result = workflowStatus({ id, projectDir: project });
+      if (hasFlag('--json')) console.log(JSON.stringify({ ...completed, steps: result.steps }, null, 2));
+      else printWorkflow(result);
+      return;
+    }
+    fail('Usage: vld workflow list|lint [id]|run|status|complete');
+  } catch (error) {
+    fail(error.message);
+  }
+}
+
 function runMcp() {
   import('./lib/mcp.mjs').then(({ serve, TOOLS }) => {
     console.error(`vibecode-like-a-dev MCP server · ${TOOLS.length} tools · stdio`);
@@ -545,6 +886,24 @@ switch (command) {
     break;
   case 'change':
     runChange();
+    break;
+  case 'artifact':
+    runArtifact();
+    break;
+  case 'store':
+    runStore();
+    break;
+  case 'module':
+    runModule();
+    break;
+  case 'bundle':
+    runBundle();
+    break;
+  case 'agent':
+    runAgent();
+    break;
+  case 'workflow':
+    runWorkflowCommand();
     break;
   case 'mcp':
     runMcp();

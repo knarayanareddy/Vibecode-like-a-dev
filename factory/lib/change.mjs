@@ -405,6 +405,7 @@ function tasksMarkdown(plan) {
   lines.push('## 1. Approve the intent');
   lines.push('');
   lines.push(box('Read `proposal.md`. Reject it here if the blast radius is wrong: rejecting a spec is an hour, rejecting an implementation is a week.'));
+  lines.push(box('Fill and review `design.md`: decisions, rejected alternatives, risks and rollback must be explicit before implementation.'));
   lines.push(box('Confirm `spec.after.json` is the manifest you want. It is a diff of intent, not a copy of the code.'));
   lines.push('');
 
@@ -446,9 +447,29 @@ function tasksMarkdown(plan) {
   return `${lines.join('\n')}\n`;
 }
 
+function designMarkdown(plan) {
+  const { change, impact, blastRadius, added, modified, removed } = plan;
+  const lines = [
+    `# Design for ${change.id}`,'',
+    `**Status:** Proposed · **Impact:** ${impact} · **Risk:** ${change.risk}`,'',
+    '## Context','',
+    `This change touches ${blastRadius.areas.join(', ')} and changes ${added.length} added, ${modified.length} modified and ${removed.length} removed requirement(s).`,'',
+    '## Decisions','',
+    '- [Record the implementation boundary, data/contract decision and rationale before changing code.]','',
+    '## Alternatives Considered','',
+    '- [Record a rejected alternative and the reason it is unsafe, too costly or does not meet the requirements.]','',
+    '## Risks and Rollback','',
+    change.rollback ?? 'Revert the change; document any data restoration step before approval.','',
+    '## Requirement Links','',
+    ...[...added.map((r) => `- ${r.id} — ${r.key}`), ...modified.map((r) => `- ${r.target.id} — ${r.target.key}`), ...removed.map((r) => `- ${r.target.id} — ${r.target.key}`)], ''
+  ];
+  return `${lines.join('\n')}\n`;
+}
+
 export function renderChange(plan) {
   const files = new Map();
   files.set('proposal.md', proposalMarkdown(plan));
+  files.set('design.md', designMarkdown(plan));
   files.set('tasks.md', tasksMarkdown(plan));
   files.set('delta.json', `${JSON.stringify(
     {
@@ -756,6 +777,7 @@ export function verifyChange(changeDir) {
   const deltaPath = path.join(changeDir, 'delta.json');
   if (!existsSync(deltaPath)) return { ok: false, errors: ['no delta.json in this change directory'], warnings, passes };
   if (!existsSync(path.join(changeDir, 'proposal.md'))) errors.push('no proposal.md: a change needs its argument written down');
+  if (!existsSync(path.join(changeDir, 'design.md'))) errors.push('no design.md: a change needs its implementation decisions recorded');
   if (!existsSync(path.join(changeDir, 'tasks.md'))) errors.push('no tasks.md: a change needs its work order');
   if (!existsSync(path.join(changeDir, 'spec.after.json'))) errors.push('no spec.after.json: the resulting manifest is missing');
 

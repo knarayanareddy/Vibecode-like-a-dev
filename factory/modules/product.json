@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "product",
+  "version": "0.1.0",
+  "title": "Product discovery",
+  "summary": "Turn an approved problem statement into a bounded brief, measurable outcomes and explicit assumptions.",
+  "capabilities": ["brief", "problem-framing", "success-measures"],
+  "outputs": ["product brief", "assumption register", "success measures"],
+  "requires": []
+}

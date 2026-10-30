@@ -7,6 +7,7 @@
 
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -30,6 +31,11 @@ const payload = (response) => JSON.parse(response.result.content[0].text);
 test('initialize advertises tools and an instruction to compute rigor first', () => {
   const response = handleMessage({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05' } });
   assert.equal(response.result.serverInfo.name, 'vibecode-like-a-dev');
+  assert.equal(
+    response.result.serverInfo.version,
+    JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version,
+    'MCP metadata and the package report the same release'
+  );
   assert.ok(response.result.capabilities.tools);
   assert.match(response.result.instructions, /compute_rigor/);
 });

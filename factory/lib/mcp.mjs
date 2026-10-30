@@ -18,7 +18,10 @@ import { buildPlan, loadCatalog, loadPolicy, loadRouting } from './planner.mjs';
 import { normalizeProfile, validateProfile } from './profile.mjs';
 
 const PROTOCOL_VERSION = '2024-11-05';
-const SERVER_INFO = { name: 'vibecode-like-a-dev', version: '0.1.0' };
+// MCP clients display this in their server list, so it must be the package version
+// rather than a second literal that can silently drift from `vld --version`.
+const PACKAGE_VERSION = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
+const SERVER_INFO = { name: 'vibecode-like-a-dev', version: PACKAGE_VERSION };
 
 const PRIMITIVE_ROOT = path.join(ROOT, 'primitives');
 

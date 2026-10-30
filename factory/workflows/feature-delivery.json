@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "id": "feature-delivery",
+  "version": "0.1.0",
+  "title": "Feature delivery",
+  "summary": "Move an approved feature from deterministic planning through agent handoff, review and packet verification.",
+  "requiresModules": ["product", "architecture", "delivery", "review", "qa"],
+  "steps": [
+    {
+      "id": "confirm-intent",
+      "type": "human-input",
+      "description": "Confirm scope, risks and the profile before running the feature workflow."
+    },
+    {
+      "id": "plan",
+      "type": "command",
+      "dependsOn": ["confirm-intent"],
+      "description": "Review the selected requirements, practices and gates.",
+      "run": ["plan", "{profile}"]
+    },
+    {
+      "id": "design-handoff",
+      "type": "agent-handoff",
+      "module": "architecture",
+      "skill": "vld-feature-delivery",
+      "dependsOn": ["plan"],
+      "description": "Have an agent prepare implementation-oriented design evidence without changing the compiled policy."
+    },
+    {
+      "id": "approve-plan",
+      "type": "approval",
+      "dependsOn": ["design-handoff"],
+      "description": "Approve the plan and the declared implementation evidence before code changes begin."
+    },
+    {
+      "id": "compile-packet",
+      "type": "command",
+      "dependsOn": ["approve-plan"],
+      "description": "Compile the approved profile into a portable VLD packet.",
+      "run": ["compile", "{profile}", "-o", "{packet}"]
+    },
+    {
+      "id": "implement-handoff",
+      "type": "agent-handoff",
+      "module": "delivery",
+      "skill": "vld-feature-delivery",
+      "dependsOn": ["compile-packet"],
+      "description": "Implement against requirement anchors and packet gates; do not claim completion without executable evidence."
+    },
+    {
+      "id": "verify-packet",
+      "type": "validation",
+      "dependsOn": ["implement-handoff"],
+      "description": "Validate the compiled packet before its generated CI guards are accepted.",
+      "run": ["verify", "{packet}"]
+    },
+    {
+      "id": "review-evidence",
+      "type": "approval",
+      "dependsOn": ["verify-packet"],
+      "description": "Review requirement anchors, test results and residual risk before release."
+    }
+  ]
+}

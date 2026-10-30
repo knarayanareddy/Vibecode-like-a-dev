@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "claude-code",
+  "version": "0.1.0",
+  "title": "Claude Code commands",
+  "target": ".claude/commands",
+  "format": "command",
+  "files": ["vld-discovery.md", "vld-feature-delivery.md"]
+}

@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "qa",
+  "version": "0.1.0",
+  "title": "Quality assurance",
+  "summary": "Translate critical acceptance criteria into evidence-oriented test strategy and release checks.",
+  "capabilities": ["test-strategy", "e2e-planning", "release-evidence"],
+  "outputs": ["test strategy", "end-to-end scenarios", "verification evidence"],
+  "requires": ["delivery"]
+}

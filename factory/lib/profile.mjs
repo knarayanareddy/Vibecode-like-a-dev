@@ -143,6 +143,25 @@ export function validateProfile(profile) {
     }
   }
 
+  // Both fields are rendered into the packet. Validate their shape here rather
+  // than letting a malformed optional value turn into an emitter stack trace.
+  // Newlines would also let profile data become Markdown structure.
+  if (typeof profile.constraints.stack !== 'string' || profile.constraints.stack.trim() === '') {
+    errors.push('constraints.stack: must be a non-empty string');
+  } else if (/[\r\n]/.test(profile.constraints.stack)) {
+    errors.push('constraints.stack: must be one line');
+  }
+
+  if (!Array.isArray(profile.constraints.mustUse)) {
+    errors.push('constraints.mustUse: must be a list of one-line strings');
+  } else {
+    profile.constraints.mustUse.forEach((entry, index) => {
+      if (typeof entry !== 'string' || entry.trim() === '' || /[\r\n]/.test(entry)) {
+        errors.push(`constraints.mustUse[${index}]: must be a non-empty one-line string`);
+      }
+    });
+  }
+
   return errors;
 }
 

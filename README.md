@@ -142,6 +142,57 @@ The selection comes from the same policy as the CLI, so an agent cannot invent i
 { "mcpServers": { "vibecode": { "command": "node", "args": ["/path/to/factory/cli.mjs", "mcp"] } } }
 ```
 
+## Optional platform layer — one tool, without one monolith
+
+The compiler remains deliberately deterministic. Optional modules, bundles, agent handoffs and workflows add a broader product-to-release loop **without** putting a model call, credentials or arbitrary shell execution in `plan`, `compile` or `verify`.
+
+```bash
+# Start from a conservative, reviewable bundle. It only adds declared signals;
+# it never lowers risk or replaces your project stage.
+vld bundle apply startup-saas --profile profile.json
+
+# Inspect or opt into the version-locked delivery disciplines.
+vld module list
+vld module enable product,architecture,delivery,review,qa --project .
+
+# Generate validated, human-authored artifacts. Templates start as drafts;
+# strict validation rejects placeholders, draft status and missing requirement evidence.
+vld artifact init product-brief --project . --packet specs
+vld artifact init architecture-decision auth-boundary --project . --packet specs
+vld artifact validate product-brief --project . --packet specs --strict
+
+# Share advisory, reviewable delivery guidance without changing the compiler.
+vld store init ../team-playbook --id team-playbook
+# Commit ../team-playbook with Git, then pin its resolved commit in this project:
+vld store add team-playbook https://github.com/acme/team-playbook.git --ref main --project .
+vld store status --project .
+vld store update team-playbook --project .  # explicit refresh after review
+
+vld module verify --project .
+
+# Generate handoffs for a local coding-agent environment. This installs files;
+# it does not invoke a model or use credentials.
+vld agent install codex --project .
+vld agent install claude-code --project .
+vld agent status --project .
+
+# Preview a typed workflow first. Only --execute writes resumable .vld state.
+vld workflow run discovery --profile profile.json
+vld workflow run discovery --profile profile.json --execute
+vld workflow complete discovery capture-intent \
+  --evidence "Product owner reviewed users, non-goals and risk flags."
+vld workflow run discovery --execute
+```
+
+| Layer | Purpose | Guardrail |
+| --- | --- | --- |
+| **Modules** | Product discovery, architecture, delivery, review and QA capabilities | SHA-256 locked under `.vld/modules.json`; dependency closure is explicit. |
+| **Bundles** | `startup-saas` and `regulated-payments` starting points | May add traits, true risk signals and modules; cannot silently lower risk or replace a scalar decision. |
+| **Agent adapters** | Generated Codex, Claude Code and GitHub Copilot handoffs | Generated files and enabled module set are drift-checked; the adapter never runs a model. |
+| **Workflows** | Discovery, feature delivery and release readiness | Typed/resumable DAG; human and agent steps require explicit evidence; command steps can only run an allowlisted VLD argv, never a shell. |
+
+The result is one repository and one `vld` CLI, while the packet remains portable and small. Use the agent-facing modules where they help; use the compiler and generated gates as the authority. See [ADR-0002](docs/adr/0002-optional-platform-extensions.md) for the extension boundary and security model.
+
 ## What you get
 
 A tier-1 packet for a four-week MVP, 891 lines total:
@@ -428,7 +479,7 @@ factory/
     gate-runner.mjs    the gate checker shipped into every packet
   schema/
     spec.schema.json   the manifest contract
-  test/                152 tests: data integrity, planning, reproducibility, adoption,
+  test/                176 tests: data integrity, planning, reproducibility, adoption,
                        delta specs, overlays, gates, EARS, MCP protocol, routing & outcome evals
 profile.json           this repository's own profile
 specs/                 this repository's own compiled packet, guarded in CI
@@ -446,7 +497,7 @@ docs/                  research notes, authoring guide, stress test, landscape s
 ```
 
 ```bash
-npm test        # 152 tests
+npm test        # 176 tests
 npm run eval    # library health + packet specificity + 74-prompt routing + 24-task outcome calibration
 npm run stress  # 10 representative + 24 hostile ideas, and 6 refusals; scored on soundness
 npm run check   # lint + index + tests + verify + self-guard + gates + eval + stress

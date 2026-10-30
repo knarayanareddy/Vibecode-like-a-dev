@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "startup-saas",
+  "version": "0.1.0",
+  "title": "Startup SaaS delivery",
+  "summary": "A compact product-to-delivery setup for a public-facing SaaS product with accounts and persistent customer data.",
+  "profile": {
+    "traits": ["auth", "persistence"],
+    "risks": { "publicFacing": true }
+  },
+  "modules": ["product", "architecture", "delivery", "review", "qa"],
+  "workflows": ["discovery", "feature-delivery", "release-readiness"]
+}
