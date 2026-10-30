@@ -50,6 +50,8 @@ test('builtin workflows validate and reject cycles, arbitrary shell-like actions
   assert.match(errors, /only plan, compile, verify are allowed/);
   assert.match(errors, /workflow dependency cycle/);
   assert.match(errors, /agent handoff needs a module id/);
+  const badArtifactGate = { ...malformed, id: 'bad-artifact-flow', steps: [{ id: 'evidence', type: 'artifact-validation', description: 'This must name a known artifact type and never accept arbitrary commands.', artifacts: ['invented-artifact'] }] };
+  assert.match(validateWorkflow(badArtifactGate).join('\n'), /unknown artifact type/);
 });
 
 test('discovery workflow starts only on explicit execute, runs safe VLD commands, and resumes through human evidence', (t) => {
@@ -108,6 +110,16 @@ test('feature workflow compiles and verifies a real packet, but executable steps
   assert.ok(complete.steps.every((step) => step.status === 'complete'));
   const state = JSON.parse(readFileSync(path.join(project, '.vld', 'workflows', 'feature-delivery.json'), 'utf8'));
   assert.equal(state.steps['verify-packet'].evidence.type, 'command');
+
+  // The release workflow's typed artifact validator runs in-process, stores only a
+  // bounded digest/summary, and fails rather than treating absent human evidence
+  // as a self-certified release gate.
+  runWorkflow({ id: 'release-readiness', projectDir: project, context: { packet }, execute: true });
+  completeWorkflowStep({ id: 'release-readiness', stepId: 'collect-evidence', projectDir: project, evidence: 'Release evidence was collected for the accountable review decision.' });
+  const release = runWorkflow({ id: 'release-readiness', projectDir: project, execute: true });
+  assert.deepEqual(release.executed.map((entry) => [entry.id, entry.status]), [['verify-packet', 'complete'], ['verify-release-artifacts', 'failed']]);
+  assert.equal(release.state.steps['verify-release-artifacts'].evidence.type, 'artifact-validation');
+  assert.match(release.state.steps['verify-release-artifacts'].evidence.reportDigest, /^[a-f0-9]{64}$/);
 });
 
 test('a failing workflow command persists a failure rather than pretending the step ran', (t) => {

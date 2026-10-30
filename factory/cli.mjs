@@ -13,7 +13,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { adoptRepo, isRemoteRepo, writeAdoptedProfile } from './lib/adopt.mjs';
-import { artifactStatus, initArtifact, listArtifacts, validateArtifact } from './lib/artifacts.mjs';
+import { artifactStatus, initArtifact, listArtifacts, validateArtifact, verifyArtifacts } from './lib/artifacts.mjs';
 import { agentStatus, installAgent, listAdapters } from './lib/agents.mjs';
 import { applyBundle, getBundle, listBundles } from './lib/bundles.mjs';
 import { CHANGE_TEMPLATE, applyChange, archiveChange, emitChange, planChange, verifyChange } from './lib/change.mjs';
@@ -40,7 +40,7 @@ const option = (name, fallback) => {
 };
 const VALUE_FLAGS = new Set([
   '-o', '--out', '--repo', '--name', '--idea', '--profile', '--packet',
-  '--project', '--modules', '--evidence', '--file', '--ref', '--title', '--from-store'
+  '--project', '--modules', '--evidence', '--file', '--ref', '--title', '--from-store', '--types'
 ]);
 const positional = rest.filter((item, index) => !item.startsWith('-') && !(index > 0 && VALUE_FLAGS.has(rest[index - 1])));
 
@@ -61,8 +61,8 @@ Usage
   vld change archive <change-dir> <packet-dir> [--profile <p>]
                                      fold an applied change into the profile's overlay stack
   vld change init <dir>              write change.json to fill in
-  vld artifact list|init|validate|status <type> [id] [--from-store store/asset] [--project <dir>]
-                                     generate and validate product, architecture, delivery, review and QA artifacts
+  vld artifact list|init|validate|verify|status <type> [id] [--from-store store/asset] [--project <dir>]
+                                     generate, validate and cross-check product, architecture, delivery, review and QA artifacts
   vld store init <dir> [--id <id>] | add <id> <git-url> | update|status [id] | assets|copy <id> [asset]
                                      fetch, pin and verify read-only Git-backed shared delivery stores
   vld module list|enable|status|verify [ids] [--project <dir>] [--json]
@@ -575,13 +575,26 @@ function runArtifact() {
       if (hasFlag('--strict') ? !report.strictOk : !report.ok) process.exit(1);
       return;
     }
+    if (action === 'verify') {
+      const report = verifyArtifacts({ projectDir: project, packetDir: option('--packet', null), kinds: option('--types', null) });
+      if (hasFlag('--json')) console.log(JSON.stringify(report, null, 2));
+      else {
+        console.log(`\nartifact verify · ${displayPath(report.project)}\n`);
+        for (const pass of report.passes) console.log(`  ✓ ${pass}`);
+        for (const warning of report.warnings) console.log(`  ! ${warning}`);
+        for (const error of report.errors) console.log(`  ✗ ${error}`);
+        console.log(`\n${report.ok ? 'PASS' : 'FAIL'} · ${report.artifacts.length} artifact(s) · ${report.requirements.length} packet requirement(s)\n`);
+      }
+      if (!report.ok) process.exit(1);
+      return;
+    }
     if (action === 'status') {
       const report = artifactStatus({ projectDir: project, packetDir: option('--packet', null) });
       if (hasFlag('--json')) console.log(JSON.stringify(report, null, 2));
       else { console.log('\nartifacts\n'); for (const entry of report) console.log(`  ${entry.exists && entry.ok ? '✓' : entry.exists ? '!' : '·'} ${entry.id.padEnd(24)} ${entry.exists ? displayPath(entry.file) : 'not created'}`); console.log(''); }
       return;
     }
-    fail('Usage: vld artifact list|init|validate|status');
+    fail('Usage: vld artifact list|init|validate|verify|status');
   } catch (error) { fail(error.message); }
 }
 

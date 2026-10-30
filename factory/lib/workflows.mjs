@@ -11,6 +11,7 @@ import { existsSync, readdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { ROOT } from './indexer.mjs';
+import { ARTIFACTS, verifyArtifacts } from './artifacts.mjs';
 import { requireVerifiedModules } from './modules.mjs';
 import {
   ID_PATTERN,
@@ -24,8 +25,8 @@ import {
 } from './extension-utils.mjs';
 
 export const WORKFLOWS_DIR = path.join(ROOT, 'factory', 'workflows');
-const STEP_TYPES = new Set(['human-input', 'agent-handoff', 'command', 'validation', 'approval', 'gate']);
-const EXECUTABLE_TYPES = new Set(['command', 'validation', 'gate']);
+const STEP_TYPES = new Set(['human-input', 'agent-handoff', 'command', 'validation', 'artifact-validation', 'approval', 'gate']);
+const EXECUTABLE_TYPES = new Set(['command', 'validation', 'artifact-validation', 'gate']);
 const MANUAL_TYPES = new Set(['human-input', 'agent-handoff', 'approval']);
 const ALLOWED_COMMANDS = new Set(['plan', 'compile', 'verify']);
 
@@ -66,11 +67,20 @@ export function validateWorkflow(workflow, expectedId = workflow?.id) {
     if (!STEP_TYPES.has(step.type)) errors.push(`${label}.type: must be ${[...STEP_TYPES].join(', ')}`);
     if (typeof step.description !== 'string' || step.description.trim().length < 20 || /[\r\n]/.test(step.description)) errors.push(`${label}.description: required one-line string of at least 20 characters`);
     if (step.dependsOn !== undefined && (!validStringList(step.dependsOn) || new Set(step.dependsOn).size !== step.dependsOn.length)) errors.push(`${label}.dependsOn: must be a unique list of step ids`);
-    if (EXECUTABLE_TYPES.has(step.type)) {
+    if (['command', 'validation', 'gate'].includes(step.type)) {
       if (!validStringList(step.run) || step.run.length < 1) errors.push(`${label}.run: executable steps require an argv list`);
       else if (!ALLOWED_COMMANDS.has(step.run[0])) errors.push(`${label}.run[0]: only ${[...ALLOWED_COMMANDS].join(', ')} are allowed in builtin workflows`);
     } else if (step.run !== undefined) {
-      errors.push(`${label}.run: only executable steps may run a command`);
+      errors.push(`${label}.run: only command, validation and gate steps may run an argv command`);
+    }
+    if (step.type === 'artifact-validation') {
+      if (!validStringList(step.artifacts) || step.artifacts.length < 1) errors.push(`${label}.artifacts: requires a non-empty list of artifact types`);
+      else {
+        if (new Set(step.artifacts).size !== step.artifacts.length) errors.push(`${label}.artifacts: artifact types must not repeat`);
+        for (const artifact of step.artifacts) if (!ARTIFACTS[artifact]) errors.push(`${label}.artifacts: unknown artifact type "${artifact}"`);
+      }
+    } else if (step.artifacts !== undefined) {
+      errors.push(`${label}.artifacts: only artifact-validation steps may declare artifacts`);
     }
     if (step.type === 'agent-handoff') {
       if (!step.module || !ID_PATTERN.test(step.module)) errors.push(`${label}.module: agent handoff needs a module id`);
@@ -257,6 +267,22 @@ function resolveArg(token, context) {
 }
 
 function runStep(step, context) {
+  if (step.type === 'artifact-validation') {
+    try {
+      const report = verifyArtifacts({ projectDir: context.project, packetDir: context.packet, kinds: step.artifacts });
+      return {
+        status: report.ok ? 'complete' : 'failed',
+        evidence: {
+          type: 'artifact-validation',
+          artifacts: [...step.artifacts],
+          reportDigest: digest({ artifacts: report.artifacts.map((artifact) => ({ kind: artifact.kind, id: artifact.id, strictOk: artifact.strictOk })), requirements: report.requirements, errors: report.errors, warnings: report.warnings }),
+          summary: report.ok ? `${report.artifacts.length} artifact(s) verified` : `${report.errors.length} artifact verification finding(s)`
+        }
+      };
+    } catch (error) {
+      return { status: 'failed', evidence: { type: 'artifact-validation', artifacts: [...step.artifacts], summary: error.message, reportDigest: digest(error.message) } };
+    }
+  }
   const argv = step.run.map((token) => resolveArg(token, context));
   const action = argv[0];
   if (!ALLOWED_COMMANDS.has(action)) throw extensionError(`workflow step "${step.id}" has a disallowed action`, 'DISALLOWED_WORKFLOW_COMMAND');

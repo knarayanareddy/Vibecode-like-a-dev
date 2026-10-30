@@ -149,6 +149,11 @@ test('public platform failures are clean usage/input errors, not agent invocatio
   assert.match(missingEvidence.stderr, /has not started/);
   assert.doesNotMatch(missingEvidence.stderr, /^\s+at\s/m);
 
+  const noArtifacts = await cli(['artifact', 'verify', '--project', project, '--json']);
+  assert.equal(noArtifacts.code, 1);
+  assert.equal(JSON.parse(noArtifacts.stdout).ok, false);
+  assert.equal(noArtifacts.stderr, '');
+
   const missingAdapter = await cli(['agent', 'install', 'invented-agent', '--project', project]);
   assert.equal(missingAdapter.code, 2);
   assert.match(missingAdapter.stderr, /unknown agent adapter/);

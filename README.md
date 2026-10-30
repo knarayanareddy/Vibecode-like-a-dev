@@ -160,6 +160,8 @@ vld module enable product,architecture,delivery,review,qa --project .
 vld artifact init product-brief --project . --packet specs
 vld artifact init architecture-decision auth-boundary --project . --packet specs
 vld artifact validate product-brief --project . --packet specs --strict
+# Strictly cross-check enabled artifact evidence against one compiled packet.
+vld artifact verify --project . --packet specs
 
 # Share advisory, reviewable delivery guidance without changing the compiler.
 vld store init ../team-playbook --id team-playbook
@@ -193,7 +195,7 @@ vld workflow run discovery --execute
 | **Modules** | Product discovery, architecture, delivery, review and QA capabilities | SHA-256 locked under `.vld/modules.json`; dependency closure is explicit. |
 | **Bundles** | `startup-saas` and `regulated-payments` starting points | May add traits, true risk signals and modules; cannot silently lower risk or replace a scalar decision. |
 | **Agent adapters** | Generated Codex, Claude Code and GitHub Copilot handoffs | Generated files and enabled module set are drift-checked; the adapter never runs a model. |
-| **Workflows** | Discovery, feature delivery and release readiness | Typed/resumable DAG; human and agent steps require explicit evidence; command steps can only run an allowlisted VLD argv, never a shell. |
+| **Workflows** | Discovery, feature delivery and release readiness | Typed/resumable DAG; human and agent steps require explicit evidence; command steps can only run an allowlisted VLD argv, and artifact validation is an in-process typed gate—not a shell escape hatch. |
 
 The result is one repository and one `vld` CLI, while the packet remains portable and small. Use the agent-facing modules where they help; use the compiler and generated gates as the authority. See [ADR-0002](docs/adr/0002-optional-platform-extensions.md) for the extension boundary and security model.
 
@@ -483,7 +485,7 @@ factory/
     gate-runner.mjs    the gate checker shipped into every packet
   schema/
     spec.schema.json   the manifest contract
-  test/                177 tests: data integrity, planning, reproducibility, adoption,
+  test/                178 tests: data integrity, planning, reproducibility, adoption,
                        delta specs, overlays, gates, EARS, MCP protocol, routing & outcome evals
 profile.json           this repository's own profile
 specs/                 this repository's own compiled packet, guarded in CI
@@ -501,7 +503,7 @@ docs/                  research notes, authoring guide, stress test, landscape s
 ```
 
 ```bash
-npm test        # 177 tests
+npm test        # 178 tests
 npm run eval    # library health + packet specificity + 74-prompt routing + 24-task outcome calibration
 npm run stress  # 10 representative + 24 hostile ideas, and 6 refusals; scored on soundness
 npm run check   # lint + index + tests + verify + self-guard + gates + eval + stress
