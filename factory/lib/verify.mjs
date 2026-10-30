@@ -13,6 +13,7 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { earsError } from './ears.mjs';
 import { loadIndex } from './indexer.mjs';
 import { loadPolicy } from './planner.mjs';
 
@@ -161,6 +162,34 @@ export function verifyPacket(packetDir, { repo = null, strict = false, policy = 
     passes.push(`all ${expectedGates.length} gates for tiers 0-${tier} present`);
   }
 
+  // 3b. every gate is a command, not a sentence
+  //
+  // A gate with no mechanism is the failure this packet exists to prevent, so a
+  // packet that lists gates but ships no runner is called out; one that ships a runner
+  // which has lost a rule is an error, because the missing rule is silent at run time.
+  const declared = (spec.gates ?? []).filter((gate) => gate.enforcement);
+  const runner = spec.gates?.[0]?.enforcement?.runner ?? 'enforcement/gates.mjs';
+  if (declared.length === 0) {
+    warnings.push(`no gate has an executable mechanism; recompile with the current generator to get ${runner}`);
+  } else {
+    const runnerPath = path.join(packetDir, runner);
+    if (!existsSync(runnerPath)) {
+      errors.push(`spec.json declares ${runner} but the packet does not contain it`);
+    } else {
+      const source = readFileSync(runnerPath, 'utf8');
+      const missing = (spec.gates ?? []).filter((gate) => !source.includes(`"${gate.id}"`)).map((gate) => gate.id);
+      if (missing.length > 0) errors.push(`${runner} has no rule for ${missing.join(', ')}`);
+      const fragments = [...new Set(declared.flatMap((gate) => gate.enforcement.files ?? []))];
+      const absent = fragments.filter((file) => !existsSync(path.join(packetDir, file)));
+      if (absent.length > 0) errors.push(`enforcement files declared but missing: ${absent.join(', ')}`);
+      const uncovered = (spec.gates ?? []).filter((gate) => !gate.enforcement).map((gate) => gate.id);
+      if (uncovered.length > 0) errors.push(`gate(s) with no mechanism: ${uncovered.join(', ')}`);
+      if (missing.length === 0 && absent.length === 0) {
+        passes.push(`${declared.length} gate(s) have an executable mechanism (${runner}${fragments.length ? ` + ${fragments.length} config fragment(s)` : ''})`);
+      }
+    }
+  }
+
   // 4. requirements
   const requirements = Array.isArray(spec.requirements) ? spec.requirements : [];
   if (requirements.length === 0) errors.push('spec.json has no requirements');
@@ -171,6 +200,11 @@ export function verifyPacket(packetDir, { repo = null, strict = false, policy = 
     if (!/^REQ-\d{3}$/.test(requirement.id ?? '')) errors.push(`invalid requirement id "${requirement.id}"`);
     if (!requirement.statement || String(requirement.statement).length < 40) {
       errors.push(`${requirement.id}: statement missing or too thin`);
+    } else {
+      // EARS shape, enforced: the test generator, the reviewer and the gate all read
+      // the same clauses, and none of them can do that with a run-on sentence.
+      const ears = earsError(requirement.statement);
+      if (ears) errors.push(`${requirement.id}: not an EARS requirement — ${ears}`);
     }
     if (!Array.isArray(requirement.acceptance) || requirement.acceptance.length === 0) {
       errors.push(`${requirement.id}: no acceptance criteria`);
@@ -183,6 +217,54 @@ export function verifyPacket(packetDir, { repo = null, strict = false, policy = 
     if (requirement.verify === 'automated' && !requirement.anchor) {
       errors.push(`${requirement.id}: automated requirement needs an anchor path`);
     }
+  }
+
+  const byPattern = new Map();
+  for (const requirement of requirements) {
+    const ears = earsError(requirement.statement);
+    if (ears) continue;
+    const pattern = /^(Where|While|When|If)\b/.exec(requirement.statement)?.[1] ?? 'The';
+    byPattern.set(pattern, (byPattern.get(pattern) ?? 0) + 1);
+  }
+  if (byPattern.size > 0) {
+    passes.push(
+      `${requirements.length} requirement statements parse as EARS (${[...byPattern.entries()].map(([shape, count]) => `${shape} ${count}`).join(', ')})`
+    );
+  }
+
+  // 4b. overlay provenance
+  const overlays = Array.isArray(spec.overlays) ? spec.overlays : [];
+  if (overlays.length > 0) {
+    const overlayIds = new Set(overlays.map((overlay) => overlay.id));
+    const gateIds = new Set((spec.gates ?? []).map((gate) => gate.id));
+    let claimed = 0;
+    for (const overlay of overlays) {
+      if (!['org', 'domain', 'team'].includes(overlay.layer)) {
+        errors.push(`overlay "${overlay.id}" has layer "${overlay.layer}"; expected org, domain or team`);
+      }
+      for (const gate of overlay.adds?.gates ?? []) {
+        claimed += 1;
+        if (!gateIds.has(gate)) errors.push(`overlay "${overlay.id}" adds gate ${gate}, which is not in spec.json`);
+      }
+      for (const key of overlay.adds?.requirements ?? []) {
+        claimed += 1;
+        const requirement = requirements.find((entry) => entry.key === key);
+        if (!requirement) errors.push(`overlay "${overlay.id}" adds requirement "${key}", which is not in spec.json`);
+        else if (!String(requirement.origin ?? '').includes(overlay.id)) {
+          errors.push(`${requirement.id} came from overlay "${overlay.id}" but does not say so in its origin`);
+        }
+      }
+    }
+    // The reverse direction: nothing may claim an overlay that is not listed.
+    for (const requirement of requirements) {
+      const origin = String(requirement.origin ?? 'catalog');
+      if (origin === 'catalog') continue;
+      const ids = origin.replace(/^overlay:/, '').split('+').map((entry) => entry.replace('overlay:', ''));
+      for (const id of ids) {
+        if (!overlayIds.has(id)) errors.push(`${requirement.id} claims overlay "${id}", which is not in spec.json`);
+      }
+    }
+    passes.push(`${overlays.length} overlay(s) applied, ${claimed} requirement/gate claim(s) resolved`);
   }
 
   // 5. primitive references still resolve

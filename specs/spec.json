@@ -8,6 +8,7 @@
   "project": {
     "name": "vibecode-like-a-dev",
     "title": "Vibecode Like A Dev",
+    "profile": "profile.json",
     "kind": "cli",
     "stage": "production",
     "idea": "A deterministic compiler for engineering discipline. A developer who can describe an app in one paragraph, or point at a repository they already have, runs it and gets a specification packet an agent can execute: requirements with acceptance criteria, a computed rigor tier, the gates that define done, and a script that fails CI when the spec and the code stop agreeing. Today those developers paste a prompt into an agent and inherit whatever engineering the model happened to infer, which is why the output rarely survives review, maintenance or a second contributor.",
@@ -54,6 +55,26 @@
     ],
     "check": "node specs/spec-check.mjs --repo ."
   },
+  "overlays": [
+    {
+      "id": "org-baseline",
+      "layer": "org",
+      "title": "The organisation's baseline",
+      "source": "factory/overlays/org-baseline.json",
+      "why": "Every project this organisation runs needs an owner for failure and a runbook before it can be called live. The catalog knows what a product needs; it cannot know who answers the page.",
+      "adds": {
+        "requirements": [
+          "ops.incident-response"
+        ],
+        "gates": [
+          "G1-INCIDENT"
+        ],
+        "practices": []
+      },
+      "modifies": [],
+      "removes": []
+    }
+  ],
   "primitives": [
     {
       "id": "product.product-brief",
@@ -61,7 +82,8 @@
       "path": "primitives/product/product-brief/SKILL.md",
       "why": "An agent fills every ambiguity silently. A written brief is the cheapest place to remove ambiguity.",
       "when": "always",
-      "enforces": []
+      "enforces": [],
+      "origin": "router"
     },
     {
       "id": "product.non-goals-and-scope",
@@ -71,7 +93,8 @@
       "when": "always",
       "enforces": [
         "core.non-goals"
-      ]
+      ],
+      "origin": "router"
     },
     {
       "id": "domain.ubiquitous-language",
@@ -79,7 +102,8 @@
       "path": "primitives/domain/ubiquitous-language/SKILL.md",
       "why": "Shared vocabulary is the highest-leverage defence against plausible-but-wrong generated code.",
       "when": "always",
-      "enforces": []
+      "enforces": [],
+      "origin": "router"
     },
     {
       "id": "testing.tdd-loop",
@@ -87,7 +111,8 @@
       "path": "primitives/testing/tdd-loop/SKILL.md",
       "why": "A failing test is the only instruction an agent cannot misinterpret.",
       "when": "always",
-      "enforces": []
+      "enforces": [],
+      "origin": "router"
     },
     {
       "id": "testing.acceptance-traceability",
@@ -97,7 +122,8 @@
       "when": "always",
       "enforces": [
         "spec.drift-guard"
-      ]
+      ],
+      "origin": "router"
     },
     {
       "id": "agent.handoff-packet",
@@ -105,7 +131,8 @@
       "path": "primitives/agent/handoff-packet/SKILL.md",
       "why": "The spec is useless if the agent that receives it cannot find the entry point.",
       "when": "always",
-      "enforces": []
+      "enforces": [],
+      "origin": "router"
     },
     {
       "id": "domain.aggregates-and-invariants",
@@ -116,7 +143,8 @@
       "enforces": [
         "payments.correctness",
         "core.domain-invariants"
-      ]
+      ],
+      "origin": "router"
     },
     {
       "id": "architecture.style-selection",
@@ -124,7 +152,8 @@
       "path": "primitives/architecture/style-selection/SKILL.md",
       "why": "Default to a modular monolith; distributed complexity must be justified, not inherited.",
       "when": "always",
-      "enforces": []
+      "enforces": [],
+      "origin": "router"
     },
     {
       "id": "security.secrets-and-supply-chain",
@@ -132,7 +161,8 @@
       "path": "primitives/security/secrets-and-supply-chain/SKILL.md",
       "why": "Leaked keys and unpinned dependencies are the two cheapest attacks on a new product.",
       "when": "tier gte 1",
-      "enforces": []
+      "enforces": [],
+      "origin": "router"
     },
     {
       "id": "delivery.ci-gates",
@@ -142,7 +172,8 @@
       "when": "tier gte 1",
       "enforces": [
         "core.runnable"
-      ]
+      ],
+      "origin": "router"
     },
     {
       "id": "product.user-journeys",
@@ -152,7 +183,8 @@
       "when": "always",
       "enforces": [
         "core.primary-journey"
-      ]
+      ],
+      "origin": "router"
     },
     {
       "id": "domain.bounded-contexts",
@@ -162,7 +194,8 @@
       "when": "tier gte 1",
       "enforces": [
         "auth.tenant-isolation"
-      ]
+      ],
+      "origin": "router"
     },
     {
       "id": "testing.test-budget",
@@ -170,7 +203,8 @@
       "path": "primitives/testing/test-budget/SKILL.md",
       "why": "Test suite shape must match risk: heavy on domain rules, thin on frameworks.",
       "when": "always",
-      "enforces": []
+      "enforces": [],
+      "origin": "router"
     },
     {
       "id": "agent.review-protocol",
@@ -178,7 +212,8 @@
       "path": "primitives/agent/review-protocol/SKILL.md",
       "why": "Self-review is theatre when the reviewer shares the author's blind spots.",
       "when": "tier gte 1",
-      "enforces": []
+      "enforces": [],
+      "origin": "router"
     },
     {
       "id": "architecture.ports-and-adapters",
@@ -189,7 +224,8 @@
       "enforces": [
         "library.api-stability",
         "cli.ergonomics"
-      ]
+      ],
+      "origin": "router"
     },
     {
       "id": "architecture.adr-log",
@@ -197,7 +233,8 @@
       "path": "primitives/architecture/adr-log/SKILL.md",
       "why": "Decisions without rationale get re-litigated on every agent session.",
       "when": "always",
-      "enforces": []
+      "enforces": [],
+      "origin": "router"
     },
     {
       "id": "architecture.build-vs-buy",
@@ -205,7 +242,8 @@
       "path": "primitives/architecture/build-vs-buy/SKILL.md",
       "why": "Most generated auth, billing and queues are worse than the boring proven option.",
       "when": "tier gte 1",
-      "enforces": []
+      "enforces": [],
+      "origin": "router"
     }
   ],
   "deferred": [],
@@ -318,8 +356,9 @@
       "id": "REQ-001",
       "key": "core.runnable",
       "area": "core",
+      "origin": "catalog",
       "title": "Runnable from a clean clone",
-      "statement": "A new contributor can install dependencies, start the project and run its tests from a clean clone using only the documented commands, with no manual database seeding, no hidden local state and no undocumented environment variables.",
+      "statement": "The application shall start, run its tests and name every missing environment variable from a clean clone using only the commands in the README.",
       "failurePath": "A missing environment variable produces a single actionable error naming the variable, not a stack trace deep in a startup path.",
       "acceptance": [
         {
@@ -335,8 +374,9 @@
       "id": "REQ-002",
       "key": "core.primary-journey",
       "area": "core",
+      "origin": "catalog",
       "title": "The primary journey works end to end",
-      "statement": "The single journey described in the product brief works from first step to last, through the real interface, persisting whatever it must persist, and produces the outcome the brief promises. It is exercised by one end-to-end test, not by unit tests of its parts.",
+      "statement": "The application shall carry one record through the journey in the product brief from first step to last, through the documented interface, and leave the promised outcome readable on a second visit.",
       "failurePath": "If any step of the journey fails, the user is left in a state they can retry from, with no partially written data and an explanation that names what failed.",
       "acceptance": [
         {
@@ -356,8 +396,9 @@
       "id": "REQ-003",
       "key": "core.non-goals",
       "area": "core",
+      "origin": "catalog",
       "title": "Explicit non-goals",
-      "statement": "The product brief lists at least three things this version deliberately does not do, and the codebase contains no partially built version of them.",
+      "statement": "The product brief shall name at least three capabilities this version deliberately does not provide, with no partially built version of them anywhere in the codebase.",
       "failurePath": "Out-of-scope work arrives as a failing review comment referencing a non-goal, rather than as silent extra code.",
       "acceptance": [
         {
@@ -373,8 +414,9 @@
       "id": "REQ-004",
       "key": "cli.ergonomics",
       "area": "api",
+      "origin": "catalog",
       "title": "Predictable command-line behaviour",
-      "statement": "Commands follow a documented grammar, write data to stdout and diagnostics to stderr, support --help and --version, and exit non-zero on failure.",
+      "statement": "When a command runs, the CLI shall follow the documented grammar, write data to stdout and diagnostics to stderr, answer --help and --version, and exit non-zero on failure.",
       "failurePath": "An invalid flag prints usage to stderr and exits 2; a partial failure exits non-zero and leaves no half-written output file.",
       "acceptance": [
         {
@@ -390,8 +432,9 @@
       "id": "REQ-005",
       "key": "core.domain-invariants",
       "area": "core",
+      "origin": "catalog",
       "title": "The product's own rules are named and pinned",
-      "statement": "Every invariant listed in the domain model names a rule that makes this product itself, and each has at least one automated test whose failure mode is that rule being violated. An invariant with no test is a comment; a test that would pass with the rule inverted is not a test.",
+      "statement": "The domain model shall state every product-specific invariant as a rule, each pinned by an automated test that fails when the rule is inverted.",
       "failurePath": "If a core rule is inverted by a refactor, a test fails and names the rule, rather than the change being discovered by a user or a reviewer.",
       "acceptance": [
         {
@@ -406,48 +449,147 @@
       "verify": "automated",
       "anchor": "tests/core/core-domain-invariants.test.ts",
       "status": "todo"
+    },
+    {
+      "id": "REQ-006",
+      "key": "ops.incident-response",
+      "area": "reliability",
+      "origin": "overlay:org-baseline",
+      "title": "Someone owns failure, and knows what to do first",
+      "statement": "When the primary journey fails in production, the application shall have a named owner and a first-response step recorded in the repository, reachable without asking anyone.",
+      "failurePath": "An incident with no named owner becomes a thread about whose turn it is while the product is down.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given the repository, when a new engineer looks for who owns the service, then they find a named role, a channel and the first three diagnostic steps without asking in a chat."
+        }
+      ],
+      "verify": "manual",
+      "anchor": null,
+      "status": "todo"
     }
   ],
   "gates": [
     {
       "id": "G0-RUN",
       "statement": "The project starts from a clean clone with one documented command.",
-      "origin": "policy:tier-0"
+      "origin": "policy:tier-0",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [],
+        "kind": "local",
+        "proves": "The README contains a fenced command block a new contributor can copy.",
+        "doesNotProve": "The README itself. This check only proves a command is written down; G0-SMOKE proves it works."
+      }
     },
     {
       "id": "G0-CHECK",
       "statement": "Lint or typecheck runs in CI on every pull request.",
-      "origin": "policy:tier-0"
+      "origin": "policy:tier-0",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [],
+        "kind": "local",
+        "proves": "A CI workflow runs a lint or typecheck step on pull requests.",
+        "doesNotProve": "The workflow file. Add the same command to the README so a local run matches CI."
+      }
     },
     {
       "id": "G0-SMOKE",
       "statement": "One happy-path smoke test exercises the primary user journey.",
-      "origin": "policy:tier-0"
+      "origin": "policy:tier-0",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [],
+        "kind": "local",
+        "proves": "A smoke or end-to-end test file exists for the primary journey.",
+        "doesNotProve": "One end-to-end test, exercising the documented interface rather than the internals."
+      }
     },
     {
       "id": "G1-CI",
       "statement": "The full test suite runs in CI on every pull request and is required to merge.",
-      "origin": "policy:tier-1"
+      "origin": "policy:tier-1",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [],
+        "kind": "local",
+        "proves": "A CI workflow runs the test command.",
+        "doesNotProve": "The workflow file, plus a branch protection rule that makes the job required. The rule is in the forge, not in the repository."
+      }
     },
     {
       "id": "G1-DOMAIN-TESTS",
       "statement": "Every rule in the domain model has at least one automated test.",
-      "origin": "policy:tier-1"
+      "origin": "policy:tier-1",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [],
+        "kind": "local",
+        "proves": "Every core requirement carries an @req anchor in a test file.",
+        "doesNotProve": "`spec-check.mjs` counts the anchors; this gate fails while a core requirement has none."
+      }
     },
     {
       "id": "G1-AC-TRACE",
       "statement": "Every requirement marked automated maps to a named test through an @req anchor.",
-      "origin": "policy:tier-1"
+      "origin": "policy:tier-1",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [],
+        "kind": "local",
+        "proves": "Every requirement marked automated has a test anchor.",
+        "doesNotProve": "`spec-check.mjs --strict`, run in CI."
+      }
     },
     {
       "id": "G1-RUNBOOK",
       "statement": "README documents how to run, test and deploy, plus known limitations.",
-      "origin": "policy:tier-1"
+      "origin": "policy:tier-1",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [],
+        "kind": "local",
+        "proves": "The README covers running, testing and deploying.",
+        "doesNotProve": "Three headings. A runbook with none of them is a README for the author."
+      }
     },
     {
       "id": "G1-SECRETS",
       "statement": "No secret is committed; configuration comes from the environment and is validated at startup.",
-      "origin": "policy:tier-1"
+      "origin": "policy:tier-1",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [
+          "enforcement/gitleaks.toml"
+        ],
+        "kind": "local",
+        "proves": "No credential-shaped string is committed, and a gitleaks config is present for the pre-commit hook.",
+        "doesNotProve": "The runner scans the working tree; gitleaks scans history. Both are needed: this file cannot see what was already committed and deleted."
+      }
+    },
+    {
+      "id": "G1-INCIDENT",
+      "statement": "An owner and a first-response runbook exist for the primary journey, and both name the same person or role.",
+      "origin": "overlay:org-baseline",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [
+          "enforcement/templates/docs/runbook.md"
+        ],
+        "kind": "local",
+        "proves": "docs/runbook.md names an owner, an escalation channel and first-response steps.",
+        "doesNotProve": "The runbook file. This proves the fields are present, not that the named person knows the product; the three diagnostic steps are the part to read."
+      }
     }
   ],
   "docs": [
@@ -465,10 +607,10 @@
   ],
   "stats": {
     "primitives": 17,
-    "requirements": 5,
-    "acceptanceCriteria": 7,
+    "requirements": 6,
+    "acceptanceCriteria": 8,
     "automated": 3,
-    "gates": 8,
+    "gates": 9,
     "deferred": 0,
     "skipped": 17
   }

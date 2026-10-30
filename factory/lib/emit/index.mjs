@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { derive } from './derive.mjs';
+import { enforcementFiles } from '../enforcement.mjs';
 import {
   agentsMd,
   agentHandoff,
@@ -50,6 +51,11 @@ export function renderPacket(plan) {
   if (existsSync(checker)) {
     files.set('spec-check.mjs', readFileSync(checker, 'utf8'));
   }
+
+  // One runnable mechanism per gate, plus the config fragments for the gates whose
+  // real check belongs to another tool. Written under `enforcement/` so the packet's
+  // top level stays the readable part.
+  for (const [name, content] of enforcementFiles(plan)) files.set(name, content);
 
   return { files, derived: d };
 }
@@ -137,6 +143,7 @@ export function emitPacket(plan, outDir, { force = false } = {}) {
   let totalLines = 0;
   for (const [name, content] of files) {
     const filePath = path.join(target, name);
+    mkdirSync(path.dirname(filePath), { recursive: true });
     writeFileSync(filePath, content, 'utf8');
     const lines = content.split('\n').length;
     totalLines += lines;

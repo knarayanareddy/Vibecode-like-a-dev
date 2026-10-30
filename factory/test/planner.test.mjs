@@ -180,7 +180,7 @@ test('a requirement keeps its id when the catalog grows around it', () => {
         when: { field: 'kind', eq: 'api' },
         render: 'core',
         title: 'A newly catalogued obligation',
-        statement: 'Something the catalog did not previously ask for, inserted before everything else in the list.',
+        statement: 'The application shall do the newly catalogued thing that no earlier requirement asked for.',
         failurePath: 'Nothing fails; that is the point of this fixture.',
         acceptance: ['Given a fixture, when the catalog grows, then no existing id moves.'],
         verify: 'automated'

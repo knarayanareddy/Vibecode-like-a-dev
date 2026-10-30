@@ -22,5 +22,8 @@
     "weeks": 8,
     "stack": "javascript",
     "mustUse": []
-  }
+  },
+  "overlays": [
+    "org-baseline"
+  ]
 }

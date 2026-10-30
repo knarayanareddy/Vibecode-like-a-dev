@@ -73,6 +73,7 @@ export function normalizeProfile(raw) {
     ...(raw.constraints || {})
   };
   profile.traits = Array.isArray(raw.traits) ? raw.traits : [];
+  profile.overlays = Array.isArray(raw.overlays) ? raw.overlays : [];
   profile.risks = { ...(raw.risks || {}) };
 
   return profile;
@@ -119,6 +120,19 @@ export function validateProfile(profile) {
     }
     if (typeof value !== 'boolean') {
       errors.push(`risks.${flag}: must be true or false`);
+    }
+  }
+
+  if (!Array.isArray(profile.overlays)) {
+    errors.push('overlays: must be a list of overlay ids, e.g. ["org-baseline", "health-data"]');
+  } else {
+    for (const id of profile.overlays) {
+      if (!/^[a-z0-9][a-z0-9-]{1,60}$/.test(String(id))) {
+        errors.push(`overlays: "${id}" is not a kebab-case overlay id`);
+      }
+    }
+    if (new Set(profile.overlays).size !== profile.overlays.length) {
+      errors.push('overlays: an overlay is listed twice; layers apply once');
     }
   }
 

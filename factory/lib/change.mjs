@@ -15,9 +15,13 @@
  * over a backup.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { loadIndex } from './indexer.mjs';
+import { earsError } from './ears.mjs';
+import { emitPacket } from './emit/index.mjs';
+import { buildIndex, loadIndex } from './indexer.mjs';
+import { buildPlan } from './planner.mjs';
+import { normalizeProfile } from './profile.mjs';
 
 const ID_PATTERN = /^[a-z0-9][a-z0-9-]{1,60}$/;
 // Keys are namespaced like the catalog: "feature.export", not "feature-export".
@@ -74,7 +78,12 @@ export function validateChange(change) {
     else if (addKeys.has(requirement.key)) errors.push(`${label}.key: "${requirement.key}" is added twice`);
     else addKeys.add(requirement.key);
     if (!requirement.title) errors.push(`${label}.title: required`);
-    if (!requirement.statement || String(requirement.statement).length < 40) errors.push(`${label}.statement: required, at least 40 characters`);
+    if (!requirement.statement || String(requirement.statement).length < 40) {
+      errors.push(`${label}.statement: required, at least 40 characters`);
+    } else {
+      const ears = earsError(requirement.statement);
+      if (ears) errors.push(`${label}.statement: not an EARS requirement — ${ears}`);
+    }
     if (!requirement.failurePath || String(requirement.failurePath).length < 10) errors.push(`${label}.failurePath: required. A requirement without a failure path is a demo script.`);
     if (!Array.isArray(requirement.acceptance) || requirement.acceptance.length === 0) errors.push(`${label}.acceptance: at least one criterion`);
     if (!['automated', 'manual', 'gate'].includes(requirement.verify)) errors.push(`${label}.verify: automated, manual or gate`);
@@ -88,6 +97,10 @@ export function validateChange(change) {
     if (!entry.key) errors.push(`${label}.key: required (the requirement key or id to change)`);
     if (!entry.statement && !entry.failurePath && !(entry.addAcceptance ?? []).length) {
       errors.push(`${label}: does nothing. Provide statement, failurePath or addAcceptance.`);
+    }
+    if (entry.statement) {
+      const ears = earsError(entry.statement);
+      if (ears) errors.push(`${label}.statement: not an EARS requirement — ${ears}`);
     }
   });
 
@@ -503,6 +516,236 @@ export function applyChange(plan, { force = false } = {}) {
   return { specPath, backupPath };
 }
 
+
+// ------------------------------------------------------------------ archive
+
+/**
+ * Fold an applied change back into the packet's source of truth.
+ *
+ * A delta is a proposal; the packet is generated from a profile. Leaving an applied
+ * delta only in `spec.json` means the next `vld compile` silently drops it, which is
+ * the worst kind of data loss: the requirement is gone and nothing says so. So the
+ * archive step writes the delta into the profile's overlay stack (the team layer),
+ * records the merge in `changes/history.json`, keeps the change directory under
+ * `changes/archive/<id>/`, and recompiles.
+ *
+ * Idempotent by construction: the overlay file is a pure function of the delta, the
+ * history entry is keyed by change id, and the recompile is a pure function of the
+ * profile — so archiving twice produces byte-identical files.
+ */
+export async function archiveChange({ packetDir, changeDir, profilePath = null, force = false, recompile = true }) {
+  const specPath = path.join(packetDir, 'spec.json');
+  if (!existsSync(specPath)) throw new Error(`no spec.json in ${packetDir}`);
+  const spec = readJson(specPath);
+  const deltaPath = path.join(changeDir, 'delta.json');
+  if (!existsSync(deltaPath)) {
+    const error = new Error(`${changeDir} is not a change directory: no delta.json`);
+    error.code = 'NO_DELTA';
+    throw error;
+  }
+  const delta = readJson(deltaPath);
+
+  const profileFile = resolveProfileFile({ profilePath, spec, packetDir });
+
+  const profile = readJson(profileFile);
+  const overlayId = `change-${delta.id}`;
+  const overlayDir = path.join(path.dirname(profileFile), 'overlays');
+  const overlayPath = path.join(overlayDir, `${overlayId}.json`);
+
+  // --- the delta, restated as an overlay a later compile can re-apply
+  const addRequirements = (delta.added ?? []).map((requirement) => ({
+    key: requirement.key,
+    title: requirement.title,
+    area: requirement.area ?? 'core',
+    statement: requirement.statement,
+    failurePath: requirement.failurePath,
+    acceptance: (requirement.acceptance ?? []).map((criteria) => criteria.text ?? String(criteria)),
+    verify: requirement.verify ?? 'automated',
+    why: requirement.why ?? ''
+  }));
+
+  const modify = (delta.modified ?? [])
+    .map(({ definition = {}, target = {} }) => {
+      const entry = { key: target.key ?? definition.key };
+      if (definition.statement) entry.statement = definition.statement;
+      if (definition.failurePath) entry.failurePath = definition.failurePath;
+      if (definition.title) entry.title = definition.title;
+      if ((definition.addAcceptance ?? []).length > 0) entry.addAcceptance = definition.addAcceptance;
+      return Object.keys(entry).length > 1 ? entry : null;
+    })
+    .filter(Boolean);
+
+  const remove = (delta.removed ?? [])
+    .map(({ definition = {}, target = {} }) => ({ key: target.key ?? definition.key, why: definition.why }))
+    .filter((entry) => entry.key);
+
+  const overlay = {
+    id: overlayId,
+    layer: 'team',
+    title: `Change: ${delta.title}`,
+    why: delta.why,
+    provenance: {
+      from: 'vld change',
+      change: delta.id,
+      risk: delta.risk,
+      impact: delta.impact,
+      base: delta.base ?? null
+    },
+    addRequirements,
+    addGates: [],
+    modify,
+    remove
+  };
+
+  mkdirSync(overlayDir, { recursive: true });
+  const overlayText = `${JSON.stringify(overlay, null, 2)}\n`;
+  const overlayChanged = !existsSync(overlayPath) || readFileSync(overlayPath, 'utf8') !== overlayText;
+  writeFileSync(overlayPath, overlayText, 'utf8');
+
+  // --- the profile lists the overlay, once
+  const overlays = Array.isArray(profile.overlays) ? profile.overlays : [];
+  const profileChanged = !overlays.includes(overlayId);
+  if (profileChanged) {
+    profile.overlays = [...overlays, overlayId];
+    writeFileSync(profileFile, `${JSON.stringify(profile, null, 2)}\n`, 'utf8');
+  }
+
+  // --- the change directory is kept with the packet that absorbed it
+  const archiveRoot = path.join(packetDir, 'changes', 'archive');
+  const archiveDir = path.join(archiveRoot, delta.id);
+  mkdirSync(archiveRoot, { recursive: true });
+  if (path.resolve(changeDir) !== path.resolve(archiveDir)) {
+    cpSync(changeDir, archiveDir, { recursive: true, force: true });
+  }
+
+  // --- history: one entry per change, in merge order, rewritten in place
+  const historyPath = path.join(packetDir, 'changes', 'history.json');
+  const history = existsSync(historyPath)
+    ? readJson(historyPath)
+    : { schemaVersion: 1, packet: path.basename(path.resolve(packetDir)), entries: [] };
+  const entry = {
+    id: delta.id,
+    title: delta.title,
+    risk: delta.risk,
+    impact: delta.impact,
+    why: delta.why,
+    overlay: overlayId,
+    added: addRequirements.map((requirement) => requirement.key),
+    modified: modify.map((item) => item.key),
+    removed: remove.map((item) => item.key),
+    requirementsAfter: Number.isInteger(delta.requirementsAfter) ? delta.requirementsAfter : null
+  };
+  // A recompile reports what it carried forward and what it dropped in the manifest.
+  // That is a record of one transition, not a property of the packet, so it belongs
+  // next to the change that caused it — and leaving it in spec.json would make an
+  // archived packet differ from a freshly compiled one for the same inputs.
+  const compiled = recompile ? await recompilePacket(profileFile, packetDir, { force: true }) : null;
+  if (compiled) {
+    const after = readJson(specPath);
+    if (after.history) {
+      entry.compile = after.history;
+      delete after.history;
+      writeFileSync(specPath, `${JSON.stringify(after, null, 2)}\n`, 'utf8');
+    }
+  }
+
+  const existing = history.entries.findIndex((item) => item.id === delta.id);
+  if (existing === -1) history.entries.push(entry);
+  else {
+    // Re-archiving keeps the first record of what the compile did: it is history,
+    // and rewriting it to "nothing to report" would erase the drop it documents.
+    history.entries[existing] = { ...entry, compile: history.entries[existing].compile ?? entry.compile };
+  }
+  history.entries = history.entries.map((item, index) => ({ ...item, n: index + 1 }));
+  writeFileSync(historyPath, `${JSON.stringify(history, null, 2)}\n`, 'utf8');
+
+  return {
+    overlayId,
+    overlayPath,
+    historyPath,
+    archiveDir,
+    profilePath: profileFile,
+    changed: { overlay: overlayChanged, profile: profileChanged, history: true },
+    compiled
+  };
+}
+
+/**
+ * Recompile an existing packet in place. Kept here rather than in the CLI so the
+ * archive path and the `vld compile` path cannot drift: same planner, same emitter,
+ * same id carry-over.
+ */
+export function recompilePacket(profileFile, packetDir, { force = true } = {}) {
+  const profile = normalizeProfile(readJson(profileFile));
+  const previousIds = existsSync(path.join(packetDir, 'spec.json'))
+    ? Object.fromEntries(
+        (readJson(path.join(packetDir, 'spec.json')).requirements ?? []).map((requirement) => [requirement.key, requirement.id])
+      )
+    : {};
+  const plan = buildPlan(profile, {
+    index: buildIndex(),
+    previousIds,
+    profileDir: path.dirname(path.resolve(profileFile))
+  });
+  // Keep the packet's own record of its source, so a second archive is not an error.
+  const previousSpec = existsSync(path.join(packetDir, 'spec.json')) ? readJson(path.join(packetDir, 'spec.json')) : null;
+  plan.profileLabel = previousSpec?.project?.profile ?? profileFile.split(path.sep).join('/');
+  const result = emitPacket(plan, packetDir, { force });
+  return { outDir: result.outDir, requirements: plan.requirements.length, gates: plan.gates.length };
+}
+
+/**
+ * Find the profile an archive should write back to.
+ *
+ * `spec.project.profile` is recorded as the CLI was given it, so it is relative to
+ * whatever directory that command ran in. Archiving from a different directory would
+ * then resolve to a different file, and writing an overlay into the wrong profile is
+ * silent data corruption with a plausible-looking success message. So every candidate
+ * is checked against the packet's own project name, and a mismatch refuses rather
+ * than guesses.
+ */
+function resolveProfileFile({ profilePath, spec, packetDir }) {
+  const declared = profilePath ?? spec.project?.profile ?? null;
+  if (!declared) {
+    const error = new Error(
+      'this packet does not record where its profile lives, so the change cannot be folded back. Pass --profile <path> (the file `vld compile` was run with).'
+    );
+    error.code = 'NO_PROFILE';
+    throw error;
+  }
+
+  const candidates = declared.startsWith('/') || /^[A-Za-z]:\\/.test(declared)
+    ? [path.resolve(declared)]
+    : [path.resolve(declared), path.resolve(packetDir, '..', declared), path.resolve(packetDir, declared)];
+
+  const expected = spec.project?.name ?? null;
+  let wrongName = null;
+  for (const candidate of candidates) {
+    if (!existsSync(candidate)) continue;
+    let raw;
+    try {
+      raw = readJson(candidate);
+    } catch {
+      continue;
+    }
+    if (!expected || raw.name === expected) return candidate;
+    wrongName = wrongName ?? { candidate, name: raw.name };
+  }
+
+  if (wrongName) {
+    const error = new Error(
+      `${wrongName.candidate} is the profile for "${wrongName.name}", not "${expected}". ` +
+        'The recorded path is relative to the directory the packet was compiled in; pass --profile <path> to resolve it here.'
+    );
+    error.code = 'PROFILE_MISMATCH';
+    throw error;
+  }
+
+  const error = new Error(`profile ${declared} does not exist (looked from ${process.cwd()} and ${packetDir}); nothing was archived`);
+  error.code = 'NO_PROFILE';
+  throw error;
+}
+
 // ------------------------------------------------------------------ verify
 
 export function verifyChange(changeDir) {
@@ -599,7 +842,7 @@ export const CHANGE_TEMPLATE = {
       key: 'feature.export',
       title: 'A user can export their own data',
       area: 'api',
-      statement: 'An authenticated user can request an export of every record they own, delivered as a download that completes or fails as a unit.',
+      statement: 'When an authenticated user requests an export, the application shall deliver one download containing every record they own, which either completes or fails as a unit.',
       failurePath: 'An export that exceeds the size limit fails with a message naming the limit and leaves no partial file.',
       acceptance: ['Given a user with records, when they request an export, then a single file containing all their records is produced.'],
       verify: 'automated'

@@ -53,8 +53,9 @@ _Every boundary around a specification fixed while changing it is still free._
 _Working specification behaviour end to end, one requirement at a time._
 
 - [ ] REQ-004 Every command that touches a specification documents its flags and exit codes, rejects unknown input, and supports a dry run that changes nothing. Test first, then implement, then trace.
+- [ ] REQ-006 Someone owns failure, and knows what to do first holds for a specification. Test first, then implement, then trace.
 
-**Exit:** Each of the 5 requirements is traceable from criterion to test, with its anchor green in CI.
+**Exit:** Each of the 6 requirements is traceable from criterion to test, with its anchor green in CI.
 
 ### Phase 4 — Interface and hardening · week 7-7
 
@@ -63,7 +64,7 @@ _Vibecode Like A Dev feels finished to a developer and fails predictably._
 - [ ] Exercise every failure path in the requirements, manually or by test.
 - [ ] Mutation testing is deferred; keep assertions specific anyway.
 
-**Exit:** All 8 gates pass in CI, and the manual checks have been run once and dated.
+**Exit:** All 9 gates pass in CI, and the manual checks have been run once and dated.
 
 ### Phase 5 — Release and first observation · week 8-8
 
@@ -96,9 +97,9 @@ Rules for humans and agents alike. The point is to stop the loop where the model
 
 | Risk | Likelihood | Mitigation |
 | --- | --- | --- |
-| Scope creep past the 5 listed requirements | high | The non-goals table is the answer: anything unlisted is rejected in review rather than debated. |
+| Scope creep past the 6 listed requirements | high | The non-goals table is the answer: anything unlisted is rejected in review rather than debated. |
 | An invented abstraction around the specification | medium | One context per owned noun; a new layer needs a reason a reviewer can check. |
 | Environment and configuration drift | medium | Configuration is validated at startup and fails by naming the missing variable. |
 | The 8-week calendar slipping | medium | Cut scope in the brief, never a gate. |
 
-v1 is finished when all 8 gates in `05-verification.md` pass, every manual check is dated, and `spec.json` describes what was actually built — including the decisions that changed on the way.
+v1 is finished when all 9 gates in `05-verification.md` pass, every manual check is dated, and `spec.json` describes what was actually built — including the decisions that changed on the way.

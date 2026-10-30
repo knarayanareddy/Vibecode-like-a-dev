@@ -14,7 +14,7 @@ Rigor is a cost, so it is computed rather than assumed. Score **1**:
 
 No cap applied: the stage "production" permits the rigor the signals imply.
 
-Tier 1 (standard) allows 22 practices and requires 8 gates, listed in [05-verification.md](05-verification.md).
+Tier 1 (standard) allows 22 practices and requires 9 gates, listed in [05-verification.md](05-verification.md).
 
 ## 1. The laws, and what they mean here
 
@@ -23,7 +23,7 @@ The left column is law for every project this factory compiles. The right column
 | Law | In Vibecode Like A Dev |
 | --- | --- |
 | The spec is the interface. | A change to how a specification behaves starts as a change to a requirement or an ADR — never as a code edit the spec is later bent to match. |
-| A failing test comes before behaviour. | 3 of 5 requirements are proven by a test carrying `@req`; the rest carry a manual script. Untested behaviour is proposed, not done. |
+| A failing test comes before behaviour. | 3 of 6 requirements are proven by a test carrying `@req`; the rest carry a manual script. Untested behaviour is proposed, not done. |
 | One term, one meaning. | `specification` and `developer` are the only names for those things — in code, in tests, in commit messages, and in the UI copy developers read. |
 | Boundaries before bodies. | The 1 surfaces in `04-contracts.md` are fixed while changing them is free; after sign-off, a change to one needs its own requirement. |
 | The domain stays pure. | Rules import no framework, no PostgreSQL, and no vendor SDK. Hexagonal single artifact only holds if this is checked, not intended. |
@@ -41,7 +41,7 @@ A specification change is done when all of the following are true for Vibecode L
 - [ ] **G0-CHECK** — Lint or typecheck runs in CI on every pull request.
 - [ ] **G0-SMOKE** — One happy-path smoke test exercises the primary user journey. _Here: one specification taken from creation to done through the documented interface._
 - [ ] **G1-CI** — The full test suite runs in CI on every pull request and is required to merge.
-- [ ] 3 of 5 requirements carry an `@req` anchor; REQ-001 is the first, at `tests/core/core-runnable.test.ts`.
+- [ ] 3 of 6 requirements carry an `@req` anchor; REQ-001 is the first, at `tests/core/core-runnable.test.ts`.
 - [ ] The change can be reverted with one command or one flag.
 
 ## 3. Change protocol
@@ -76,6 +76,14 @@ A specification change is done when all of the following are true for Vibecode L
 | `architecture.ports-and-adapters` | In Vibecode Like A Dev, specification rules run in tests with no PostgreSQL and no network, because every external call sits behind a port the use case owns. | REQ-004 Every command that touches a specification documents its flags and exit codes, rejects unknown input, and supports a dry run that changes nothing. | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/architecture/ports-and-adapters/SKILL.md) |
 | `architecture.adr-log` | In Vibecode Like A Dev, the decisions that are expensive to reverse — persistence in PostgreSQL, the auth model, and every dependency worth a day — carry an ADR with a consequence. | gate G2-ADR | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/architecture/adr-log/SKILL.md) |
 | `architecture.build-vs-buy` | In Vibecode Like A Dev, everything around a specification that is commodity — auth, mail, payments, queues — is bought and wrapped in a port, and only the specification rules are written by hand. | gate G2-ADR | [SKILL.md](https://github.com/knarayanareddy/Vibecode-like-a-dev/blob/main/primitives/architecture/build-vs-buy/SKILL.md) |
+
+## Overlays
+
+1 layer(s) sit on top of the catalog for Vibecode Like A Dev. Each is a policy decision made by someone closer to the work than the catalog is, and each one is recorded in `spec.json` with the ids it added, changed or removed.
+
+| Layer | Overlay | What it adds here | Why |
+| --- | --- | --- | --- |
+| org | `org-baseline` — The organisation's baseline | +ops.incident-response +G1-INCIDENT | Every project this organisation runs needs an owner for failure and a runbook before it can be called live. The catalog knows what a product needs; it cannot know who answers the page. |
 
 ## 5. Deliberately not doing
 

@@ -6,18 +6,18 @@ You are implementing **Vibecode Like A Dev** — cli, production, rigor tier 1 (
 
 ## Start here
 
-First: **REQ-001** — A clean clone of Vibecode Like A Dev runs with one documented command, and a missing setting is named rather than guessed. It is proven by hand for now. Then one requirement at a time; there are 5, of which 3 need an anchor.
+First: **REQ-001** — A clean clone of Vibecode Like A Dev runs with one documented command, and a missing setting is named rather than guessed. It is proven by hand for now. Then one requirement at a time; there are 6, of which 3 need an anchor.
 
 ## Where each answer lives
 
 | Question | Document |
 | --- | --- |
-| The rules you cannot break | `00-constitution.md` — 5 requirements, 17 practices |
+| The rules you cannot break | `00-constitution.md` — 6 requirements, 17 practices |
 | What this product is and is not | `01-product-brief.md` — specification, developer, non-goals |
 | The nouns to use in code | `02-domain-model.md` — 0 aggregates, 6 candidate terms |
 | What may import what | `03-architecture.md` — 1 contexts, 1 ADRs |
 | Interface shapes | `04-contracts.md` — 1 surfaces on PostgreSQL |
-| How your work is judged | `05-verification.md` — 8 gates |
+| How your work is judged | `05-verification.md` — 9 gates |
 
 ## Commands
 
@@ -25,6 +25,7 @@ First: **REQ-001** — A clean clone of Vibecode Like A Dev runs with one docume
 # after setup, then keep this block accurate
 npm run lint && npm run typecheck && npm test
 node specs/spec-check.mjs --repo .
+node specs/enforcement/gates.mjs --repo .
 ```
 
 An agent that cannot run the checks will claim success instead.

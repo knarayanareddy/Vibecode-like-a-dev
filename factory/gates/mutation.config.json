@@ -1,0 +1,14 @@
+{
+  "$comment": "Mutation configuration. Scope it to the domain: mutating adapters and framework glue produces survivors nobody can act on, and a score nobody trusts gets ignored. Run the matching tool for the stack: Stryker (TS/JS), mutmut or cosmic-ray (Python), PIT (Java/Kotlin), cargo-mutants (Rust), go-mutesting (Go).",
+  "mutate": ["src/domain/**/*.ts", "src/domain/**/*.js"],
+  "testRunner": "vitest",
+  "reporters": ["clear-text", "json"],
+  "thresholds": {
+    "high": 80,
+    "low": 60,
+    "break": 60
+  },
+  "ignorePatterns": ["**/*.test.ts", "**/migrations/**", "**/generated/**"],
+  "python": { "runner": "mutmut run --paths-to-mutate=src/domain", "config": "runner = pytest\npaths_to_mutate = src/domain/" },
+  "ratchet": "Record the score in CI. The threshold only moves up; lowering it is a review comment, not a fix."
+}

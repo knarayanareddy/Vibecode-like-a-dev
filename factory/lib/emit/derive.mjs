@@ -419,8 +419,16 @@ export function unmappedObligations(profile, requirements, domainText = '') {
       .join(' ')
   );
   // No stemming library, so compare on prefixes: "authorized" and "authorization"
-  // are the same obligation, and so are "read" and "reading".
-  const shares = (word) => known.some((other) => other === word || other.startsWith(word) || word.startsWith(other));
+  // are the same obligation, and so are "read" and "reading". The six-character
+  // prefix covers the inflections a prefix test misses.
+  const shares = (word) =>
+    known.some(
+      (other) =>
+        other === word ||
+        other.startsWith(word) ||
+        word.startsWith(other) ||
+        (word.length >= 6 && other.length >= 6 && word.slice(0, 6) === other.slice(0, 6))
+    );
 
   const sentences = String(profile.idea ?? '')
     .split(/(?<=[.!?;])\s+/)

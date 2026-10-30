@@ -19,7 +19,7 @@ Answer from the specification side, in the user's words. These four answers are 
 
 ## In scope for v1
 
-5 requirements, each with acceptance criteria in `spec.json`. They were selected by what the idea asks for, not by what a template ships.
+6 requirements, each with acceptance criteria in `spec.json`. They were selected by what the idea asks for, not by what a template ships.
 
 **Foundation**
 
@@ -31,6 +31,10 @@ Answer from the specification side, in the user's words. These four answers are 
 **Interface & contracts**
 
 - `REQ-004` Every command that touches a specification documents its flags and exit codes, rejects unknown input, and supports a dry run that changes nothing. _(predictable command-line behaviour)_
+
+**Reliability**
+
+- `REQ-006` Someone owns failure, and knows what to do first holds for a specification. _(someone owns failure, and knows what to do first)_
 
 ## Out of scope
 
