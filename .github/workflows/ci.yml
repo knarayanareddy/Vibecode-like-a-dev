@@ -84,12 +84,87 @@ jobs:
             | node factory/cli.mjs mcp 2>/dev/null \
             | node -e 'let b="";process.stdin.on("data",d=>b+=d).on("end",()=>{const lines=b.trim().split("\n").map(JSON.parse);const tools=lines.find(l=>l.id===2);if(tools.result.tools.length!==8)process.exit(1);console.log("8 MCP tools advertised")})'
 
-      - name: Delta spec round trip
+      # A generated delta starts with pending evidence by design. A minimal reviewed-record
+      # fixture proves the positive evidence lifecycle; it is test data, never a CI release approval.
+      - name: Delta spec and reviewed-evidence round trip
         run: |
           node factory/cli.mjs change init /tmp/change > /dev/null
           node -e 'const fs=require("fs");const c=JSON.parse(fs.readFileSync("/tmp/change/change.json"));delete c.$help;fs.writeFileSync("/tmp/change/change.json",JSON.stringify(c,null,2))'
           node factory/cli.mjs change examples/retro-board/spec /tmp/change/change.json -o /tmp/change/out
-          node factory/cli.mjs change verify /tmp/change/out
+          project=/tmp/change-project
+          mkdir -p "$project"
+          node factory/cli.mjs module enable review --project "$project"
+          node - "$project" /tmp/change/out <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const [project, change] = process.argv.slice(2);
+          const delta = JSON.parse(fs.readFileSync(path.join(change, 'delta.json'), 'utf8'));
+          const ids = [...(delta.added ?? []).map((entry) => entry.id), ...(delta.modified ?? []).map((entry) => entry.target.id), ...(delta.removed ?? []).map((entry) => entry.target.id)];
+          const review = ['# Review Brief: CI delta evidence', '', '**Status:** Approved', '', '## Change Summary', '', 'The generated delta was reviewed against the resulting manifest, expected blast radius, and release boundary.', '', '## Requirements Under Review', '', ids.map((id) => `- ${id}: Reviewed against acceptance criteria and change evidence.`).join('\n'), '', '## Risk and Invariants', '', 'The review preserves the changed requirements, their failure paths, and the stated verification method.', '', '## Evidence', '', 'The packet and change verification commands completed with no findings before the accountable review.', '', '## Review Questions', '', 'Does every changed requirement retain a falsifiable acceptance criterion and an executable verification path?', '', '## Decision', '', 'Approved after reviewing the linked evidence and the explicit rollback conditions.', ''].join('\n');
+          fs.mkdirSync(path.join(project, 'docs'), { recursive: true });
+          fs.writeFileSync(path.join(project, 'docs', 'review-brief.md'), review);
+          const evidenceFile = path.join(change, 'evidence.json');
+          const evidence = JSON.parse(fs.readFileSync(evidenceFile, 'utf8'));
+          evidence.artifacts = [{ kind: 'review-brief', file: 'docs/review-brief.md', requirements: ids }];
+          fs.writeFileSync(evidenceFile, `${JSON.stringify(evidence, null, 2)}\n`);
+          const narrativeFile = path.join(change, 'evidence.md');
+          fs.writeFileSync(narrativeFile, fs.readFileSync(narrativeFile, 'utf8').replace('**Status:** Pending', '**Status:** Approved'));
+          NODE
+          node factory/cli.mjs change verify /tmp/change/out --project "$project"
+
+      # A source checkout can hide omitted package files or an invalid bin link. Exercise
+      # the tarball users receive, including compiler, export, module, artifact and
+      # reviewed shared-store flows. No registry, credentials or network agent calls.
+      - name: Packed-install distribution journey
+        run: |
+          set -eu
+          work=$(mktemp -d)
+          pack="$work/pack"
+          install="$work/install"
+          mkdir -p "$pack"
+          npm pack --pack-destination "$pack" > /dev/null
+          tarball=$(find "$pack" -maxdepth 1 -name '*.tgz' -print -quit)
+          test -n "$tarball"
+          npm install --ignore-scripts --prefix "$install" "$tarball" > /dev/null
+          vld="$install/node_modules/.bin/vld"
+          "$vld" --version
+
+          cp examples/retro-board/profile.json "$work/profile.json"
+          "$vld" compile "$work/profile.json" --out "$work/packet"
+          "$vld" verify "$work/packet"
+          "$vld" export spec-kit "$work/packet" --out "$work/spec-kit"
+          test -f "$work/spec-kit/.specify/memory/constitution.md"
+
+          project="$work/project"
+          mkdir -p "$project" "$work/store"
+          "$vld" module enable product --project "$project"
+          "$vld" store init "$work/store" --id team-playbook --title 'Team playbook'
+          cat > "$work/store/product-brief.md" <<'EOF'
+          # Product Brief: shared template
+
+          **Status:** Draft
+
+          ## Problem
+
+          [Describe the reviewed problem.]
+          EOF
+          cat > "$work/store/vld-store.json" <<'EOF'
+          {"schemaVersion":1,"id":"team-playbook","title":"Team playbook","assets":[{"id":"product-brief-template","kind":"artifact-template","artifact":"product-brief","file":"product-brief.md"}]}
+          EOF
+          git -C "$work/store" init -q
+          git -C "$work/store" config user.email vld-ci@example.test
+          git -C "$work/store" config user.name 'VLD CI'
+          git -C "$work/store" add .
+          git -C "$work/store" commit -qm initial
+          "$vld" store add team-playbook "file://$work/store" --project "$project"
+          "$vld" artifact init product-brief --from-store team-playbook/product-brief-template --project "$project"
+
+          printf '%s\n' '<!-- refreshed -->' >> "$work/store/product-brief.md"
+          git -C "$work/store" add .
+          git -C "$work/store" commit -qm refresh
+          acknowledgement=$("$vld" store diff team-playbook --project "$project" --json | node -e 'let input="";process.stdin.on("data",part=>input+=part).on("end",()=>process.stdout.write(JSON.parse(input).next.commit))')
+          "$vld" store update team-playbook --acknowledge "$acknowledgement" --project "$project"
+          "$vld" store status team-playbook --project "$project"
 
       - name: Generated packet is in sync with the generator
         run: |

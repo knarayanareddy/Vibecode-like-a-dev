@@ -16,13 +16,14 @@ node factory/cli.mjs adopt <repo> -o <profile.json>   # infer a profile from cod
 node factory/cli.mjs change <packet> <change.json> -o <dir>
 node factory/cli.mjs change verify <dir> --project <project-dir>
 node factory/cli.mjs artifact list|init|validate|verify|status
-node factory/cli.mjs store init|add|update|list|status|assets|copy
+node factory/cli.mjs store init|add|diff|update|list|status|assets|copy
+node factory/cli.mjs export spec-kit|kiro <packet> -o <dir>
 node factory/cli.mjs module list|enable|status|verify
 node factory/cli.mjs bundle list|apply <id> --profile <profile.json>
 node factory/cli.mjs agent install codex|claude-code|github-copilot
 node factory/cli.mjs workflow list|lint|run|status|complete
 node factory/cli.mjs mcp                # MCP server over stdio (8 tools)
-npm test                                # 179 tests: integrity, planning, adoption, deltas, artifacts, stores, modules, workflows, MCP, enforcement
+npm test                                # 183 tests: integrity, planning, adoption, deltas, artifacts, stores, modules, workflows, MCP, enforcement
 npm run check                           # index freshness + tests + verify the example packet
 ```
 
@@ -41,7 +42,7 @@ No dependencies, no build step, Node 22+. If a change requires a dependency, sto
 | `factory/bundles/` | Conservative profile/module starter bundles. |
 | `factory/adapters/` | Target manifests for generated Codex, Claude Code and Copilot handoffs. |
 | `factory/workflows/` | Typed, allowlisted workflow DAGs; runtime state belongs under a project's `.vld/`. |
-| `factory/lib/` | `frontmatter`, `predicate`, `indexer`, `planner`, `verify`, `emit/`, `scan`, `adopt`, `change`, `modules`, `bundles`, `agents`, `workflows`, `mcp`. |
+| `factory/lib/` | `frontmatter`, `predicate`, `indexer`, `planner`, `verify`, `emit/`, `scan`, `adopt`, `change`, `exports`, `modules`, `bundles`, `agents`, `workflows`, `mcp`. |
 | `factory/templates/spec-check.mjs` | Copied verbatim into every packet. Must stay dependency-free and standalone. |
 | `factory/test/` | Node's test runner. Tests are the specification. |
 | `examples/` | A profile and its compiled packet. Regenerate, do not hand-edit. |
@@ -65,7 +66,7 @@ No dependencies, no build step, Node 22+. If a change requires a dependency, sto
 15. **A generative input must never become document structure.** Idea text is user data: flatten it before embedding, bound its length, and never let it reach a line start that Markdown reads as a heading. The adversarial suite tests this.
 16. **Requirement ids are permanent.** `REQ-###` is an anchor target in product repositories. Ids are preserved per requirement key and retired when a requirement drops out — never renumbered, never recycled. This has a test; keep it.
 17. **The MCP server must not drift from the CLI.** Both call `buildPlan`. If you add a tool, it returns policy-derived data, never a second implementation of the selection rules.
-18. **Extensions do not weaken the compiler.** Modules, bundles, agent adapters and workflows live outside `compile`; lock their manifests, report drift, and never add a model call or clock-derived value to a packet.
+18. **Extensions do not weaken the compiler.** Modules, bundles, stores, exports, agent adapters and workflows live outside `compile`; lock or derive them from verified input, report drift, and never add a model call or clock-derived value to a packet.
 19. **Workflows are not a shell escape hatch.** Builtin executable steps use a typed argv allowlist. Human/agent steps need explicit one-line evidence, and an agent can never self-approve a release.
 
 ## Definition of done

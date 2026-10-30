@@ -6,7 +6,8 @@
  * into .vld/stores.json so a team can review, pin and detect local drift.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { digest, ensureProjectDir, extensionError, ID_PATTERN, readJson, stableJson, vldDir, writeJsonAtomic } from './extension-utils.mjs';
 
@@ -109,6 +110,9 @@ export function readStoreState(projectDir = '.') {
     if (store?.ref !== null && store?.ref !== undefined && !SAFE_REF.test(String(store.ref))) errors.push(`${file}: store ${store?.id ?? '?'} has an invalid ref`);
     if (!COMMIT.test(String(store?.commit ?? ''))) errors.push(`${file}: store ${store?.id ?? '?'} has an invalid commit`);
     if (!/^[a-f0-9]{64}$/.test(String(store?.snapshotDigest ?? ''))) errors.push(`${file}: store ${store?.id ?? '?'} has an invalid snapshot digest`);
+    if (store?.acknowledgedCommit !== undefined && (!COMMIT.test(String(store.acknowledgedCommit)) || store.acknowledgedCommit !== store.commit)) {
+      errors.push(`${file}: store ${store?.id ?? '?'} has an invalid refresh acknowledgement`);
+    }
   }
   return { project, file, exists: true, state, errors };
 }
@@ -125,18 +129,78 @@ function cloneStore({ repository, ref, destination }) {
   args.push('--', repository, destination);
   git(args);
 }
-function stateEntry({ id, repository, ref, snapshot: checked }) {
-  return { id, repository, ref: ref ?? null, commit: checked.commit, manifestDigest: checked.manifestDigest, snapshotDigest: checked.snapshotDigest, title: checked.manifest.title, assets: checked.manifest.assets };
+function stateEntry({ id, repository, ref, snapshot: checked, acknowledgedCommit = null }) {
+  return {
+    id,
+    repository,
+    ref: ref ?? null,
+    commit: checked.commit,
+    manifestDigest: checked.manifestDigest,
+    snapshotDigest: checked.snapshotDigest,
+    title: checked.manifest.title,
+    assets: checked.manifest.assets,
+    ...(acknowledgedCommit ? { acknowledgedCommit } : {})
+  };
 }
 
-/** Fetch a new immutable snapshot. Existing snapshots change only with --refresh. */
-export function addStore({ projectDir = '.', id, repository, ref = null, refresh = false }) {
+function assetChanges(previous = [], next = []) {
+  const before = new Map(previous.map((asset) => [asset.id, asset]));
+  const after = new Map(next.map((asset) => [asset.id, asset]));
+  const added = next.filter((asset) => !before.has(asset.id));
+  const removed = previous.filter((asset) => !after.has(asset.id));
+  const changed = [];
+  for (const asset of next) {
+    const old = before.get(asset.id);
+    if (!old || stableJson(old) === stableJson(asset)) continue;
+    const fields = ['kind', 'artifact', 'file', 'digest'].filter((field) => old[field] !== asset[field]);
+    changed.push({ id: asset.id, fields, before: old, after: asset });
+  }
+  return { added, removed, changed };
+}
+
+function describeRefresh(current, next) {
+  const assets = assetChanges(current.assets, next.assets);
+  const metadata = ['title', 'manifestDigest', 'snapshotDigest'].filter((field) => current[field] !== next[field]);
+  return {
+    changed: current.commit !== next.commit || metadata.length > 0 || assets.added.length > 0 || assets.removed.length > 0 || assets.changed.length > 0,
+    commitChanged: current.commit !== next.commit,
+    metadata,
+    assets
+  };
+}
+
+/** Fetch and validate a candidate snapshot in an OS temporary directory. No project state changes. */
+export function previewStoreRefresh({ projectDir = '.', id }) {
+  const loaded = readStoreState(projectDir);
+  if (loaded.errors.length) throw extensionError(loaded.errors.join('\n'), 'INVALID_STORE_STATE');
+  requireId(id);
+  const current = loaded.state.stores.find((entry) => entry.id === id);
+  if (!current) throw extensionError(`store "${id}" is not locked`, 'STORE_NOT_FOUND');
+  const temporary = mkdtempSync(path.join(os.tmpdir(), `vld-store-${id}-`));
+  try {
+    cloneStore({ repository: current.repository, ref: current.ref, destination: temporary });
+    const checked = snapshot(temporary, id);
+    const next = stateEntry({ id, repository: current.repository, ref: current.ref, snapshot: checked });
+    return { project: loaded.project, file: loaded.file, current, next, changes: describeRefresh(current, next) };
+  } finally {
+    rmSync(temporary, { recursive: true, force: true });
+  }
+}
+
+/** Fetch a new immutable snapshot. Public refreshes provide an exact reviewed commit. */
+export function addStore({ projectDir = '.', id, repository, ref = null, refresh = false, expectedCommit = null }) {
   const project = ensureProjectDir(projectDir); requireId(id); repository = validateRepository(repository);
   if (ref !== null && ref !== undefined && !SAFE_REF.test(String(ref))) throw extensionError('store ref must be a safe branch, tag, or commit name', 'INVALID_STORE_REF');
   const loaded = readStoreState(project);
   if (loaded.errors.length) throw extensionError(loaded.errors.join('\n'), 'INVALID_STORE_STATE');
   const prior = loaded.state.stores.find((store) => store.id === id);
-  if (prior && !refresh) throw extensionError(`store "${id}" is already locked; pass --refresh after reviewing the remote update`, 'STORE_EXISTS');
+  if (prior && !refresh) throw extensionError(`store "${id}" is already locked; run "vld store diff ${id}" before a reviewed refresh`, 'STORE_EXISTS');
+  if (prior && refresh && !expectedCommit) {
+    throw extensionError(`store "${id}" needs the exact reviewed commit acknowledgement before refresh`, 'STORE_ACKNOWLEDGEMENT_REQUIRED');
+  }
+  if (expectedCommit !== null && !COMMIT.test(String(expectedCommit))) {
+    throw extensionError('store refresh acknowledgement must be the full 40-character commit shown by "vld store diff"', 'INVALID_STORE_ACKNOWLEDGEMENT');
+  }
   const root = storesDir(project); mkdirSync(root, { recursive: true });
   const destination = storeDir(project, id);
   const temporary = path.join(root, `.${id}.${process.pid}.fetching`);
@@ -146,10 +210,13 @@ export function addStore({ projectDir = '.', id, repository, ref = null, refresh
   try {
     cloneStore({ repository, ref, destination: temporary });
     const checked = snapshot(temporary, id);
+    if (expectedCommit && checked.commit !== expectedCommit) {
+      throw extensionError(`store remote resolved to ${checked.commit}, not acknowledged ${expectedCommit}; run "vld store diff ${id}" again and review the new snapshot`, 'STORE_ACKNOWLEDGEMENT_MISMATCH');
+    }
     if (existsSync(destination)) renameSync(destination, backup);
     renameSync(temporary, destination);
     const next = loaded.state.stores.filter((store) => store.id !== id);
-    next.push(stateEntry({ id, repository, ref, snapshot: checked }));
+    next.push(stateEntry({ id, repository, ref, snapshot: checked, acknowledgedCommit: prior ? expectedCommit : null }));
     next.sort((a, b) => a.id.localeCompare(b.id));
     writeJsonAtomic(loaded.file, { schemaVersion: STATE_VERSION, stores: next });
     lockWritten = true;
@@ -164,12 +231,25 @@ export function addStore({ projectDir = '.', id, repository, ref = null, refresh
   } finally { rmSync(temporary, { recursive: true, force: true }); }
 }
 
-export function refreshStore({ projectDir = '.', id }) {
-  const loaded = readStoreState(projectDir);
-  if (loaded.errors.length) throw extensionError(loaded.errors.join('\n'), 'INVALID_STORE_STATE');
-  const store = loaded.state.stores.find((entry) => entry.id === id);
-  if (!store) throw extensionError(`store "${id}" is not locked`, 'STORE_NOT_FOUND');
-  return addStore({ projectDir: loaded.project, id, repository: store.repository, ref: store.ref, refresh: true });
+export function refreshStore({ projectDir = '.', id, acknowledge = null }) {
+  const preview = previewStoreRefresh({ projectDir, id });
+  if (!preview.changes.changed) {
+    return { project: preview.project, file: preview.file, refreshed: false, unchanged: true, store: preview.current };
+  }
+  if (!acknowledge) {
+    throw extensionError(`review ${preview.next.commit} with "vld store diff ${id}", then rerun with --acknowledge ${preview.next.commit}`, 'STORE_ACKNOWLEDGEMENT_REQUIRED');
+  }
+  if (acknowledge !== preview.next.commit) {
+    throw extensionError(`acknowledgement ${acknowledge} does not match previewed commit ${preview.next.commit}; rerun "vld store diff ${id}" and acknowledge that exact commit`, 'STORE_ACKNOWLEDGEMENT_MISMATCH');
+  }
+  return addStore({
+    projectDir: preview.project,
+    id,
+    repository: preview.current.repository,
+    ref: preview.current.ref,
+    refresh: true,
+    expectedCommit: acknowledge
+  });
 }
 
 /** Inspect only the locally pinned snapshot: this never contacts a remote. */
