@@ -112,7 +112,7 @@
       "render": "data",
       "title": "Data lifecycle: retention, export and deletion",
       "statement": "When a subject asks for their data to be deleted, the application shall remove every field, derived row and cached copy about that subject in one operation, under the purpose and retention period recorded for each field.",
-      "definition": "A {secondary}'s {primary} data has a stated retention period, an export, and a deletion path that removes every copy including the ones in logs and fixtures.",
+      "definition": "{aSecondary}'s {primary} data has a stated retention period, an export, and a deletion path that removes every copy including the ones in logs and fixtures.",
       "failurePath": "A deletion request for an unknown subject returns success without inventing records, and leaves no orphan rows.",
       "acceptance": [
         "Given a subject with records in every table, when deletion runs, then a query for that subject across all tables returns zero rows.",
@@ -129,7 +129,7 @@
       "render": "security",
       "title": "Authentication with explicit session lifecycle",
       "statement": "While a session is open, the application shall accept it only after verifying it server-side, and expire or revoke it on the documented triggers.",
-      "definition": "A {secondary} signs in and signs out, and a revoked session stops working on the server immediately rather than at the next token expiry.",
+      "definition": "{aSecondary} signs in and signs out, and a revoked session stops working on the server immediately rather than at the next token expiry.",
       "failurePath": "An expired or revoked session receives an unauthenticated response and performs no state change.",
       "acceptance": [
         "Given valid credentials, when the user signs in, then a session is issued and the identifier is not placed in a URL.",
@@ -280,7 +280,7 @@
       "render": "frontend",
       "title": "Errors are classified before they are rendered",
       "statement": "When an operation fails, the interface shall classify the failure as user-correctable, retryable or unexpected and apply that class's one presentation and logging rule.",
-      "definition": "A {primary} failure is classified before it is rendered, so the message tells the {secondary} what to do next and never leaks an identifier they cannot act on.",
+      "definition": "{aPrimary} failure is classified before it is rendered, so the message tells the {secondary} what to do next and never leaks an identifier they cannot act on.",
       "failurePath": "Unexpected errors never render internal messages, stack traces or identifiers to the user, and are logged with a correlation ID that is shown as a short support code.",
       "acceptance": [
         "Given a forced internal failure, when it is displayed, then the user sees a generic message plus a support code and the server log contains the matching correlation ID."

@@ -8,7 +8,7 @@ tier_min: 2
 cost: medium
 priority: 5
 tags: [idempotency, retries, webhooks, queues, distributed]
-triggers: [webhook, retry, duplicate, idempotency, queue, at-least-once, double charge]
+triggers: [webhook, retry, duplicate, idempotency, queue, at-least-once, double charge, on reconnect, double count, duplicate delivery, deduplicate, replay ack]
 enforces: [integration.retries, pipeline.idempotency, mobile.offline]
 artifacts: [04-contracts.md, 02-domain-model.md]
 ---

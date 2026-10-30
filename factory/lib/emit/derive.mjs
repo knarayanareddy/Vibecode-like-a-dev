@@ -272,7 +272,7 @@ export function buildPhases(plan, phrases) {
         `Initialise the repository with ${stackFor(profile).stack.language} and ${db}; commit the lockfile.`,
         'Add the CI workflow with lint, typecheck and test jobs, and make it required on the default branch.',
         `Add configuration validation that names every missing variable before the first ${primary} is created.`,
-        `Write the runbook: install, run, test, deploy, and what ${secondary}s see when the ${primary} service is down.`,
+        `Write the runbook: install, run, test, deploy, and what ${secondaryPlural} see when the ${primary} service is down.`,
         'Copy the specification packet into specs/ and wire the spec check into CI.',
         `Answer the open questions that block the ${primary} slice; the rest can wait for their phase.`
       ],
@@ -299,7 +299,7 @@ export function buildPhases(plan, phrases) {
         'Record a real response for every external dependency, or write down the stub and why.',
         `Record an ADR for each library that a reviewer could plausibly want removed.`
       ],
-      exit: `The ${aPrimary} acceptance tests exist and fail because the behaviour is missing, not because the setup is.`
+      exit: `The ${primary} acceptance tests exist and fail because the behaviour is missing, not because the setup is.`
     },
     {
       name: 'Phase 3 — Vertical slices',
@@ -522,13 +522,19 @@ export const AREA_DOCUMENT = {
 export function templateFiller(plan) {
   const vocab = vocabularyFor(plan.profile);
   const project = titleize(plan.profile.name).replace(/^\d+\s*/, '');
+  const aSecondary = `${articleFor(vocab.secondary)} ${vocab.secondary}`;
+  const cap = (text) => `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
   return (template) =>
     String(template)
       .replace(/\{project\}/g, project)
+      .replace(/\bA \{primary\}/g, cap(vocab.aPrimary))
+      .replace(/\ba \{primary\}/g, vocab.aPrimary)
       .replace(/\{aPrimary\}/g, vocab.aPrimary)
       .replace(/\{primaryPlural\}/g, vocab.primaryPlural)
       .replace(/\{primary\}/g, vocab.primary)
-      .replace(/\{aSecondary\}/g, `${articleFor(vocab.secondary)} ${vocab.secondary}`)
+      .replace(/\bA \{secondary\}/g, cap(aSecondary))
+      .replace(/\ba \{secondary\}/g, aSecondary)
+      .replace(/\{aSecondary\}/g, aSecondary)
       .replace(/\{secondaryPlural\}/g, vocab.secondaryPlural)
       .replace(/\{secondary\}/g, vocab.secondary)
       .replace(/\{db\}/g, dbLabel(plan.profile));

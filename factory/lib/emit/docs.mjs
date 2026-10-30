@@ -72,7 +72,7 @@ export function constitution(plan, d) {
     ['The domain stays pure.', `Rules import no framework, no ${db === 'SQLite' ? 'database driver' : db}, and no vendor SDK. ${d.style.name} only holds if this is checked, not intended.`],
     ['Boring technology, justified additions.', `${plan.primitives.length} practices were selected for ${d.project}; anything not among them needs an ADR naming what it replaces and what breaks without it.`],
     ['Fail closed.', profile.risks.multiTenant
-      ? `Deny by default. A ${primary} read without a resolved tenant is a failure, not an empty list.`
+      ? `Deny by default. ${d.aPrimary.charAt(0).toUpperCase()}${d.aPrimary.slice(1)} read without a resolved tenant is a failure, not an empty list.`
       : 'Deny by default for authorization; refuse rather than guess; never silently weaken a control to make a test pass.'],
     ['Make it observable.', `A failed ${d.primary} operation is a log line with a correlation id and the ${d.secondary} it belonged to — including the ones you think cannot happen.`],
     ['Reversible beats predictable.', `Schema changes go forward only, behind a ${db} migration; ${plan.config.weeks}-week scope means something gets cut, so cut features, not rollback paths.`],
@@ -80,7 +80,7 @@ export function constitution(plan, d) {
   ];
 
   const conditional = [];
-  if (profile.traits.includes('payments')) conditional.push(['Money is never approximate.', `A ${primary} that moves money writes a ledger entry in the same transaction as the state change. No balance is ever recomputed from events at read time.`]);
+  if (profile.traits.includes('payments')) conditional.push(['Money is never approximate.', `${d.aPrimary.charAt(0).toUpperCase()}${d.aPrimary.slice(1)} that moves money writes a ledger entry in the same transaction as the state change. No balance is ever recomputed from events at read time.`]);
   if (profile.risks.multiTenant) conditional.push(['Tenancy is not a parameter.', 'The tenant comes from the session. Any handler that reads it from a body or a query string is a bug, including in tests.']);
   if (profile.traits.includes('ai')) conditional.push(['A model is an untrusted dependency.', 'Model output is validated before it is used; a timeout or malformed response degrades, it never half-writes.']);
   if (profile.traits.includes('offline')) conditional.push(['A write is confirmed once.', `A queued ${primary} change replays idempotently; a duplicate is discarded on the server, not in the client.`]);
@@ -562,7 +562,7 @@ export function architecture(plan, d) {
     '',
     bullets([
       `A single ${d.primary} operation needs to scale on a different curve from the rest, measured rather than predicted.`,
-      `A ${d.primary} write starts spanning more than two of the ${d.contexts.length} contexts and cannot be made eventually consistent without rewriting the rules.`,
+      `${d.aPrimary.charAt(0).toUpperCase()}${d.aPrimary.slice(1)} write starts spanning more than two of the ${d.contexts.length} contexts and cannot be made eventually consistent without rewriting the rules.`,
       `The tests for ${d.primary} rules need ${d.db} running to pass: that is a broken boundary, not a reason to add a service.`
     ]),
     ''
@@ -590,7 +590,7 @@ export function contracts(plan, d) {
   // alike; the rest lives in the library practice this packet selected.
   const conventions = [
     ['Identifiers', `Every ${primary} id is opaque and sortable (ULID); a sequential integer never appears in an external shape, because it invites enumeration.`],
-    ['Timestamps', `Instants on a ${primary} are ISO-8601 UTC with \`Z\`; a local time or a bare date is a bug, not a style choice.`]
+    ['Timestamps', `Instants on ${d.aPrimary} are ISO-8601 UTC with \`Z\`; a local time or a bare date is a bug, not a style choice.`]
   ];
   if (profile.traits.includes('payments')) {
     conventions.push(['Money', 'Integer minor units plus an ISO-4217 code. Never a float, never a pre-formatted string.']);
@@ -632,10 +632,10 @@ export function contracts(plan, d) {
     ...(authenticated
       ? [
           ['401', 'No valid session', `Missing, expired or revoked credential. No ${primary} is created and no state changes.`],
-          ['403', 'Authenticated but not permitted', `Policy denied for this ${d.aSecondary}. Never reveal whether the ${primary} exists.`]
+          ['403', 'Authenticated but not permitted', `Policy denied for this ${d.secondary}. Never reveal whether the ${primary} exists.`]
         ]
       : []),
-    ['404', 'Not found, or not visible to this actor', `One response for both cases, so a ${primary} id cannot be used to probe.`],
+    ['404', 'Not found, or not visible to this actor', `One response for both cases, so ${d.aPrimary} id cannot be used to probe.`],
     ['409', 'Conflict with current state', `The ${primary} would be left in a state \`02-domain-model.md\` calls illegal, or a replay carries a different payload.`],
     ['422', 'Semantically invalid', `Well-formed but breaks a rule that makes ${d.aPrimary} valid.`]
   ];
@@ -644,7 +644,7 @@ export function contracts(plan, d) {
   }
 
   const shapes = d.surfaces.slice(0, 4).map(([surface, why]) => {
-    if (/HTTP/.test(surface)) return [`\`POST /v1/${primary}s\``, `creates ${d.aPrimary}; returns the created id and its version`, why];
+    if (/HTTP/.test(surface)) return [`\`POST /v1/${d.primaryPlural}\``, `creates ${d.aPrimary}; returns the created id and its version`, why];
     if (/Session/.test(surface)) return ['`POST /v1/sessions`', `exchanges credentials for a short-lived token tied to ${d.aSecondary}`, why];
     if (/Upload/.test(surface)) return ['`POST /v1/uploads`', 'returns a content-addressed id the client then attaches', why];
     if (/Payment/.test(surface)) return ['`POST /v1/payment-intents`', 'one intent per attempt, replayable by key', why];
@@ -699,7 +699,7 @@ export function contracts(plan, d) {
             'Event names are past-tense facts about what happened, not commands.',
             'Every event carries `id`, `type`, `occurredAt`, `correlationId`, `producer`, `schemaVersion`.',
             'Consumers tolerate duplicates, out-of-order delivery and late arrival; producers never rely on delivery order.',
-            `A job that touches an ${primary} declares an idempotency key and a maximum attempt count.`
+            `A job that touches ${d.aPrimary} declares an idempotency key and a maximum attempt count.`
           ]),
           ''
         ]
@@ -708,7 +708,7 @@ export function contracts(plan, d) {
     '',
     bullets([
       `Each of the ${d.surfaces.length} surfaces gets one test for its success shape and one for the ${primary} failure it is most likely to hit.`,
-      `Anything this product consumes is tested against a recorded response; a hand-written mock of a ${d.aSecondary} drifts silently.`,
+      `Anything this product consumes is tested against a recorded response; a hand-written mock of ${d.aSecondary} drifts silently.`,
       `Changing a shape in section 2 fails the build before review, because the test that pins it lives beside the ${primary} it serialises.`
     ]),
     '',

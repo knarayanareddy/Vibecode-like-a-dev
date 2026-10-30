@@ -8,7 +8,7 @@ tier_min: 1
 cost: medium
 priority: 3
 tags: [database, migrations, schema, rollback, data]
-triggers: [schema, migration, database change, alter table, migration rollback]
+triggers: [schema, migration, database change, alter table, migration rollback, add column, nullable column, drop column, locking writes, table lock, expand contract, backfill]
 enforces: [data.persistence]
 artifacts: [04-contracts.md]
 ---

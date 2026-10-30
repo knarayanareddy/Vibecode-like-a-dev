@@ -8,7 +8,7 @@ tier_min: 2
 cost: medium
 priority: 5
 tags: [security, threat-model, stride, trust-boundary, owasp, llm-guardrails]
-triggers: [threat model, prompt injection, abuse case, untrusted upload, attack surface, trust boundary, stride, vulnerability, llm guardrails, token spend, external model, structured json output]
+triggers: [threat model, prompt injection, abuse case, untrusted upload, attack surface, trust boundary, stride, vulnerability, llm guardrails, token spend, llm spend, model spend, cost ceiling, external model, calling openai, calling anthropic, structured json output]
 enforces: [auth.authorization, ops.rate-limits, data.uploads, ai.guardrails]
 artifacts: [04-contracts.md, 05-verification.md]
 ---

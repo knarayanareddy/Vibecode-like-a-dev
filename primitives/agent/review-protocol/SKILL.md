@@ -3,7 +3,7 @@ id: agent.review-protocol
 title: Automated review protocol
 module: agent
 summary: Review against the spec with a reviewer that did not write the code, and refuse the diff that only looks right.
-obligation: "In {project}, every change to a {primary} rule is reviewed by a session that did not write it, against `spec.json` rather than against the diff."
+obligation: "In {project}, every change to {aPrimary} rule is reviewed by a session that did not write it, against `spec.json` rather than against the diff."
 tier_min: 1
 cost: low
 priority: 4
@@ -25,7 +25,7 @@ A review needs a reader with a different objective: the spec, not the diff.
 
 Generated per product from the profile — the braces are slots the packet fills:
 
-> In {project}, every change to a {primary} rule is reviewed by a session that did not write it, against `spec.json` rather than against the diff.
+> In {project}, every change to {aPrimary} rule is reviewed by a session that did not write it, against `spec.json` rather than against the diff.
 
 That sentence is generated from the profile, so it names this product's own nouns. If it would read the same for any product of this kind, the idea behind the profile is too thin to bind the practice — fix the idea, not the sentence.
 

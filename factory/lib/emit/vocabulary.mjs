@@ -80,12 +80,20 @@ const KNOWN_NOUN_STEMS = new Set([
  */
 const ACTOR_STEMS = new Set([
   'participant', 'patient', 'coordinator', 'therapist', 'clinician', 'doctor', 'nurse', 'sponsor',
-  'auditor', 'reviewer', 'approver', 'operator', 'admin', 'administrator', 'moderator', 'member',
-  'tenant', 'seller', 'buyer', 'merchant', 'vendor', 'supplier', 'shopper', 'subscriber', 'reader',
-  'author', 'writer', 'editor', 'creator', 'owner', 'manager', 'staff', 'receptionist', 'driver',
-  'rider', 'courier', 'student', 'teacher', 'instructor', 'applicant', 'claimant', 'accountant',
-  'analyst', 'consumer', 'client', 'partner', 'team', 'organisation', 'organization', 'clinic',
-  'hospital', 'site', 'company', 'enterprise', 'institution', 'agency', 'bank'
+  'auditor', 'reviewer', 'approver', 'operator', 'dispatcher', 'aggregator', 'host', 'admin',
+  'administrator', 'moderator', 'member', 'tenant', 'seller', 'buyer', 'merchant', 'vendor',
+  'supplier', 'distributor', 'wholesaler', 'retailer', 'manufacturer', 'producer', 'grower',
+  'farmer', 'shopper', 'subscriber', 'reader', 'author', 'writer', 'editor', 'creator', 'owner',
+  'manager', 'director', 'supervisor', 'inspector', 'regulator', 'contractor', 'subcontractor',
+  'broker', 'dealer', 'underwriter', 'adjuster', 'investor', 'advisor', 'counselor', 'mediator',
+  'arbitrator', 'issuer', 'borrower', 'lender', 'payer', 'payee', 'beneficiary', 'carrier',
+  'shipper', 'employer', 'employee', 'recruiter', 'candidate', 'trainee', 'attendee', 'organizer',
+  'organiser', 'volunteer', 'donor', 'custodian', 'guardian', 'caregiver', 'pharmacist',
+  'practitioner', 'technician', 'scheduler', 'assessor', 'officer', 'clerk', 'cashier', 'landlord',
+  'lessee', 'lessor', 'renter', 'guest', 'passenger', 'staff', 'receptionist', 'driver', 'rider',
+  'courier', 'student', 'teacher', 'instructor', 'applicant', 'claimant', 'accountant', 'analyst',
+  'consumer', 'client', 'partner', 'team', 'organisation', 'organization', 'clinic', 'hospital',
+  'site', 'company', 'enterprise', 'institution', 'agency', 'bank'
 ]);
 
 /**

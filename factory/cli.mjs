@@ -31,13 +31,14 @@ const option = (name, fallback) => {
   const index = rest.indexOf(name);
   return index === -1 || index === rest.length - 1 ? fallback : rest[index + 1];
 };
-const positional = rest.filter((item, index) => !item.startsWith('-') && !(index > 0 && ['-o', '--out', '--repo'].includes(rest[index - 1])));
+const VALUE_FLAGS = new Set(['-o', '--out', '--repo', '--name', '--idea', '--profile', '--packet']);
+const positional = rest.filter((item, index) => !item.startsWith('-') && !(index > 0 && VALUE_FLAGS.has(rest[index - 1])));
 
 const USAGE = `vibecode like a dev — from one paragraph to a spec an agent can execute
 
 Usage
   vld init <dir>                     write profile.json to fill in
-  vld adopt <repo> [-o <file>] [--force] [--json]
+  vld adopt <repo> [-o <file>] [--name <slug>] [--idea <text>] [--force] [--json]
                                      infer a profile from an existing repository
   vld plan <profile.json> [--json]   show selection and reasoning, write nothing
   vld compile <profile.json> -o <dir> [--force]
@@ -250,7 +251,9 @@ function runAdopt(repoPath) {
   const repo = repoPath ?? '.';
   if (!existsSync(repo)) fail(`No such repository: ${repo}`);
 
-  const report = adoptRepo(repo);
+  const explicitName = option('--name', null);
+  const explicitIdea = option('--idea', null);
+  const report = adoptRepo(repo, { name: explicitName, idea: explicitIdea });
 
   if (hasFlag('--json')) {
     console.log(JSON.stringify(report, null, 2));
@@ -286,13 +289,17 @@ function runAdopt(repoPath) {
     written = writeAdoptedProfile(report, out, { force: hasFlag('--force') });
     console.log(`\n✓ wrote ${written}`);
   } catch (error) {
+    if (error.code === 'INVALID_PROFILE') fail(error.message);
     console.log(`\n  ! profile not written: ${error.message}`);
     return;
   }
 
+  const stepOne = explicitIdea
+    ? `1. Review and answer the remaining questions above inside ${displayPath(written)}.`
+    : `1. Answer the questions above inside ${displayPath(written)} — the draft idea is a placeholder.`;
   console.log(`
 Next
-  1. Answer the questions above inside ${displayPath(written)} — the draft idea is a placeholder.
+  ${stepOne}
   2. vld plan ${displayPath(written)}      # check the tier before you trust it
   3. vld compile ${displayPath(written)} -o specs
 `);

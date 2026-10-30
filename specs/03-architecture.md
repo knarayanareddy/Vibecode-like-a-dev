@@ -92,5 +92,5 @@ Architecture that is not executable is decoration, so each of these runs in CI f
 ## 10. When this architecture should change
 
 - A single agent operation needs to scale on a different curve from the rest, measured rather than predicted.
-- A agent write starts spanning more than two of the 1 contexts and cannot be made eventually consistent without rewriting the rules.
+- An agent write starts spanning more than two of the 1 contexts and cannot be made eventually consistent without rewriting the rules.
 - The tests for agent rules need PostgreSQL running to pass: that is a broken boundary, not a reason to add a service.

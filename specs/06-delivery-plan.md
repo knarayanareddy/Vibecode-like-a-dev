@@ -46,7 +46,7 @@ _Every boundary around an agent fixed while changing it is still free._
 - [ ] Record a real response for every external dependency, or write down the stub and why.
 - [ ] Record an ADR for each library that a reviewer could plausibly want removed.
 
-**Exit:** The an agent acceptance tests exist and fail because the behaviour is missing, not because the setup is.
+**Exit:** The agent acceptance tests exist and fail because the behaviour is missing, not because the setup is.
 
 ### Phase 3 — Vertical slices · week 5-6
 

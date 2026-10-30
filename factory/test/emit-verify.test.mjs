@@ -550,3 +550,27 @@ test('out-of-scope section does not defer offline to v2 when the offline trait i
   assert.match(briefWithoutOffline, /need it offline, that is a v2 decision/i);
 });
 
+test('emitted markdown never produces doubled determiners ("a an", "this a", "the a") or wrong articles before vowel nouns', (t) => {
+  const vowelProject = compileTemp(
+    normalizeProfile({
+      name: 'grid-invoicing',
+      idea:
+        'An invoice settlement platform where grid aggregators and regional operators review utility invoices, approve invoice adjustments, and settle each invoice idempotently across webhooks and background jobs.',
+      kind: 'web-app',
+      stage: 'production',
+      traits: ['auth', 'admin', 'payments', 'persistence', 'webhooks', 'background-jobs', 'offline', 'ai'],
+      risks: { pii: true, payments: true, regulated: true, multiTenant: true, publicFacing: true }
+    })
+  );
+  t.after(vowelProject.cleanup);
+
+  const mdFiles = ['00-constitution.md', '01-product-brief.md', '02-domain-model.md', '03-architecture.md', '04-contracts.md', '05-verification.md', '06-delivery-plan.md', '07-agent-handoff.md'];
+  for (const doc of mdFiles) {
+    const text = readFileSync(path.join(vowelProject.outDir, doc), 'utf8');
+    assert.doesNotMatch(text, /\b(a|an)\s+(a|an)\s+[a-z]/i, `${doc} contains doubled indefinite article`);
+    assert.doesNotMatch(text, /\b(the|this)\s+(a|an)\s+[a-z]/i, `${doc} contains determiner + indefinite article`);
+    assert.doesNotMatch(text, /\b[Aa]\s+(invoice|aggregator|operator)\b/, `${doc} used "a" before vowel noun`);
+  }
+});
+
+

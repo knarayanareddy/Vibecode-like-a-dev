@@ -3,7 +3,7 @@ id: agent.spec-drift-guard
 title: Spec drift guard
 module: agent
 summary: Make spec-code divergence fail the build, because an unchecked spec becomes a confident lie.
-obligation: "In {project}, a {primary} requirement that loses its test anchor fails the build instead of quietly becoming documentation."
+obligation: "In {project}, {aPrimary} requirement that loses its test anchor fails the build instead of quietly becoming documentation."
 tier_min: 2
 cost: low
 priority: 7
@@ -23,7 +23,7 @@ The fix is not better discipline. It is a check that runs without anyone remembe
 
 Generated per product from the profile — the braces are slots the packet fills:
 
-> In {project}, a {primary} requirement that loses its test anchor fails the build instead of quietly becoming documentation.
+> In {project}, {aPrimary} requirement that loses its test anchor fails the build instead of quietly becoming documentation.
 
 That sentence is generated from the profile, so it names this product's own nouns. If it would read the same for any product of this kind, the idea behind the profile is too thin to bind the practice — fix the idea, not the sentence.
 

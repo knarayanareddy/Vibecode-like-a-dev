@@ -46,7 +46,7 @@ _Every boundary around a board fixed while changing it is still free._
 - [ ] Record a real response for every external dependency, or write down the stub and why.
 - [ ] Record an ADR for each library that a reviewer could plausibly want removed.
 
-**Exit:** The a board acceptance tests exist and fail because the behaviour is missing, not because the setup is.
+**Exit:** The board acceptance tests exist and fail because the behaviour is missing, not because the setup is.
 
 ### Phase 3 — Vertical slices · week 4-4
 

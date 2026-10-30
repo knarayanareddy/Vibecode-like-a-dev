@@ -185,3 +185,27 @@ test('compile and verify report identical core packet markdown line counts even 
     rmSync(workspace, { recursive: true, force: true });
   }
 });
+
+test('vld adopt supports --name and --idea flags on the CLI and rejects invalid --name cleanly with exit 2', async () => {
+  const workspace = mkdtempSync(path.join(os.tmpdir(), 'vld-adopt-flags-'));
+  try {
+    writeFileSync(path.join(workspace, 'package.json'), JSON.stringify({ name: '@grid/console', dependencies: { next: '15.0.0', react: '19.0.0' } }));
+    const outPath = path.join(workspace, 'adopted-profile.json');
+    const customIdea = 'A multi-tenant virtual power plant dispatch platform for commercial fleet operators and grid aggregators.';
+
+    const ok = await cli(['adopt', '--name', 'gridpulse-dispatch', '--idea', customIdea, workspace, '-o', outPath]);
+    assert.equal(ok.code, 0, ok.stderr);
+    assert.doesNotMatch(ok.stdout, /Replace the draft idea/i);
+    const written = JSON.parse(readFileSync(outPath, 'utf8'));
+    assert.equal(written.name, 'gridpulse-dispatch');
+    assert.equal(written.idea, customIdea);
+
+    const bad = await cli(['adopt', workspace, '--name', 'BAD_UPPERCASE_NAME', '-o', path.join(workspace, 'bad.json')]);
+    assert.equal(bad.code, 2);
+    assert.match(bad.stderr, /invalid profile/i);
+    assert.ok(!/^\s+at\s/m.test(bad.stderr), 'invalid --name must not print a stack trace');
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
