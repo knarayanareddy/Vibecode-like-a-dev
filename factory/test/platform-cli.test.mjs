@@ -122,6 +122,10 @@ test('public store journey pins a file-backed Git snapshot and reports clean fai
   assert.equal(JSON.parse(added.stdout).store.assets.length, 1);
   const status = await cli(['store', 'status', 'team-playbook', '--project', consumer, '--json']);
   assert.equal(status.code, 0, status.stderr); assert.equal(JSON.parse(status.stdout).ok, true);
+  const assets = await cli(['store', 'assets', 'team-playbook', '--project', consumer, '--json']);
+  assert.equal(assets.code, 0, assets.stderr); assert.equal(JSON.parse(assets.stdout).stores[0].assets[0].id, 'review-guidance');
+  const copied = await cli(['store', 'copy', 'team-playbook', 'review-guidance', '--project', consumer, '--json']);
+  assert.equal(copied.code, 0, copied.stderr); assert.match(JSON.parse(copied.stdout).output, /docs\/shared\/team-playbook\/review-guidance\.md$/);
   const unsafe = await cli(['store', 'add', 'unsafe', '--bad', '--project', consumer]);
   assert.equal(unsafe.code, 2); assert.match(unsafe.stderr, /safe Git URL|Usage/); assert.equal(unsafe.stdout, '');
 });
@@ -144,6 +148,11 @@ test('public platform failures are clean usage/input errors, not agent invocatio
   assert.equal(missingEvidence.code, 2);
   assert.match(missingEvidence.stderr, /has not started/);
   assert.doesNotMatch(missingEvidence.stderr, /^\s+at\s/m);
+
+  const noArtifacts = await cli(['artifact', 'verify', '--project', project, '--json']);
+  assert.equal(noArtifacts.code, 1);
+  assert.equal(JSON.parse(noArtifacts.stdout).ok, false);
+  assert.equal(noArtifacts.stderr, '');
 
   const missingAdapter = await cli(['agent', 'install', 'invented-agent', '--project', project]);
   assert.equal(missingAdapter.code, 2);

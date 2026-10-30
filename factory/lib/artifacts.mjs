@@ -1,7 +1,8 @@
 /** Validated, human-authored delivery artifacts for optional VLD modules. */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { requireVerifiedModules } from './modules.mjs';
+import { readStoreAsset } from './stores.mjs';
 import { ensureProjectDir, extensionError } from './extension-utils.mjs';
 
 export const ARTIFACTS = {
@@ -36,6 +37,11 @@ function headingBody(content, heading) {
   return lines.slice(start + 1, end === -1 ? undefined : end).join('\n').trim();
 }
 function links(content) { return [...new Set(content.match(/REQ-\d{3}/g) ?? [])]; }
+function storeReference(value) {
+  const [storeId, assetId, ...extra] = String(value ?? '').split('/');
+  if (!storeId || !assetId || extra.length) throw extensionError('store template must be written as <store-id>/<asset-id>', 'INVALID_STORE_TEMPLATE');
+  return { storeId, assetId };
+}
 function template(kind, { profile = {}, requirements = [], id }) {
   const name = profile.name ?? 'project';
   const reqs = requirements.length ? requirements.map((r) => `- ${r.id} — ${r.title}`).join('\n') : '- [Link relevant REQ-### identifiers after compiling the packet.]';
@@ -46,24 +52,108 @@ function template(kind, { profile = {}, requirements = [], id }) {
   if (kind === 'review-brief') return `# Review Brief: ${name}\n\n${common}## Change Summary\n\n[Describe the changed behavior and blast radius.]\n\n## Requirements Under Review\n\n${reqs}\n\n## Risk and Invariants\n\n- [State the invariant a reviewer must protect.]\n\n## Evidence\n\n- [Record an executed command and its outcome.]\n\n## Review Questions\n\n- [Ask a falsifiable review question.]\n\n## Decision\n\n[Record approve, reject, or the blocking concern.]\n`;
   return `# QA Plan: ${name}\n\n${common}## Risk-based Strategy\n\n[Explain which failure paths need the strongest evidence.]\n\n## Requirement Coverage\n\n| Requirement | Test level | Evidence | Status |\n| --- | --- | --- | --- |\n${requirements.length ? requirements.filter((r) => r.verify === 'automated').map((r) => `| ${r.id} | [unit/integration/e2e] | [test path] | planned |`).join('\n') : '| REQ-### | [test level] | [test path] | planned |'}\n\n## End-to-End Scenarios\n\n### [Scenario name]\n\n- Given: [state]\n- When: [action]\n- Then: [observable result]\n\n## Release Evidence\n\n- [Record required test and gate evidence.]\n`;
 }
-export function initArtifact({ kind, projectDir='.', packetDir=null, profilePath=null, id=null, out=null, force=false }) {
+export function initArtifact({ kind, projectDir='.', packetDir=null, profilePath=null, id=null, out=null, fromStore=null, force=false }) {
   const project=ensureProjectDir(projectDir), type=typeOrThrow(kind); requireVerifiedModules(project,[type.module]);
   const file=fileFor(project,kind,id,out); if (existsSync(file)&&!force) throw extensionError(`${file} exists; pass --force to replace it`, 'ARTIFACT_EXISTS');
   let profile={}; const p=path.resolve(profilePath ?? path.join(project,'profile.json')); if (existsSync(p)) try { profile=JSON.parse(readFileSync(p,'utf8')); } catch {}
-  const requirements=packetRequirements(path.resolve(packetDir ?? path.join(project,'specs'))); mkdirSync(path.dirname(file),{recursive:true}); writeFileSync(file,template(kind,{profile,requirements,id}),'utf8'); return {project,kind,file,requirements:requirements.length};
+  const requirements=packetRequirements(path.resolve(packetDir ?? path.join(project,'specs'))); let source=null;
+  let content=template(kind,{profile,requirements,id});
+  if (fromStore) {
+    const reference=storeReference(fromStore); const imported=readStoreAsset({ projectDir: project, ...reference, kind: 'artifact-template' });
+    if (imported.asset.artifact !== kind) throw extensionError(`store template "${fromStore}" is for ${imported.asset.artifact}, not ${kind}`, 'STORE_TEMPLATE_TYPE_MISMATCH');
+    source={ store: imported.store.id, asset: imported.asset.id, commit: imported.store.commit, digest: imported.asset.digest };
+    content=`${imported.content.trimEnd()}\n\n<!-- VLD template source: ${source.store}/${source.asset} @ ${source.commit} · sha256 ${source.digest} -->\n`;
+  }
+  mkdirSync(path.dirname(file),{recursive:true}); writeFileSync(file,content,'utf8'); return {project,kind,file,requirements:requirements.length,source};
 }
-export function validateArtifact({ kind, projectDir='.', packetDir=null, id=null, file=null, strict=false }) {
+export function validateArtifact({ kind, projectDir='.', packetDir=null, requirementsOverride=null, id=null, file=null, strict=false }) {
   const project=ensureProjectDir(projectDir), type=typeOrThrow(kind); requireVerifiedModules(project,[type.module]);
   const target=fileFor(project,kind,id,file), errors=[], warnings=[]; if(!existsSync(target)) return {ok:false,strictOk:false,file:target,errors:[`missing artifact: ${target}`],warnings,requirements:[]};
   const content=readFileSync(target,'utf8'); if(!content.startsWith(`# ${type.title === 'Architecture Decision' ? 'ADR:' : type.title}`)) errors.push('title does not match artifact type');
   for(const section of type.sections){ const body=headingBody(content,section); if(!body) errors.push(`missing or empty ## ${section}`); else if(body.length<20) warnings.push(`## ${section} is too thin`); }
   if(PLACEHOLDER.test(content)) warnings.push('contains an unfilled template placeholder'); if(DRAFT.test(content)) warnings.push('artifact status is still Draft, Proposed or Pending');
-  const requirements=packetRequirements(path.resolve(packetDir ?? path.join(project,'specs'))), known=new Set(requirements.map(r=>r.id)), referenced=links(content);
+  const requirements=Array.isArray(requirementsOverride) ? requirementsOverride : packetRequirements(path.resolve(packetDir ?? path.join(project,'specs'))), known=new Set(requirements.map(r=>r.id)), referenced=links(content);
   for(const req of referenced) if(!known.has(req)&&requirements.length) errors.push(`${req} is not in the packet`);
   if(requirements.length&&referenced.length===0) warnings.push('does not link to a packet requirement');
   if(kind==='qa-plan') { if(!requirements.length) errors.push('QA plan requires a compiled packet'); else { const missing=requirements.filter(r=>r.verify==='automated'&&!referenced.includes(r.id)).map(r=>r.id); if(missing.length) errors.push(`QA coverage is missing automated requirement(s): ${missing.join(', ')}`); } }
   const ok=errors.length===0; return {ok,strictOk:ok&&warnings.length===0,file:target,errors,warnings,requirements:referenced};
 }
+function requestedKinds(kinds) {
+  const values = Array.isArray(kinds) ? kinds : typeof kinds === 'string' ? kinds.split(',') : [];
+  const selected = values.map((value) => String(value).trim()).filter(Boolean);
+  const invalid = selected.filter((kind) => !ARTIFACTS[kind]);
+  if (invalid.length) throw extensionError(`unknown artifact type(s): ${invalid.join(', ')}`, 'UNKNOWN_ARTIFACT');
+  if (new Set(selected).size !== selected.length) throw extensionError('artifact types must not repeat', 'DUPLICATE_ARTIFACT');
+  return selected;
+}
+function targetsFor(project, kind) {
+  if (kind !== 'architecture-decision') return [{ id: null, file: fileFor(project, kind, null, null) }];
+  const directory = path.join(project, 'docs', 'adr');
+  if (!existsSync(directory)) return [];
+  return readdirSync(directory, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
+    .map((entry) => ({ id: entry.name.slice(0, -3), file: path.join(directory, entry.name) }))
+    .sort((left, right) => left.file.localeCompare(right.file));
+}
+
+/**
+ * Verify the enabled human artifacts together against one compiled packet.
+ * This is deliberately a structural traceability check: it does not interpret
+ * prose or let an artifact replace the packet's requirement source of truth.
+ */
+export function verifyArtifacts({ projectDir='.', packetDir=null, kinds=null }) {
+  const project = ensureProjectDir(projectDir);
+  const modules = requireVerifiedModules(project, []);
+  const enabled = new Set(modules.modules.map((module) => module.id));
+  const selected = requestedKinds(kinds);
+  const types = selected.length ? selected : listArtifacts().filter((type) => enabled.has(type.module)).map((type) => type.id);
+  const errors = [], warnings = [], passes = [], reports = [];
+  if (!types.length) errors.push('no artifact modules are enabled');
+  const packet = path.resolve(packetDir ?? path.join(project, 'specs'));
+  const packetFile = path.join(packet, 'spec.json');
+  if (!existsSync(packetFile)) errors.push(`artifact verification requires a compiled packet: ${packetFile}`);
+  const requirements = packetRequirements(packet);
+  for (const kind of types) {
+    const type = typeOrThrow(kind);
+    if (!enabled.has(type.module)) {
+      errors.push(`${kind} requires enabled module ${type.module}`);
+      continue;
+    }
+    const targets = targetsFor(project, kind);
+    if (!targets.length) {
+      errors.push(kind === 'architecture-decision' ? 'architecture-decision requires at least one docs/adr/<id>.md artifact' : `missing ${kind} artifact`);
+      continue;
+    }
+    for (const target of targets) {
+      if (target.id && !ID.test(target.id)) {
+        errors.push(`architecture-decision has invalid decision id "${target.id}"`);
+        continue;
+      }
+      let report;
+      try {
+        report = validateArtifact({ kind, projectDir: project, packetDir: packet, id: target.id, file: target.file, strict: true });
+      } catch (error) {
+        errors.push(`${kind}${target.id ? `/${target.id}` : ''}: ${error.message}`);
+        continue;
+      }
+      reports.push({ kind, id: target.id, ...report });
+      for (const warning of report.warnings) warnings.push(`${kind}${target.id ? `/${target.id}` : ''}: ${warning}`);
+      for (const error of report.errors) errors.push(`${kind}${target.id ? `/${target.id}` : ''}: ${error}`);
+      if (report.ok && !report.strictOk) errors.push(`${kind}${target.id ? `/${target.id}` : ''}: strict validation has warnings`);
+    }
+  }
+  if (existsSync(packetFile) && !requirements.length) errors.push('compiled packet has no requirements');
+  const productReports = reports.filter((report) => report.kind === 'product-brief');
+  if (requirements.length && productReports.length) {
+    const linked = new Set(productReports.flatMap((report) => report.requirements));
+    const missing = requirements.filter((requirement) => !linked.has(requirement.id)).map((requirement) => requirement.id);
+    if (missing.length) errors.push(`product-brief does not link packet requirement(s): ${missing.join(', ')}`);
+    else passes.push(`product brief links all ${requirements.length} packet requirement(s)`);
+  }
+  if (!errors.length) passes.push(`${reports.length} artifact(s) passed strict structural validation`);
+  return { ok: errors.length === 0, project, packet, artifacts: reports, requirements: requirements.map((requirement) => requirement.id), errors, warnings, passes };
+}
+
 export function artifactStatus({ projectDir='.', packetDir=null }) {
   const project = ensureProjectDir(projectDir);
   return listArtifacts().map(({ id }) => {

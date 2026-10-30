@@ -14,6 +14,7 @@ import test from 'node:test';
 import { applyChange, archiveChange, emitChange, planChange, recompilePacket, renderChange, validateChange, verifyChange } from '../lib/change.mjs';
 import { emitPacket } from '../lib/emit/index.mjs';
 import { buildIndex } from '../lib/indexer.mjs';
+import { enableModules } from '../lib/modules.mjs';
 import { buildPlan } from '../lib/planner.mjs';
 import { normalizeProfile } from '../lib/profile.mjs';
 
@@ -33,6 +34,17 @@ function packet() {
   const { outDir } = emitPacket(plan, path.join(root, 'spec'));
   const spec = JSON.parse(readFileSync(path.join(outDir, 'spec.json'), 'utf8'));
   return { root, outDir, spec, cleanup: () => rmSync(root, { recursive: true, force: true }) };
+}
+
+function recordReviewedEvidence({ root, changeDir, plan }) {
+  enableModules({ projectDir: root, ids: 'review' });
+  const ids = [...plan.added.map((requirement) => requirement.id), ...plan.modified.map(({ target }) => target.id), ...plan.removed.map(({ target }) => target.id)];
+  mkdirSync(path.join(root, 'docs'), { recursive: true });
+  writeFileSync(path.join(root, 'docs', 'review-brief.md'), `# Review Brief: retro-board\n\n**Status:** Approved\n\n## Change Summary\n\nThe proposed requirement delta and resulting packet were reviewed before archival.\n\n## Requirements Under Review\n\n${ids.map((id) => `- ${id}`).join('\n')}\n\n## Risk and Invariants\n\nThe review protects the stated acceptance criteria and the documented rollback boundary.\n\n## Evidence\n\nThe generated packet and linked tests were reviewed against the change proposal.\n\n## Review Questions\n\nDo the linked requirements retain executable evidence after the proposed delta?\n\n## Decision\n\nApproved by the accountable reviewer with the stated rollback condition.\n`);
+  const evidence = JSON.parse(readFileSync(path.join(changeDir, 'evidence.json'), 'utf8'));
+  evidence.artifacts = [{ kind: 'review-brief', file: 'docs/review-brief.md', requirements: ids }];
+  writeFileSync(path.join(changeDir, 'evidence.json'), `${JSON.stringify(evidence, null, 2)}\n`);
+  writeFileSync(path.join(changeDir, 'evidence.md'), readFileSync(path.join(changeDir, 'evidence.md'), 'utf8').replace('**Status:** Pending', '**Status:** Approved'));
 }
 
 function change(overrides = {}) {
@@ -211,7 +223,7 @@ test('emitting a change writes a reviewable packet and verifies', (t) => {
   const result = emitChange(plan, out);
 
   const names = result.written.map((file) => file.name).sort();
-  assert.deepEqual(names, ['delta.json', 'design.md', 'proposal.md', 'spec.after.json', 'tasks.md']);
+  assert.deepEqual(names, ['delta.json', 'design.md', 'evidence.json', 'evidence.md', 'proposal.md', 'spec.after.json', 'tasks.md']);
 
   const proposal = readFileSync(path.join(out, 'proposal.md'), 'utf8');
   assert.match(proposal, /## ADDED/);
@@ -225,12 +237,21 @@ test('emitting a change writes a reviewable packet and verifies', (t) => {
   assert.match(design, /## Decisions/);
   assert.match(design, /## Alternatives Considered/);
 
+  const evidence = readFileSync(path.join(out, 'evidence.md'), 'utf8');
+  assert.match(evidence, /## Artifact Register/);
+  assert.match(evidence, /## Release Decision/);
+
   const tasks = readFileSync(path.join(out, 'tasks.md'), 'utf8');
   assert.match(tasks, /design\.md/);
+  assert.match(tasks, /evidence\.json/);
   assert.match(tasks, /spec-check\.mjs/);
   assert.match(tasks, /@req REQ-\d{3}/);
 
-  const report = verifyChange(out);
+  const pending = verifyChange(out, { projectDir: p.root });
+  assert.equal(pending.ok, false);
+  assert.match(pending.errors.join('\n'), /evidence\.json needs at least one linked reviewed artifact/);
+  recordReviewedEvidence({ root: p.root, changeDir: out, plan });
+  const report = verifyChange(out, { projectDir: p.root });
   assert.deepEqual(report.errors, []);
   assert.ok(report.ok);
 });
@@ -336,6 +357,7 @@ function packetWithProfile() {
   const delta = planChange({ packetDir: outDir, change: change() });
   const changeDir = path.join(root, 'changes', 'add-export');
   emitChange(delta, changeDir);
+  recordReviewedEvidence({ root, changeDir, plan: delta });
 
   return { root, profileFile, outDir, changeDir, delta, cleanup: () => rmSync(root, { recursive: true, force: true }) };
 }
@@ -389,11 +411,24 @@ test('archiving folds the delta into the profile, the history and the packet', a
   assert.equal(history.entries[0].id, 'add-export');
   assert.deepEqual(history.entries[0].added, ['feature.export']);
   assert.deepEqual(history.entries[0].modified, ['api.error-envelope']);
+  assert.equal(history.entries[0].evidence.artifacts[0].kind, 'review-brief');
   assert.deepEqual(history.entries[0].compile.dropped, ['ui.design-tokens'], 'the removal is recorded as a drop, next to the change that caused it');
   assert.equal(spec.history, undefined, 'the manifest stays a pure function of its inputs');
 
   // 4. The change directory is kept with the packet that absorbed it.
   assert.ok(existsSync(path.join(p.outDir, 'changes', 'archive', 'add-export', 'delta.json')));
+});
+
+test('archiving refuses a change whose reviewed evidence was withdrawn or altered', async (t) => {
+  const p = packetWithProfile();
+  t.after(p.cleanup);
+  const evidence = path.join(p.changeDir, 'evidence.md');
+  writeFileSync(evidence, readFileSync(evidence, 'utf8').replace('**Status:** Approved', '**Status:** Pending'));
+  await assert.rejects(
+    () => archiveChange({ packetDir: p.outDir, changeDir: p.changeDir, profilePath: p.profileFile }),
+    /change evidence is not ready to archive[\s\S]*status must be Approved/
+  );
+  assert.equal(existsSync(path.join(p.root, 'overlays', 'change-add-export.json')), false, 'a failed evidence check writes no profile overlay');
 });
 
 test('apply -> archive -> recompile is idempotent', async (t) => {

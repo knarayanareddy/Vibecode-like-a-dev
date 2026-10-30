@@ -8,13 +8,14 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { digest, ensureProjectDir, extensionError, ID_PATTERN, readJson, vldDir, writeJsonAtomic } from './extension-utils.mjs';
+import { digest, ensureProjectDir, extensionError, ID_PATTERN, readJson, stableJson, vldDir, writeJsonAtomic } from './extension-utils.mjs';
 
 const STATE_VERSION = 1;
 const STORE_VERSION = 1;
 const COMMIT = /^[a-f0-9]{40}$/;
 const SAFE_REF = /^(?!.*(?:^|\/)\.{1,2}(?:\/|$))[A-Za-z0-9][A-Za-z0-9._/-]{0,120}$/;
 const ASSET_KINDS = new Set(['artifact-template', 'guidance']);
+const ARTIFACT_TYPES = new Set(['product-brief', 'architecture-decision', 'delivery-plan', 'review-brief', 'qa-plan']);
 const SAFE_ASSET = /^(?!.*(?:^|\/)\.\.(?:\/|$))[a-zA-Z0-9][a-zA-Z0-9._/-]{0,240}$/;
 
 function stateFile(project) { return path.join(vldDir(project), 'stores.json'); }
@@ -74,11 +75,15 @@ export function readStoreManifest(root, expectedId = null) {
     if (seen.has(asset.id)) { errors.push(`store asset "${asset.id}" is listed twice`); continue; }
     seen.add(asset.id);
     if (!ASSET_KINDS.has(asset.kind)) { errors.push(`store asset "${asset.id}" has an unsupported kind`); continue; }
+    if (asset.kind === 'artifact-template' && !ARTIFACT_TYPES.has(asset.artifact)) {
+      errors.push(`artifact template "${asset.id}" must declare a supported artifact type`); continue;
+    }
     try {
       const target = assetPath(root, asset.file);
+      if (!target.endsWith('.md')) { errors.push(`store asset "${asset.id}" must be a Markdown file`); continue; }
       if (!existsSync(target)) { errors.push(`store asset "${asset.id}" is missing ${asset.file}`); continue; }
       if (!lstatSync(target).isFile()) { errors.push(`store asset "${asset.id}" must be a regular file`); continue; }
-      assets.push({ id: asset.id, kind: asset.kind, file: asset.file, digest: digest(readFileSync(target, 'utf8')) });
+      assets.push({ id: asset.id, kind: asset.kind, file: asset.file, digest: digest(readFileSync(target, 'utf8')), ...(asset.kind === 'artifact-template' ? { artifact: asset.artifact } : {}) });
     } catch (error) { errors.push(error.message); }
   }
   if (errors.length) throw extensionError(`invalid store manifest:\n${errors.map((error) => `- ${error}`).join('\n')}`, 'INVALID_STORE_MANIFEST');
@@ -181,6 +186,7 @@ export function storeStatus(projectDir = '.', id = null) {
         const checked = snapshot(root, locked.id);
         if (checked.commit !== locked.commit) drift.push(`cached commit ${checked.commit.slice(0, 12)} differs from locked ${locked.commit.slice(0, 12)}`);
         if (checked.manifestDigest !== locked.manifestDigest) drift.push('manifest content differs from lock');
+        if (stableJson(checked.manifest.assets) !== stableJson(locked.assets ?? [])) drift.push('locked asset declarations differ from the manifest');
         if (checked.snapshotDigest !== locked.snapshotDigest) drift.push('declared asset content differs from lock');
       } catch (error) { drift.push(error.message); }
     }
@@ -188,6 +194,36 @@ export function storeStatus(projectDir = '.', id = null) {
   }
   if (id && !stores.length) errors.push(`store "${id}" is not locked`);
   return { ...loaded, stores, errors, ok: errors.length === 0 && stores.every((store) => store.ok) };
+}
+
+/** Read a declared asset only when the cached snapshot still matches its committed lock. */
+export function readStoreAsset({ projectDir = '.', storeId, assetId, kind = null }) {
+  const project = ensureProjectDir(projectDir); requireId(storeId); requireId(assetId, 'asset id');
+  const report = storeStatus(project, storeId);
+  if (!report.ok) throw extensionError(`store "${storeId}" is not verified:\n${[...report.errors, ...(report.stores[0]?.drift ?? [])].map((entry) => `- ${entry}`).join('\n')}`, 'STORE_NOT_VERIFIED');
+  const store = report.stores[0];
+  const asset = store.assets.find((entry) => entry.id === assetId);
+  if (!asset) throw extensionError(`store "${storeId}" has no asset "${assetId}"`, 'STORE_ASSET_NOT_FOUND');
+  if (kind && asset.kind !== kind) throw extensionError(`store asset "${storeId}/${assetId}" is ${asset.kind}, not ${kind}`, 'STORE_ASSET_KIND_MISMATCH');
+  const file = assetPath(store.directory, asset.file);
+  const content = readFileSync(file, 'utf8');
+  if (digest(content) !== asset.digest) throw extensionError(`store asset "${storeId}/${assetId}" changed while being read`, 'STORE_ASSET_DRIFT');
+  return { project, store: { id: store.id, commit: store.commit, title: store.title }, asset, file, content };
+}
+
+/** Copy a verified advisory asset into the project; never let a store write project state. */
+export function copyStoreAsset({ projectDir = '.', storeId, assetId, out = null, force = false }) {
+  const loaded = readStoreAsset({ projectDir, storeId, assetId });
+  const target = path.resolve(loaded.project, out ?? path.join('docs', 'shared', storeId, `${assetId}.md`));
+  const relative = path.relative(loaded.project, target);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative) || relative.split(path.sep)[0] === '.vld') {
+    throw extensionError('store asset output must be a non-state path inside the project', 'INVALID_STORE_OUTPUT');
+  }
+  if (!target.endsWith('.md')) throw extensionError('store asset output must be a Markdown file', 'INVALID_STORE_OUTPUT');
+  if (existsSync(target) && !force) throw extensionError(`${target} exists; pass --force to replace it`, 'STORE_ASSET_EXISTS');
+  mkdirSync(path.dirname(target), { recursive: true });
+  writeFileSync(target, loaded.content, 'utf8');
+  return { ...loaded, output: target };
 }
 
 /** Create an authoring skeleton. Git initialization and publication are deliberate user actions. */

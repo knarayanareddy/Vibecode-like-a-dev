@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "release-readiness",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "title": "Release readiness",
   "summary": "Require explicit delivery evidence and a strict packet verification before a release decision.",
   "requiresModules": ["review", "qa"],
@@ -19,9 +19,16 @@
       "run": ["verify", "{packet}", "--strict"]
     },
     {
+      "id": "verify-release-artifacts",
+      "type": "artifact-validation",
+      "dependsOn": ["verify-packet"],
+      "artifacts": ["review-brief", "qa-plan"],
+      "description": "Strictly validate the review and QA evidence against the compiled packet before release approval."
+    },
+    {
       "id": "release-decision",
       "type": "approval",
-      "dependsOn": ["verify-packet"],
+      "dependsOn": ["verify-release-artifacts"],
       "description": "An accountable human records the release decision and any accepted residual risk."
     }
   ]
