@@ -16,7 +16,7 @@ node factory/cli.mjs adopt <repo> -o <profile.json>   # infer a profile from cod
 node factory/cli.mjs change <packet> <change.json> -o <dir>
 node factory/cli.mjs change verify <dir>
 node factory/cli.mjs mcp                # MCP server over stdio (8 tools)
-npm test                                # 83 tests: integrity, planning, adoption, deltas, MCP, enforcement
+npm test                                # 160 tests: integrity, planning, adoption, deltas, MCP, enforcement
 npm run check                           # index freshness + tests + verify the example packet
 ```
 

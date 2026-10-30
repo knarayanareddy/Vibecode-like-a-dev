@@ -428,7 +428,7 @@ factory/
     gate-runner.mjs    the gate checker shipped into every packet
   schema/
     spec.schema.json   the manifest contract
-  test/                152 tests: data integrity, planning, reproducibility, adoption,
+  test/                160 tests: data integrity, planning, reproducibility, adoption,
                        delta specs, overlays, gates, EARS, MCP protocol, routing & outcome evals
 profile.json           this repository's own profile
 specs/                 this repository's own compiled packet, guarded in CI
@@ -446,7 +446,7 @@ docs/                  research notes, authoring guide, stress test, landscape s
 ```
 
 ```bash
-npm test        # 152 tests
+npm test        # 160 tests
 npm run eval    # library health + packet specificity + 74-prompt routing + 24-task outcome calibration
 npm run stress  # 10 representative + 24 hostile ideas, and 6 refusals; scored on soundness
 npm run check   # lint + index + tests + verify + self-guard + gates + eval + stress
