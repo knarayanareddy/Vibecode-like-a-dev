@@ -102,6 +102,22 @@ test('search_primitives ranks the right practice first and filters by tier', () 
   assert.match(none.hint, /No match/);
 });
 
+test('search_primitives calibrated activate mode isolates relevant practices and stays quiet on off-topic queries', () => {
+  const multi = payload(
+    call('search_primitives', {
+      query: 'Stripe webhook endpoint needs idempotency keys and exponential backoff plus GDPR right-to-erasure retention cleanup',
+      activate: true
+    })
+  );
+  const ids = multi.matches.map((m) => m.id);
+  assert.ok(ids.includes('reliability.idempotency-and-retries'));
+  assert.ok(ids.includes('data.data-lifecycle'));
+  assert.ok(ids.length <= 3);
+
+  const offTopic = payload(call('search_primitives', { query: 'How do I center a div vertically using CSS flexbox?', activate: true }));
+  assert.deepEqual(offTopic.matches, []);
+});
+
 test('get_primitive returns the practice body, and fails loudly on an unknown id', () => {
   const result = payload(call('get_primitive', { id: 'testing.mutation-testing' }));
   assert.equal(result.id, 'testing.mutation-testing');

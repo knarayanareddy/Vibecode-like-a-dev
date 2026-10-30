@@ -8,7 +8,7 @@ tier_min: 1
 cost: medium
 priority: 3
 tags: [authorization, rbac, abac, tenancy, security]
-triggers: [authorization, permissions, roles, rbac, tenant isolation, access control]
+triggers: [authorization, permissions, roles, rbac, idor, cross-tenant, tenant isolation, access control]
 enforces: [auth.authorization, auth.tenant-isolation]
 artifacts: [02-domain-model.md, 04-contracts.md]
 ---

@@ -8,7 +8,7 @@ tier_min: 0
 cost: low
 priority: 3
 tags: [test-strategy, pyramid, coverage, speed]
-triggers: [test suite, coverage, pyramid, slow tests, flaky tests]
+triggers: [test suite, test pyramid, pyramid, slow tests, flaky tests]
 enforces: []
 gates: [G1-CI, G1-DOMAIN-TESTS]
 artifacts: [05-verification.md]

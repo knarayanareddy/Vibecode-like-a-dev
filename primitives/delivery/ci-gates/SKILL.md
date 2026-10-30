@@ -8,7 +8,7 @@ tier_min: 1
 cost: low
 priority: 2
 tags: [ci, github-actions, gates, automation, pull-requests]
-triggers: [ci, pipeline, github actions, gate, pull request checks]
+triggers: [ci, pipeline, github actions, branch protection, required check, pull request checks]
 enforces: [core.runnable]
 artifacts: [06-delivery-plan.md, 05-verification.md]
 ---

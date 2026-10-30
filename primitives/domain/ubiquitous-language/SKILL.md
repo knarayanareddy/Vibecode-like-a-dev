@@ -8,7 +8,7 @@ tier_min: 0
 cost: low
 priority: 1
 tags: [ddd, language, naming, glossary, model]
-triggers: [domain model, glossary, naming, ubiquitous language, ddd, entity, term definition]
+triggers: [domain model, glossary, inconsistent naming, synonyms, ubiquitous language, ddd, term definition]
 enforces: []
 advisory_reason: "A glossary is agreed by readers. The drift guard checks that anchors resolve, not that code and copy use the same word."
 advisory: true

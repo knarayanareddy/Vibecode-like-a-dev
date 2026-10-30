@@ -8,7 +8,7 @@ tier_min: 0
 cost: low
 priority: 1
 tags: [handoff, agents, prompt, brief, agnostic]
-triggers: [handoff, prompt, handoff brief, hand to agent, lovable, replit, claude code]
+triggers: [handoff, handoff prompt, handoff brief, hand to agent, new session, lovable, replit, claude code]
 enforces: []
 advisory_reason: "The compiler emits the handoff for every packet, and whether an agent follows it is not visible in the repository, so no gate can fail on it."
 advisory: true

@@ -8,7 +8,7 @@ tier_min: 0
 cost: low
 priority: 2
 tags: [architecture, monolith, microservices, style, modules]
-triggers: [architecture, monolith, microservices, structure, folder layout]
+triggers: [modular monolith, monolith, microservices, service split, folder layout]
 enforces: []
 gates: [G2-ADR]
 artifacts: [03-architecture.md]

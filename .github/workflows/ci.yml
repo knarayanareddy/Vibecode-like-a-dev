@@ -61,6 +61,12 @@ jobs:
       - name: Specificity eval (a packet should not read like a form letter)
         run: node scripts/eval-specificity.mjs
 
+      - name: MCP routing eval (precision >= 0.90, recall >= 0.70, metadata ablation)
+        run: node scripts/eval-routing.mjs
+
+      - name: Outcome harness (24 tasks x 3 arms, hidden oracles, defect and drift probes)
+        run: node scripts/eval-outcome.mjs
+
       - name: Ten ideas survive the pipeline
         run: node scripts/stress-test.mjs
 

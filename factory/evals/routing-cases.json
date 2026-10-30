@@ -1,0 +1,420 @@
+{
+  "version": 1,
+  "description": "Labelled practitioner prompts for evaluating MCP and model-in-the-loop skill routing. Prompts use natural ticket and developer phrasing without primitive IDs. Negative cases (expected: []) verify the router stays quiet on routine coding edits where no architectural or process skill applies.",
+  "thresholds": {
+    "minMicroRecall": 0.7,
+    "minMicroPrecision": 0.9,
+    "maxFalsePositivesPerPractice": 2,
+    "maxZeroRecallPractices": 0
+  },
+  "cases": [
+    {
+      "id": "rt-01-handoff-fresh-session",
+      "kind": "single",
+      "prompt": "I want to hand this repository to a fresh Claude Code or Replit session tomorrow with zero chat history so it knows the entry point and rules immediately.",
+      "expected": ["agent.handoff-packet"]
+    },
+    {
+      "id": "rt-02-independent-pr-review",
+      "kind": "single",
+      "prompt": "The coding session keeps approving its own pull request and missing skipped criteria; set up a second reviewer session that checks the diff against the spec.",
+      "expected": ["agent.review-protocol"]
+    },
+    {
+      "id": "rt-03-spec-rot-ci",
+      "kind": "single",
+      "prompt": "Three weeks after launch our markdown spec is already stale and contradicts the codebase; make spec-to-code divergence fail the build automatically.",
+      "expected": ["agent.spec-drift-guard"]
+    },
+    {
+      "id": "rt-04-record-postgres-decision",
+      "kind": "single",
+      "prompt": "Document the rationale and rejected trade-offs for choosing Postgres over DynamoDB in an ADR so the next contributor stops proposing a rewrite.",
+      "expected": ["architecture.adr-log"]
+    },
+    {
+      "id": "rt-05-openapi-before-handlers",
+      "kind": "single",
+      "prompt": "Freeze the OpenAPI endpoint schemas, HTTP status codes and JSON error envelope before the backend and mobile engineers start coding separately.",
+      "expected": ["architecture.api-contract-first"]
+    },
+    {
+      "id": "rt-06-rent-auth-and-billing",
+      "kind": "single",
+      "prompt": "The agent started writing custom password-reset emails and credit-card tokenization from scratch instead of picking proven auth and payment provider vendors.",
+      "expected": ["architecture.build-vs-buy"]
+    },
+    {
+      "id": "rt-07-enforce-domain-imports",
+      "kind": "single",
+      "prompt": "Add an automated boundary check or import rule in CI that fails whenever code inside src/domain imports Express or database drivers.",
+      "expected": ["architecture.fitness-functions"]
+    },
+    {
+      "id": "rt-08-hexagonal-swap-storage",
+      "kind": "single",
+      "prompt": "Isolate our core pricing logic behind narrow ports and adapters so we can swap Postgres or S3 in tests without vendor lock-in.",
+      "expected": ["architecture.ports-and-adapters"]
+    },
+    {
+      "id": "rt-09-monolith-not-microservices",
+      "kind": "single",
+      "prompt": "Two developers want to split a brand-new MVP into seven microservices with Kafka; keep a modular monolith layout until a measured bottleneck justifies splitting.",
+      "expected": ["architecture.style-selection"]
+    },
+    {
+      "id": "rt-10-gdpr-delete-export",
+      "kind": "single",
+      "prompt": "Customers in the EU need a self-serve data export and complete GDPR account deletion with a 30-day PII retention schedule.",
+      "expected": ["data.data-lifecycle"]
+    },
+    {
+      "id": "rt-11-forward-sql-migration",
+      "kind": "single",
+      "prompt": "We need to alter a live orders table in production; ship a versioned, forward-only database migration instead of editing schema.sql in place.",
+      "expected": ["data.schema-and-migrations"]
+    },
+    {
+      "id": "rt-12-day-one-github-actions",
+      "kind": "single",
+      "prompt": "Set up a GitHub Actions pipeline on the very first commit so pull request checks run lint and tests before anything merges.",
+      "expected": ["delivery.ci-gates"]
+    },
+    {
+      "id": "rt-13-canary-feature-flag-rollback",
+      "kind": "single",
+      "prompt": "Deploy the new checkout engine behind a feature flag for 5% canary traffic and rehearse a one-command rollback in case error rates spike.",
+      "expected": ["delivery.release-and-rollback"]
+    },
+    {
+      "id": "rt-14-order-consistency-invariant",
+      "kind": "single",
+      "prompt": "Enforce inside one aggregate transaction boundary that an invoice's line items always equal its total and a settled state machine transition cannot be reversed.",
+      "expected": ["domain.aggregates-and-invariants"]
+    },
+    {
+      "id": "rt-15-billing-vs-identity-contexts",
+      "kind": "single",
+      "prompt": "Our User class has 90 fields shared across billing, support and shipping; split the coupled god-object into bounded contexts with clear module seams.",
+      "expected": ["domain.bounded-contexts"]
+    },
+    {
+      "id": "rt-16-one-domain-glossary",
+      "kind": "single",
+      "prompt": "Half the codebase says Organization, the UI says Workspace and the tests say Tenant; establish a single ubiquitous language glossary across code and UI.",
+      "expected": ["domain.ubiquitous-language"]
+    },
+    {
+      "id": "rt-17-keyboard-screen-reader-modal",
+      "kind": "single",
+      "prompt": "Our dialog traps mouse users fine, but keyboard tab focus disappears and VoiceOver screen reader users get no WCAG announcement when it opens.",
+      "expected": ["frontend.accessibility-baseline"]
+    },
+    {
+      "id": "rt-18-shared-css-design-tokens",
+      "kind": "single",
+      "prompt": "Generated screens have twelve hardcoded hex blues and inconsistent padding; centralize colour, spacing and typography into CSS variables and design tokens.",
+      "expected": ["frontend.design-system-tokens"]
+    },
+    {
+      "id": "rt-19-loading-empty-error-views",
+      "kind": "single",
+      "prompt": "Every dashboard page only renders the populated happy path and flashes blank white during fetch or network failure; define loading, empty state and error state views.",
+      "expected": ["frontend.ui-state-model"]
+    },
+    {
+      "id": "rt-20-stop-mvp-scope-creep",
+      "kind": "single",
+      "prompt": "Keep the four-week v1 focused by writing explicit non-goals so feature requests like SSO, dark mode and custom plugins stay out of scope.",
+      "expected": ["product.non-goals-and-scope"]
+    },
+    {
+      "id": "rt-21-clarify-vague-pitch",
+      "kind": "single",
+      "prompt": "All I have is a vague one-liner pitch for a clinic scheduler; turn it into a crisp product brief stating who it helps and what they do today before coding.",
+      "expected": ["product.product-brief"]
+    },
+    {
+      "id": "rt-22-thin-vertical-journey",
+      "kind": "single",
+      "prompt": "Instead of building every database table first, map the primary user journey walkthrough and ship one testable end-to-end vertical slice.",
+      "expected": ["product.user-journeys"]
+    },
+    {
+      "id": "rt-23-duplicate-stripe-webhook",
+      "kind": "single",
+      "prompt": "Stripe delivered payment_intent.succeeded twice during a timeout retry and our worker double-charged the customer; make webhook handling idempotent.",
+      "expected": ["reliability.idempotency-and-retries"]
+    },
+    {
+      "id": "rt-24-correlation-id-structured-logs",
+      "kind": "single",
+      "prompt": "When a checkout fails in production we cannot trace a request across workers; add structured logging with a correlation ID and error-rate alerting.",
+      "expected": ["reliability.observability-baseline"]
+    },
+    {
+      "id": "rt-25-owasp-asvs-audit",
+      "kind": "single",
+      "prompt": "Before exposing our customer portal publicly, run a numbered OWASP ASVS security checklist hardening review instead of guessing what controls we missed.",
+      "expected": ["security.asvs-baseline"]
+    },
+    {
+      "id": "rt-26-idor-cross-tenant-invoice",
+      "kind": "single",
+      "prompt": "Changing the UUID in GET /api/invoices/:id lets Organization A read Organization B's invoice; enforce deny-by-default RBAC and tenant isolation on every read.",
+      "expected": ["security.authz-model"]
+    },
+    {
+      "id": "rt-27-leaked-apikey-and-lockfile",
+      "kind": "single",
+      "prompt": "Someone committed an AWS secret in an .env file and installed unpinned npm packages; add secret scanning and supply chain lockfile hygiene.",
+      "expected": ["security.secrets-and-supply-chain"]
+    },
+    {
+      "id": "rt-28-stride-trust-boundaries",
+      "kind": "single",
+      "prompt": "Map our public upload and webhook trust boundaries with a lightweight STRIDE threat model so every untrusted entry point has a named mitigation.",
+      "expected": ["security.threat-model"]
+    },
+    {
+      "id": "rt-29-req-anchors-in-tests",
+      "kind": "single",
+      "prompt": "Every acceptance criterion needs traceability to a real test via @req anchors so nobody can mark a requirement done without test proof.",
+      "expected": ["testing.acceptance-traceability"]
+    },
+    {
+      "id": "rt-30-recorded-fixtures-not-mocks",
+      "kind": "single",
+      "prompt": "Our hand-written mock for the Twilio third-party API passed all year while production broke on a changed field; replace mocks with contract tests and real fixtures.",
+      "expected": ["testing.contract-tests"]
+    },
+    {
+      "id": "rt-31-stryker-surviving-mutants",
+      "kind": "single",
+      "prompt": "Line coverage on billing is 96% yet an off-by-one < vs <= bug slipped through because assertions were weak; run Stryker mutation testing to catch surviving mutants.",
+      "expected": ["testing.mutation-testing"]
+    },
+    {
+      "id": "rt-32-fast-check-ledger-properties",
+      "kind": "single",
+      "prompt": "Three hand-picked unit examples missed a currency-split rounding bug; use fast-check property-based generative inputs to fuzz ledger invariants.",
+      "expected": ["testing.property-based-testing"]
+    },
+    {
+      "id": "rt-33-red-green-refactor-first",
+      "kind": "single",
+      "prompt": "Stop letting the agent write 400 lines of implementation and bolt tests on afterward; require a failing test first in a strict red-green-refactor TDD loop.",
+      "expected": ["testing.tdd-loop"]
+    },
+    {
+      "id": "rt-34-slow-flaky-e2e-pyramid",
+      "kind": "single",
+      "prompt": "Our CI takes 28 minutes because 90% of the test suite is flaky browser tests; rebalance the test pyramid toward fast domain tests and a small smoke budget.",
+      "expected": ["testing.test-budget"]
+    },
+    {
+      "id": "rt-35-distractor-prompt-injection",
+      "kind": "distractor",
+      "prompt": "Untrusted email bodies fed into our support assistant could carry prompt injection attacks that cross a trust boundary and invoke destructive tools.",
+      "expected": ["security.threat-model"]
+    },
+    {
+      "id": "rt-36-distractor-queue-at-least-once",
+      "kind": "distractor",
+      "prompt": "SQS delivers background jobs at-least-once, so a worker crash mid-flight replays the message; make job handlers safe on retry without duplicate side effects.",
+      "expected": ["reliability.idempotency-and-retries"]
+    },
+    {
+      "id": "rt-37-distractor-alter-column-backwards",
+      "kind": "distractor",
+      "prompt": "Renaming a column directly broke old app pods during rolling deploy; use expand-and-contract database migrations with a safe rollback path.",
+      "expected": ["data.schema-and-migrations"]
+    },
+    {
+      "id": "rt-38-distractor-hexagonal-orm-leak",
+      "kind": "distractor",
+      "prompt": "Prisma query objects are leaking into every business service; apply hexagonal dependency inversion so domain rules depend only on interfaces.",
+      "expected": ["architecture.ports-and-adapters"]
+    },
+    {
+      "id": "rt-39-distractor-rbac-deny-default",
+      "kind": "distractor",
+      "prompt": "New admin routes default to open unless someone remembers middleware; centralize access control permissions so unauthenticated or unauthorized roles are denied by default.",
+      "expected": ["security.authz-model"]
+    },
+    {
+      "id": "rt-40-distractor-mutmut-python",
+      "kind": "distractor",
+      "prompt": "Run mutmut on our Python risk-scoring module to measure mutation score and find tests that execute code without asserting the return value.",
+      "expected": ["testing.mutation-testing"]
+    },
+    {
+      "id": "rt-41-distractor-hypothesis-stateful",
+      "kind": "distractor",
+      "prompt": "Use Hypothesis generative testing in Python to throw random command sequences at our reservation state machine and uncover edge cases.",
+      "expected": ["testing.property-based-testing"]
+    },
+    {
+      "id": "rt-42-distractor-lovable-handoff",
+      "kind": "distractor",
+      "prompt": "Export a self-contained handoff brief we can paste into Lovable or hand to an agent without explaining the repo in chat.",
+      "expected": ["agent.handoff-packet"]
+    },
+    {
+      "id": "rt-43-distractor-wcag-focus-trap",
+      "kind": "distractor",
+      "prompt": "Audit keyboard navigation, visible focus states and ARIA labels so our form meets baseline a11y accessibility rules.",
+      "expected": ["frontend.accessibility-baseline"]
+    },
+    {
+      "id": "rt-44-distractor-spinner-blank-screen",
+      "kind": "distractor",
+      "prompt": "Users see a broken layout when search returns zero items or times out; model explicit loading spinner, empty state and error state transitions.",
+      "expected": ["frontend.ui-state-model"]
+    },
+    {
+      "id": "rt-45-distractor-pii-retention",
+      "kind": "distractor",
+      "prompt": "Define privacy retention rules and an automated purge for personal PII logs when a user requests account deletion.",
+      "expected": ["data.data-lifecycle"]
+    },
+    {
+      "id": "rt-46-distractor-archunit-layering",
+      "kind": "distractor",
+      "prompt": "Write an ArchUnit architecture test so any controller importing a repository directly fails CI immediately.",
+      "expected": ["architecture.fitness-functions"]
+    },
+    {
+      "id": "rt-47-multi-webhook-contract-and-replay",
+      "kind": "multi",
+      "prompt": "Test our Stripe adapter against recorded third-party API fixtures with contract tests, and make webhook retry processing idempotent against duplicate events.",
+      "expected": ["testing.contract-tests", "reliability.idempotency-and-retries"]
+    },
+    {
+      "id": "rt-48-multi-tdd-and-req-anchors",
+      "kind": "multi",
+      "prompt": "Write each failing test first in a red-green-refactor TDD loop and bind every acceptance criterion to its test with an @req traceability anchor.",
+      "expected": ["testing.tdd-loop", "testing.acceptance-traceability"]
+    },
+    {
+      "id": "rt-49-multi-tokens-and-a11y",
+      "kind": "multi",
+      "prompt": "Standardize component colours and spacing on CSS design system tokens while ensuring WCAG keyboard focus and screen reader accessibility.",
+      "expected": ["frontend.design-system-tokens", "frontend.accessibility-baseline"]
+    },
+    {
+      "id": "rt-50-multi-migration-and-rollback",
+      "kind": "multi",
+      "prompt": "Ship the alter-table database migration forward-only and guard the release behind a canary feature flag with a rehearsed rollback.",
+      "expected": ["data.schema-and-migrations", "delivery.release-and-rollback"]
+    },
+    {
+      "id": "rt-51-multi-invariants-and-properties",
+      "kind": "multi",
+      "prompt": "Define the ledger aggregate consistency invariants and verify them with fast-check property-based generative testing across thousands of inputs.",
+      "expected": ["domain.aggregates-and-invariants", "testing.property-based-testing"]
+    },
+    {
+      "id": "rt-52-multi-drift-guard-and-ci",
+      "kind": "multi",
+      "prompt": "Wire GitHub Actions pull request CI checks from day one and include the spec drift guard so stale specs fail the pipeline.",
+      "expected": ["delivery.ci-gates", "agent.spec-drift-guard"]
+    },
+    {
+      "id": "rt-53-neg-array-sort",
+      "kind": "negative",
+      "prompt": "Write a helper function in JavaScript that sorts an array of numbers in ascending order.",
+      "expected": []
+    },
+    {
+      "id": "rt-54-neg-footer-typo",
+      "kind": "negative",
+      "prompt": "Fix the typo in the copyright year string in Footer.tsx from 2025 to 2026.",
+      "expected": []
+    },
+    {
+      "id": "rt-55-neg-celsius-helper",
+      "kind": "negative",
+      "prompt": "Convert degrees Celsius to Fahrenheit rounded to one decimal place.",
+      "expected": []
+    },
+    {
+      "id": "rt-56-neg-regex-slug",
+      "kind": "negative",
+      "prompt": "Turn a blog post title into a lowercase hyphenated URL slug.",
+      "expected": []
+    },
+    {
+      "id": "rt-57-neg-debounce-util",
+      "kind": "negative",
+      "prompt": "Implement a small debounce utility wrapper around setTimeout.",
+      "expected": []
+    },
+    {
+      "id": "rt-58-neg-csv-line-split",
+      "kind": "negative",
+      "prompt": "Parse a comma-separated line of quoted strings into an array of cells.",
+      "expected": []
+    },
+    {
+      "id": "rt-59-neg-fibonacci",
+      "kind": "negative",
+      "prompt": "Compute the nth Fibonacci number iteratively using BigInt.",
+      "expected": []
+    },
+    {
+      "id": "rt-60-neg-readme-badge",
+      "kind": "negative",
+      "prompt": "Update the license badge link at the top of the markdown file.",
+      "expected": []
+    },
+    {
+      "id": "rt-61-colloq-synonyms-in-code",
+      "kind": "colloquial",
+      "prompt": "The backend calls a buyer an Account, the checkout page calls them a Customer, and the database table says clients; enforce one agreed glossary so code and UI stop using synonyms.",
+      "expected": ["domain.ubiquitous-language"]
+    },
+    {
+      "id": "rt-62-colloq-decision-history",
+      "kind": "colloquial",
+      "prompt": "Every new contributor asks why we chose SQLite over Redis and proposes a rewrite; record architectural decisions, rationale and rejected alternatives in the repo.",
+      "expected": ["architecture.adr-log"]
+    },
+    {
+      "id": "rt-63-colloq-assertions-not-checking",
+      "kind": "colloquial",
+      "prompt": "Tests execute every branch of the discount calculator with weak assertions, so breaking the math on purpose still leaves coverage green.",
+      "expected": ["testing.mutation-testing"]
+    },
+    {
+      "id": "rt-64-colloq-swap-vendor-interface",
+      "kind": "colloquial",
+      "prompt": "Keep third-party SDK types out of the billing domain so business rules stay framework-free and replaceable behind narrow interfaces.",
+      "expected": ["architecture.ports-and-adapters"]
+    },
+    {
+      "id": "rt-65-colloq-random-fuzz-inputs",
+      "kind": "colloquial",
+      "prompt": "Generate thousands of random inputs and edge cases to check the invariant that splitting an invoice across N diners always sums back to the exact total.",
+      "expected": ["testing.property-based-testing"]
+    },
+    {
+      "id": "rt-66-colloq-deny-unowned-records",
+      "kind": "colloquial",
+      "prompt": "A regular member guessed another member's record ID and edited it; put one policy layer between the request and the data that tests the denial path and blocks unauthorized roles.",
+      "expected": ["security.authz-model"]
+    },
+    {
+      "id": "rt-67-colloq-dark-launch-revert",
+      "kind": "colloquial",
+      "prompt": "Ship the checkout rewrite behind a switch to internal staff first with a rehearsed rollback we can flip during an incident.",
+      "expected": ["delivery.release-and-rollback"]
+    },
+    {
+      "id": "rt-68-colloq-trace-across-services",
+      "kind": "colloquial",
+      "prompt": "Propagate one correlation ID across structured logs and two alert metrics so we can trace failures across background workers.",
+      "expected": ["reliability.observability-baseline"]
+    }
+  ]
+}

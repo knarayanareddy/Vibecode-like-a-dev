@@ -8,7 +8,7 @@ tier_min: 0
 cost: low
 priority: 5
 tags: [adr, decisions, documentation, rationale]
-triggers: [adr, decision record, why, rationale, trade-off]
+triggers: [adr, decision record, architectural decision, rejected alternatives, rationale, trade-off]
 enforces: []
 gates: [G2-ADR]
 artifacts: [03-architecture.md]
