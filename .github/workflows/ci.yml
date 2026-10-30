@@ -16,6 +16,9 @@ jobs:
           node-version: 22
 
       # No install step: the CLI and the shipped spec checker have no dependencies.
+      - name: Lint
+        run: npm run lint
+
       - name: Index is up to date
         run: node factory/cli.mjs index --check
 
@@ -37,7 +40,17 @@ jobs:
               exit 1
             fi
           done
+          if ! diff -r /tmp/self-spec/enforcement specs/enforcement > /dev/null; then
+            echo "::error::specs/enforcement is stale. Run: npm run dogfood"
+            exit 1
+          fi
           echo "self-spec packet is in sync"
+
+      # The packet ships a gate runner. Dogfooding it against this repository is the
+      # only check that proves the generated file executes at all.
+      - name: Self-spec gates pass
+        run: node specs/enforcement/gates.mjs --repo . --strict
+
 
       - name: This repository passes its own drift guard
         run: node specs/spec-check.mjs --repo . --strict

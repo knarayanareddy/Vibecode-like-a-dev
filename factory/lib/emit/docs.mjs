@@ -9,6 +9,7 @@
  *     of this entire tool category, and this file is where that is decided.
  */
 
+import { gateMechanism, RUNNER, RUNNER_COMMAND } from '../enforcement.mjs';
 import { FACTORY_VERSION, bullets, checkboxes, code, commandsFor, gateReading, heading, inline, ordered, quote, table, titleize } from './derive.mjs';
 
 const h1 = (text) => heading(1, text);
@@ -155,6 +156,30 @@ export function constitution(plan, d) {
     '',
     table(['Practice', 'What it obliges here', 'Checked by', 'Read it'], practices),
     '',
+    ...(plan.overlays.length > 0
+      ? [
+          h2('Overlays'),
+          '',
+          `${plan.overlays.length} layer(s) sit on top of the catalog for ${d.project}. Each is a policy decision made by someone closer to the work than the catalog is, and each one is recorded in \`spec.json\` with the ids it added, changed or removed.`,
+          '',
+          table(
+            ['Layer', 'Overlay', 'What it adds here', 'Why'],
+            plan.overlays.map((overlay) => [
+              overlay.layer,
+              `\`${overlay.id}\` — ${overlay.title}`,
+              [
+                ...overlay.adds.requirements.map((key) => `+${key}`),
+                ...overlay.adds.gates.map((id) => `+${id}`),
+                ...overlay.adds.practices.map((id) => `+${id}`),
+                ...overlay.modifies.map((key) => `~${key}`),
+                ...overlay.removes.map((key) => `-${key}`)
+              ].join(' ') || 'nothing',
+              overlay.why
+            ])
+          ),
+          ''
+        ]
+      : []),
     h2(conditional.length > 0 ? '6. Deliberately not doing' : '5. Deliberately not doing'),
     '',
     `${plan.skipped.length} practices were considered and refused for ${d.project}. If a review comment asks for one, the answer is the reason below, not silence.`,
@@ -724,7 +749,8 @@ export function verification(plan, d) {
     '      - uses: actions/checkout@v4',
     '      - uses: actions/setup-node@v4',
     '        with: { node-version: 22 }',
-    '      - run: node specs/spec-check.mjs'
+    '      - run: node specs/spec-check.mjs',
+    '      - run: node specs/enforcement/gates.mjs'
   ].join('\n');
 
   const n = { mutation: mutation ? 6 : null };
@@ -804,6 +830,8 @@ export function verification(plan, d) {
     '',
 
     `What it fails on: a missing document, one of the ${automated.length} automated requirements without an anchor, an anchor naming a requirement that does not exist, a requirement with no criteria, and a practice reference that has disappeared.`,
+    '',
+    `The gates in section 4 are also a command: \`node specs/enforcement/gates.mjs\`, generated from this packet, ${plan.gates.length} checks, no dependencies. It is deliberately blunt — it proves a runbook exists and names an owner, not that the owner knows the product — and every check prints what it cannot see. \`enforcement/README.md\` is the table.`,
     '',
     mutation
       ? [
@@ -1126,7 +1154,8 @@ export function agentsMd(plan, d) {
   const resolved = commandsFor(plan.profile);
   const commands = [
     resolved ? resolved.join(' && ') : '# the real build and test commands go here — this stack has no built-in profile',
-    'node specs/spec-check.mjs --repo .'
+    'node specs/spec-check.mjs --repo .',
+    'node specs/enforcement/gates.mjs --repo .'
   ];
   const start = d.start;
   const automated = plan.requirements.filter((requirement) => requirement.verify === 'automated');
@@ -1225,6 +1254,11 @@ export function manifest(plan, d) {
       project: {
         name: plan.profile.name,
         title: d.project,
+        // Where the packet came from, so `vld change archive` can fold a delta back
+        // into the source of truth instead of guessing. The path is the one the CLI
+        // was given, not an absolute path, so compiling to a temp dir still produces
+        // a byte-identical manifest.
+        profile: plan.profileLabel ?? null,
         kind: plan.profile.kind,
         stage: plan.profile.stage,
         idea: plan.profile.idea,
@@ -1248,13 +1282,26 @@ export function manifest(plan, d) {
         countedIn: ['tests/**'],
         check: 'node specs/spec-check.mjs --repo .'
       },
+      // Where every obligation came from. A reviewer reading spec.json can tell a
+      // catalog baseline from an organisation's overlay without opening either file.
+      overlays: plan.overlays.map((overlay) => ({
+        id: overlay.id,
+        layer: overlay.layer,
+        title: overlay.title,
+        source: overlay.source,
+        why: overlay.why,
+        adds: overlay.adds,
+        modifies: overlay.modifies,
+        removes: overlay.removes
+      })),
       primitives: plan.primitives.map((primitive) => ({
         id: primitive.id,
         title: primitive.title,
         path: primitive.path,
         why: primitive.why,
         when: primitive.when,
-        enforces: primitive.enforces
+        enforces: primitive.enforces,
+        origin: primitive.when?.startsWith('overlay:') ? primitive.when : 'router'
       })),
       deferred: plan.deferred,
       skipped: plan.skipped,
@@ -1262,6 +1309,7 @@ export function manifest(plan, d) {
         id: requirement.id,
         key: requirement.key,
         area: requirement.render,
+        origin: requirement.origin ?? 'catalog',
         title: requirement.title,
         statement: requirement.statement,
         failurePath: requirement.failurePath,
@@ -1270,7 +1318,17 @@ export function manifest(plan, d) {
         anchor: requirement.verify === 'automated' ? d.anchors.get(requirement.id) : null,
         status: 'todo'
       })),
-      gates: plan.gates,
+      // A gate in spec.json without a mechanism is the failure this feature exists to
+      // prevent, so the mechanism travels with the gate.
+      gates: plan.gates.map((gate) => {
+        const mechanism = gateMechanism(gate.id);
+        return {
+          ...gate,
+          enforcement: mechanism
+            ? { runner: RUNNER, command: RUNNER_COMMAND, files: mechanism.files, kind: 'local', proves: mechanism.how, doesNotProve: mechanism.mechanism }
+            : null
+        };
+      }),
       docs: plan.docs,
       stats: plan.stats
     },

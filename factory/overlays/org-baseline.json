@@ -1,0 +1,26 @@
+{
+  "id": "org-baseline",
+  "layer": "org",
+  "title": "The organisation's baseline",
+  "why": "Every project this organisation runs needs an owner for failure and a runbook before it can be called live. The catalog knows what a product needs; it cannot know who answers the page.",
+  "addRequirements": [
+    {
+      "key": "ops.incident-response",
+      "title": "Someone owns failure, and knows what to do first",
+      "area": "reliability",
+      "statement": "When the primary journey fails in production, the application shall have a named owner and a first-response step recorded in the repository, reachable without asking anyone.",
+      "failurePath": "An incident with no named owner becomes a thread about whose turn it is while the product is down.",
+      "acceptance": [
+        "Given the repository, when a new engineer looks for who owns the service, then they find a named role, a channel and the first three diagnostic steps without asking in a chat."
+      ],
+      "verify": "manual"
+    }
+  ],
+  "addGates": [
+    {
+      "id": "G1-INCIDENT",
+      "tier": 1,
+      "statement": "An owner and a first-response runbook exist for the primary journey, and both name the same person or role."
+    }
+  ]
+}

@@ -91,6 +91,35 @@ try {
 
 const requirements = Array.isArray(spec.requirements) ? spec.requirements : [];
 
+// A requirement is one behaviour, with a precondition and a response a machine can
+// separate. This mirrors factory/lib/ears.mjs; it is inlined so the guard stays
+// dependency-free in the repository it is copied into. Returns null when valid.
+const CLAUSE = /^(Where|While|When|If) (.+?)(, then|,)(?=\s*(?:(?:Where|While|When|If)\s|the\s))/i;
+const CLAUSE_ORDER = { Where: 0, While: 1, When: 2, If: 3 };
+
+function earsError(statement) {
+  const text = String(statement ?? '').replace(/\s+/g, ' ').trim();
+  if (!text.endsWith('.')) return 'it must end with a full stop';
+  const parts = text.slice(0, -1).split(' shall ');
+  if (parts.length !== 2) return 'it needs exactly one "shall"';
+  let rest = parts[0].trim();
+  let last = -1;
+  for (;;) {
+    const match = rest.match(CLAUSE);
+    if (!match) break;
+    const type = match[1][0].toUpperCase() + match[1].slice(1).toLowerCase();
+    if (CLAUSE_ORDER[type] <= last) return 'clauses must be ordered WHERE -> WHILE -> WHEN -> IF,THEN';
+    const delim = match[3].toLowerCase();
+    if (type === 'If' && delim !== ', then') return 'an "If" clause must be followed by ", then"';
+    if (type !== 'If' && delim === ', then') return 'only an "If" clause takes ", then"';
+    last = CLAUSE_ORDER[type];
+    rest = rest.slice(match[0].length).trim();
+  }
+  if (!/^the [\w-]+(?: [\w-]+)*$/i.test(rest)) return 'it needs "the <system> shall ..." after the clauses';
+  if (parts[1].trim().length < 12) return 'the response is too short to implement';
+  return null;
+}
+
 // 1. documents
 for (const doc of spec.docs ?? []) {
   if (existsSync(path.join(SPEC_DIR, doc))) passes.push(`document present: ${doc}`);
@@ -103,6 +132,13 @@ for (const requirement of requirements) {
   if (!requirement.id || !requirement.title) errors.push('a requirement is missing id or title');
   if (!requirement.statement || String(requirement.statement).length < 30) {
     errors.push(`${requirement.id}: statement is missing or too thin to implement`);
+  } else if (earsError(requirement.statement)) {
+    // Same five shapes the compiler enforces (factory/lib/ears.mjs), inlined because
+    // this file is generated into a repository that has no dependency on the tool.
+    errors.push(
+      `${requirement.id}: statement is not EARS-shaped (${earsError(requirement.statement)}). Use "The <system> shall ...", ` +
+        `"When <trigger>, the <system> shall ...", "While <state>, ...", "If <condition>, then ..." or "Where <feature>, ..."`
+    );
   }
   if (!Array.isArray(requirement.acceptance) || requirement.acceptance.length === 0) {
     errors.push(`${requirement.id}: no acceptance criteria`);

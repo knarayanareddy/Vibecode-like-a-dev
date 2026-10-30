@@ -11,6 +11,7 @@ Every row must have a concrete shape before Phase 3. A row marked "to define" bl
 | Req | Surface | What it promises | Proven by |
 | --- | --- | --- | --- |
 | REQ-004 | HTTP / module interface | Predictable command-line behaviour | contract test |
+| REQ-006 | Internal interface | Someone owns failure, and knows what to do first | review |
 
 ## 2. The shapes to fix first
 

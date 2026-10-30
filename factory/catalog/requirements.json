@@ -9,7 +9,7 @@
       },
       "render": "core",
       "title": "Runnable from a clean clone",
-      "statement": "A new contributor can install dependencies, start the project and run its tests from a clean clone using only the documented commands, with no manual database seeding, no hidden local state and no undocumented environment variables.",
+      "statement": "The application shall start, run its tests and name every missing environment variable from a clean clone using only the commands in the README.",
       "definition": "A clean clone of {project} runs with one documented command, and a missing setting is named rather than guessed.",
       "failurePath": "A missing environment variable produces a single actionable error naming the variable, not a stack trace deep in a startup path.",
       "acceptance": [
@@ -24,7 +24,7 @@
       },
       "render": "core",
       "title": "The primary journey works end to end",
-      "statement": "The single journey described in the product brief works from first step to last, through the real interface, persisting whatever it must persist, and produces the outcome the brief promises. It is exercised by one end-to-end test, not by unit tests of its parts.",
+      "statement": "The application shall carry one record through the journey in the product brief from first step to last, through the documented interface, and leave the promised outcome readable on a second visit.",
       "definition": "One {primary} goes from created to finished end to end through the documented interface, with no manual step in the middle and nothing reachable only by a developer.",
       "failurePath": "If any step of the journey fails, the user is left in a state they can retry from, with no partially written data and an explanation that names what failed.",
       "acceptance": [
@@ -41,7 +41,7 @@
       },
       "render": "core",
       "title": "Explicit non-goals",
-      "statement": "The product brief lists at least three things this version deliberately does not do, and the codebase contains no partially built version of them.",
+      "statement": "The product brief shall name at least three capabilities this version deliberately does not provide, with no partially built version of them anywhere in the codebase.",
       "definition": "The three things {project} will not do in v1 are written down, reviewed before the first sprint, and cited the first time someone asks for a fourth thing.",
       "failurePath": "Out-of-scope work arrives as a failing review comment referencing a non-goal, rather than as silent extra code.",
       "acceptance": [
@@ -78,7 +78,7 @@
       },
       "render": "data",
       "title": "Durable state with forward-only migrations",
-      "statement": "Persistent state is defined by a schema kept in version control. Every schema change ships as a forward-only migration that can run on a non-empty database without data loss.",
+      "statement": "When the schema of stored state changes, the application shall apply a forward-only migration that runs against a non-empty database without losing data.",
       "definition": "What {project} knows about {aPrimary} survives a restart in {db}, and every schema change is a forward-only migration with a restore step that has been run once.",
       "failurePath": "A migration that fails halfway leaves the database in a known state, and the documented restore step returns it to the pre-migration snapshot.",
       "acceptance": [
@@ -111,7 +111,7 @@
       },
       "render": "data",
       "title": "Data lifecycle: retention, export and deletion",
-      "statement": "Every personal data field has a documented purpose, retention period and deletion path. A single operation removes all data belonging to one subject, including derived rows and cached copies.",
+      "statement": "When a subject asks for their data to be deleted, the application shall remove every field, derived row and cached copy about that subject in one operation, under the purpose and retention period recorded for each field.",
       "definition": "A {secondary}'s {primary} data has a stated retention period, an export, and a deletion path that removes every copy including the ones in logs and fixtures.",
       "failurePath": "A deletion request for an unknown subject returns success without inventing records, and leaves no orphan rows.",
       "acceptance": [
@@ -128,7 +128,7 @@
       },
       "render": "security",
       "title": "Authentication with explicit session lifecycle",
-      "statement": "Users authenticate through a named mechanism. Sessions expire, can be revoked, and never rely on client-held claims that the server cannot verify.",
+      "statement": "While a session is open, the application shall accept it only after verifying it server-side, and expire or revoke it on the documented triggers.",
       "definition": "A {secondary} signs in and signs out, and a revoked session stops working on the server immediately rather than at the next token expiry.",
       "failurePath": "An expired or revoked session receives an unauthenticated response and performs no state change.",
       "acceptance": [
@@ -158,7 +158,7 @@
       },
       "render": "security",
       "title": "Server-side authorization with deny-by-default",
-      "statement": "Every state-changing operation and every read of another subject's data checks permission on the server, keyed to a named role or policy, with deny as the default.",
+      "statement": "When a request reads or changes data belonging to another subject, the application shall deny it unless a named role or policy grants that action on that object.",
       "definition": "Reading or changing another {secondary}'s {primary} is refused by the server; the interface is allowed to hide the control but never to be the control.",
       "failurePath": "A forbidden request returns 403 or 404 as documented, writes nothing, and emits an authorization-denied log line without leaking the resource's contents.",
       "acceptance": [
@@ -175,7 +175,7 @@
       },
       "render": "security",
       "title": "Tenant isolation",
-      "statement": "Every unit of work belongs to exactly one tenant. The tenant key is applied by the layer that owns data access, never by individual call sites, and an inbound tenant identifier is never trusted.",
+      "statement": "The data-access layer shall apply the caller's tenant key to every unit of work and ignore any tenant identifier supplied by the client.",
       "definition": "Two {secondaryPlural} in different tenants cannot see or affect each other's {primary} data through any query, handler or export path.",
       "failurePath": "A query constructed without a tenant filter fails closed (returns no rows or raises), rather than returning all tenants.",
       "acceptance": [
@@ -195,7 +195,7 @@
       },
       "render": "frontend",
       "title": "Accessible primary journey",
-      "statement": "The primary journey is completable with a keyboard only and with a screen reader, with visible focus, labelled controls and no colour-only status encoding.",
+      "statement": "When the primary journey is run with a keyboard alone or with a screen reader, the interface shall complete every step with visible focus, labelled controls and no colour-only status.",
       "definition": "The main {primary} journey completes with a keyboard and a screen reader, error states included, and focus lands somewhere sensible after every navigation.",
       "failurePath": "Validation errors are announced and focus moves to the first invalid field, rather than the form silently failing.",
       "acceptance": [
@@ -223,7 +223,7 @@
       },
       "render": "frontend",
       "title": "Every screen has loading, empty, error and success states",
-      "statement": "Each data-driven screen defines four states before it is considered done, and the empty state tells the user the next action.",
+      "statement": "When a data-driven screen is empty, loading or has failed, the interface shall show that defined state and, when empty, name the next action.",
       "definition": "Every {primary} screen has loading, empty, error and success states, and the error state carries the next action rather than an apology.",
       "failurePath": "A failed request shows a retry affordance and preserves the user's input rather than discarding the form.",
       "acceptance": [
@@ -252,7 +252,7 @@
       },
       "render": "frontend",
       "title": "One design token source",
-      "statement": "Colour, spacing, typography and radius come from a single token source. No component hard-codes a hex colour, pixel spacing value or font family.",
+      "statement": "The interface shall take colour, spacing, typography and radius from one token source, with no component hard-coding a hex value, pixel spacing or font family.",
       "definition": "Colour, spacing and type come from one token source, so restyling the {primary} views is a change to one file and not to every component.",
       "failurePath": "A component using a raw value fails the design-token fitness check in CI.",
       "acceptance": [
@@ -279,7 +279,7 @@
       },
       "render": "frontend",
       "title": "Errors are classified before they are rendered",
-      "statement": "Errors are classified as user-correctable, retryable or unexpected, and each class has one documented presentation and logging rule.",
+      "statement": "When an operation fails, the interface shall classify the failure as user-correctable, retryable or unexpected and apply that class's one presentation and logging rule.",
       "definition": "A {primary} failure is classified before it is rendered, so the message tells the {secondary} what to do next and never leaks an identifier they cannot act on.",
       "failurePath": "Unexpected errors never render internal messages, stack traces or identifiers to the user, and are logged with a correlation ID that is shown as a short support code.",
       "acceptance": [
@@ -306,7 +306,7 @@
       },
       "render": "api",
       "title": "Versioned machine-readable interface contract",
-      "statement": "Every exposed or consumed interface is described in a machine-readable contract kept in the repository, and breaking changes are detected before merge.",
+      "statement": "When an exposed or consumed interface changes, the application shall update the machine-readable contract in the repository before merge, in a form a breaking-change check can reject.",
       "definition": "The {primary} interface has a versioned, machine-readable contract kept in the repository, and a breaking change fails before merge rather than after a consumer notices.",
       "failurePath": "An incompatible change fails the contract check and names the field and the consumer affected.",
       "acceptance": [
@@ -334,7 +334,7 @@
       },
       "render": "api",
       "title": "One error envelope and one identifier scheme",
-      "statement": "All errors share one envelope containing a stable machine code, a human message, a correlation ID and optional field details. Identifiers are opaque and are never sequential integers in public interfaces.",
+      "statement": "The application shall return every error in one envelope carrying a stable machine code, a human message, a correlation ID and optional field details, with opaque identifiers instead of sequential ones.",
       "definition": "Every failure on the {primary} interface returns one envelope shape, with an opaque identifier a support conversation can quote.",
       "failurePath": "An unknown route and a failed validation return the same envelope shape with distinguishable machine codes.",
       "acceptance": [
@@ -358,7 +358,7 @@
       },
       "render": "reliability",
       "title": "Idempotent handling of retried work",
-      "statement": "Every inbound webhook and every outbound retry is idempotent: replaying the same event produces the same end state and no duplicate side effect.",
+      "statement": "When an inbound webhook or outbound retry is replayed, the application shall reach the same end state with no duplicate side effect.",
       "definition": "A retried {primary} request produces the same outcome as the first one: no second record, no second side effect, no second notification.",
       "failurePath": "A duplicate event is acknowledged without reprocessing, and a retry storm does not create duplicate records or double-charge.",
       "acceptance": [
@@ -384,7 +384,7 @@
       },
       "render": "reliability",
       "title": "Money movement is correct under retries and partial failure",
-      "statement": "Amounts are stored in integer minor units with an explicit currency. Every charge, refund and transfer is idempotent, recorded in an append-only ledger, and reconciled against the provider.",
+      "statement": "When a charge, refund or transfer is retried or partially fails, the application shall write exactly one append-only ledger entry in integer minor units with an explicit currency, and reconcile it against the provider.",
       "definition": "Money attached to {aPrimary} stays correct through retries, partial failure and reversal, because every correction is a new entry rather than an edit.",
       "failurePath": "A webhook arriving before the checkout response, or twice, results in exactly one entitlement and one ledger entry.",
       "acceptance": [
@@ -410,7 +410,7 @@
       },
       "render": "ai",
       "title": "Model calls are bounded, observable and evaluated",
-      "statement": "Every model call has a declared input contract, an output validator, a timeout, a per-user rate limit and a cost ceiling. A versioned evaluation set exists for the prompts that matter.",
+      "statement": "When a model call is made, the application shall declare its input contract, validate the output, enforce a timeout, a per-user rate limit and a cost ceiling, and degrade rather than half-write.",
       "definition": "Model calls that touch {primary} content have a timeout, a validated response, a cost ceiling, and a recorded fixture the evaluation runs against.",
       "failurePath": "A malformed model response is rejected and the user sees a retryable message; it is never rendered as trusted markup.",
       "acceptance": [
@@ -443,7 +443,7 @@
       },
       "render": "reliability",
       "title": "Observable behaviour under failure",
-      "statement": "Every inbound request has a correlation ID propagated through logs and outbound calls. Errors, latency and queue depth are recorded in a form that can be alerted on.",
+      "statement": "When a request or job fails, the application shall record one structured log line with a correlation ID propagated to outbound calls, and expose error, latency and queue-depth numbers that can be alerted on.",
       "definition": "A failed {primary} operation is visible in a log with a correlation id the support team can search, without attaching a debugger to production.",
       "failurePath": "A failing dependency produces log lines carrying the correlation ID and an alertable error-rate increase, not a silent retry loop.",
       "acceptance": [
@@ -476,7 +476,7 @@
       },
       "render": "security",
       "title": "Abuse limits on public entry points",
-      "statement": "Public write and authentication endpoints are rate limited per identity and per IP, with a documented response that includes a retry hint.",
+      "statement": "When a public write or authentication endpoint is called, the application shall limit requests per identity and per IP and answer a refused request with a retry hint.",
       "definition": "Public entry points that create or change {primary} data are limited per identity and per address, and say how long to wait when they refuse.",
       "failurePath": "Exceeding the limit returns 429 with a retry hint and performs no work; the limiter fails closed for authentication endpoints.",
       "acceptance": [
@@ -500,7 +500,7 @@
       },
       "render": "security",
       "title": "Append-only audit trail for privileged actions",
-      "statement": "Privileged and destructive actions append an immutable record of actor, action, target, time and outcome. Records are never updated or deleted by application code.",
+      "statement": "When a privileged or destructive action succeeds or fails, the application shall append an immutable record of actor, action, target, time and outcome that application code cannot update or delete.",
       "definition": "Privileged changes to {aPrimary} are append-only and attributable to the {secondary} who made them, including the ones made by a support tool.",
       "failurePath": "A failed privileged action is still recorded, with its failure reason and without sensitive payloads.",
       "acceptance": [
@@ -516,7 +516,7 @@
       },
       "render": "data",
       "title": "Reprocessable pipeline stages",
-      "statement": "Each stage is deterministic given its inputs, records its watermark, and can be replayed for a time window without duplicating output.",
+      "statement": "When a stage is replayed for a time window, the pipeline shall produce the same output once, keyed by the watermark it recorded.",
       "definition": "Re-running a window of {primary} data replaces its output instead of duplicating it, so a failed run is safe to retry rather than a reason to clean up by hand.",
       "failurePath": "Replaying a window produces identical output and leaves row counts unchanged.",
       "acceptance": [
@@ -532,7 +532,7 @@
       },
       "render": "api",
       "title": "Stable public surface with semantic versioning",
-      "statement": "The public export surface is enumerated and tested, so an accidental breaking change fails CI. Versions follow semantic versioning.",
+      "statement": "The library shall enumerate and test its public export surface so an accidental breaking change fails CI, and version every release by semantic versioning.",
       "definition": "The public surface, described in terms of {aPrimary}, is versioned; removing or changing anything a consumer can call requires a major version and a migration note.",
       "failurePath": "Removing or changing a public export fails the surface test and requires a major version bump.",
       "acceptance": [
@@ -548,7 +548,7 @@
       },
       "render": "api",
       "title": "Predictable command-line behaviour",
-      "statement": "Commands follow a documented grammar, write data to stdout and diagnostics to stderr, support --help and --version, and exit non-zero on failure.",
+      "statement": "When a command runs, the CLI shall follow the documented grammar, write data to stdout and diagnostics to stderr, answer --help and --version, and exit non-zero on failure.",
       "definition": "Every command that touches {aPrimary} documents its flags and exit codes, rejects unknown input, and supports a dry run that changes nothing.",
       "failurePath": "An invalid flag prints usage to stderr and exits 2; a partial failure exits non-zero and leaves no half-written output file.",
       "acceptance": [
@@ -564,7 +564,7 @@
       },
       "render": "core",
       "title": "Spec drift is detected mechanically",
-      "statement": "Requirements marked automated carry an @req anchor in the test that proves them. CI fails when an anchored requirement has no test, when a test cites an unknown requirement, or when a primitive referenced by the spec disappears.",
+      "statement": "When a requirement marked automated loses its @req anchor, or a test cites an unknown requirement, or the spec references a missing primitive, the build shall fail and name the requirement or primitive that broke the link.",
       "definition": "A requirement about {aPrimary} that loses its test anchor fails the build rather than passing quietly.",
       "failurePath": "Deleting a test that proves an automated requirement fails CI with the requirement identifier and the missing anchor.",
       "acceptance": [
@@ -580,7 +580,7 @@
       },
       "render": "core",
       "title": "The product's own rules are named and pinned",
-      "statement": "Every invariant listed in the domain model names a rule that makes this product itself, and each has at least one automated test whose failure mode is that rule being violated. An invariant with no test is a comment; a test that would pass with the rule inverted is not a test.",
+      "statement": "The domain model shall state every product-specific invariant as a rule, each pinned by an automated test that fails when the rule is inverted.",
       "definition": "The rules that make {aPrimary} valid are written down, and each one has a test that fails when the rule is broken rather than a comment saying it matters.",
       "failurePath": "If a core rule is inverted by a refactor, a test fails and names the rule, rather than the change being discovered by a user or a reviewer.",
       "acceptance": [
@@ -613,7 +613,7 @@
       },
       "render": "data",
       "title": "Uploads are validated, contained and stripped",
-      "statement": "Every uploaded file is checked against an allowlist of types and a size limit before it is stored, stored under a generated name outside any directory the web server executes, and served only through an authorised or signed URL. Metadata that the product does not need, such as location, is removed on ingest.",
+      "statement": "When a file is uploaded, the application shall check it against a type allowlist and a size limit, store it under a generated name outside any executable path, strip metadata the product does not need, and serve it only through an authorised or signed URL.",
       "definition": "A file attached to {aPrimary} is type-checked by content, size-capped, stripped of metadata, and stored where the web server cannot execute it.",
       "failurePath": "An uploaded HTML file served from the asset host becomes stored XSS; a photo carrying GPS coordinates leaks the user's home address; an unbounded upload fills the disk and takes the service down.",
       "acceptance": [
@@ -638,7 +638,7 @@
       },
       "render": "reliability",
       "title": "Offline writes are durable and replay is safe",
-      "statement": "A write made without a network is persisted locally before the interface reports success, survives the application being killed, and is replayed on reconnect without duplicating the effect. Conflicting writes follow one documented rule, and the interface shows what is still pending rather than implying it is saved.",
+      "statement": "When a write is made without a network, the application shall persist it locally before reporting success, replay it on reconnect without duplicating the effect, and show it as pending until the server confirms it.",
       "definition": "{aPrimary} changed while offline replays exactly once after reconnect, even if the app is killed between the write and the sync.",
       "failurePath": "A user ticks a habit on a train, closes the app, and the tick is gone; or it is replayed three times and the streak counts three.",
       "acceptance": [

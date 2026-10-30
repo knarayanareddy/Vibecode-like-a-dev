@@ -119,6 +119,8 @@ A delta that only says what to add is a wish list. This one has four obligations
 
 Impact is classified (`patch` / `minor` / `major`), and removing a requirement that a practice enforces at your tier is flagged rather than silently allowed. Appended criteria keep their existing `AC-` identifiers, because anchors already cite them.
 
+When the change has shipped, `vld change archive changes/add-csv-export specs` folds the delta back into the profile as a `team` overlay, preserves the `REQ-` id your tests now anchor against, moves the change directory to `changes/archive/`, and recompiles. Running it twice produces the same bytes.
+
 ### `vld mcp` — stop pasting 34 files
 
 An MCP server over stdio, zero dependencies, 8 tools:
@@ -219,6 +221,7 @@ This is the part that is not in the other tools.
 # in the product repository, in CI, on every pull request
 node specs/spec-check.mjs --repo .            # pending requirements are notices
 node specs/spec-check.mjs --repo . --strict   # release CI: nothing ships unfinished
+node specs/enforcement/gates.mjs --repo .     # one check per gate in the packet
 ```
 
 ```ts
@@ -279,11 +282,12 @@ What it produces today:
 
 | | |
 | --- | --- |
-| profile inferred/defined as | `cli`, javascript, single-maintainer, production |
-| selection | 17 practices, tier 1, 8 gates |
-| packet | 11 documents, 803 lines (ceiling 900) |
-| `vld verify specs` | PASS — 5 requirements, 7 criteria, 0 errors |
-| `node specs/spec-check.mjs --repo . --strict` | PASS — 0 errors, 0 pending, 14 anchored files, 2 ignored |
+| profile inferred/defined as | `cli`, javascript, single-maintainer, production, `org-baseline` overlay |
+| selection | 17 practices, tier 1, 9 gates |
+| packet | 11 documents + `enforcement/`, 756 lines (ceiling 900) |
+| `vld verify specs` | PASS — 6 EARS requirements, 8 criteria, 9 gates, 0 errors |
+| `node specs/spec-check.mjs --repo . --strict` | PASS — 0 errors, 0 pending, 1 ignored |
+| `node specs/enforcement/gates.mjs --repo . --strict` | PASS — 9 pass, 0 fail, 0 pending |
 
 The interesting part is what it refused to accept. Running the tool on itself found four real defects that no unit test had:
 
@@ -413,6 +417,7 @@ npm run check   # index freshness + tests + example packet + own drift guard + s
 
 Shipped in v0.2: `vld adopt`, `vld change` (delta specs), `vld mcp`.
 Shipped in v0.3: progress that survives recompiles, anchor suppression (`@req-ignore`, `anchors.exclude`), stable requirement ids across catalog changes, unmapped-obligation reporting, Go stack support, the always-on `core.domain-invariants` requirement, a self-spec packet guarded in CI, and a ten-idea stress run in `npm run check`.
+Shipped in v0.4: per-product obligations and red-flag/anti-rationalization tables on all 34 practices, EARS-shaped requirement statements enforced by `verify` and `spec-check`, org → domain → team overlays with provenance, `vld change archive`, and `enforcement/gates.mjs` plus config fragments per gate (see [`docs/LANDSCAPE.md`](docs/LANDSCAPE.md) §8).
 
 1. **An evaluation harness** — the same set of tickets built with no spec, a generic spec, and this packet, scored on merge rate, review defects, spec drift and cost. Until that exists, every claim here is a design argument.
 2. **Exports** — `spec-kit` and `kiro` formats from one source of truth, so the packet is portable rather than a new ecosystem.

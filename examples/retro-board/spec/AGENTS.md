@@ -25,6 +25,7 @@ First: **REQ-001** — A clean clone of Retro Board runs with one documented com
 # after setup, then keep this block accurate
 npm run lint && npm run typecheck && npm test
 node specs/spec-check.mjs --repo .
+node specs/enforcement/gates.mjs --repo .
 ```
 
 An agent that cannot run the checks will claim success instead.

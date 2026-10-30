@@ -1,0 +1,28 @@
+{
+  "id": "health-data",
+  "layer": "domain",
+  "title": "Health data handling",
+  "why": "Health data carries a consent record that is not derivable from the product's own rules: who agreed, to what, and when they withdrew. The catalog's retention rule covers deletion, not the basis on which the data was held at all.",
+  "extends": "org-baseline",
+  "addRequirements": [
+    {
+      "key": "data.consent-basis",
+      "title": "Every health record has a consent basis",
+      "area": "data",
+      "statement": "When personal health data is read or written, the application shall check a recorded consent that names its purpose and its withdrawal state, and refuse the operation once that consent is withdrawn.",
+      "failurePath": "A record read after consent was withdrawn is a reportable breach, not a bug, and no later delete undoes the read.",
+      "acceptance": [
+        "Given a subject who withdraws consent, when any reader requests their health record, then the request is refused with a stable code and the refusal is logged.",
+        "Given a record created before consent was recorded, when it is read, then the read fails closed and the gap is reported rather than tolerated."
+      ],
+      "verify": "automated"
+    }
+  ],
+  "addGates": [
+    {
+      "id": "G2-CONSENT",
+      "tier": 2,
+      "statement": "A withdrawal of consent makes subsequent reads of that subject's health data fail, proven by a test."
+    }
+  ]
+}

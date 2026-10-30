@@ -8,6 +8,7 @@
   "project": {
     "name": "retro-board",
     "title": "Retro Board",
+    "profile": "examples/retro-board/profile.json",
     "kind": "web-app",
     "stage": "mvp",
     "idea": "A retrospective board for small engineering teams. A facilitator creates a board per sprint, teammates add anonymous cards into Start / Stop / Continue columns, then everyone votes and the team leaves with three agreed actions. Today teams do this in a shared doc that nobody can vote on and that loses its history.",
@@ -65,6 +66,7 @@
     ],
     "check": "node specs/spec-check.mjs --repo ."
   },
+  "overlays": [],
   "primitives": [
     {
       "id": "product.product-brief",
@@ -72,7 +74,8 @@
       "path": "primitives/product/product-brief/SKILL.md",
       "why": "An agent fills every ambiguity silently. A written brief is the cheapest place to remove ambiguity.",
       "when": "always",
-      "enforces": []
+      "enforces": [],
+      "origin": "router"
     },
     {
       "id": "product.non-goals-and-scope",
@@ -82,7 +85,8 @@
       "when": "always",
       "enforces": [
         "core.non-goals"
-      ]
+      ],
+      "origin": "router"
     },
     {
       "id": "domain.ubiquitous-language",
@@ -90,7 +94,8 @@
       "path": "primitives/domain/ubiquitous-language/SKILL.md",
       "why": "Shared vocabulary is the highest-leverage defence against plausible-but-wrong generated code.",
       "when": "always",
-      "enforces": []
+      "enforces": [],
+      "origin": "router"
     },
     {
       "id": "testing.tdd-loop",
@@ -98,7 +103,8 @@
       "path": "primitives/testing/tdd-loop/SKILL.md",
       "why": "A failing test is the only instruction an agent cannot misinterpret.",
       "when": "always",
-      "enforces": []
+      "enforces": [],
+      "origin": "router"
     },
     {
       "id": "testing.acceptance-traceability",
@@ -108,7 +114,8 @@
       "when": "always",
       "enforces": [
         "spec.drift-guard"
-      ]
+      ],
+      "origin": "router"
     },
     {
       "id": "agent.handoff-packet",
@@ -116,7 +123,8 @@
       "path": "primitives/agent/handoff-packet/SKILL.md",
       "why": "The spec is useless if the agent that receives it cannot find the entry point.",
       "when": "always",
-      "enforces": []
+      "enforces": [],
+      "origin": "router"
     },
     {
       "id": "domain.aggregates-and-invariants",
@@ -127,7 +135,8 @@
       "enforces": [
         "payments.correctness",
         "core.domain-invariants"
-      ]
+      ],
+      "origin": "router"
     },
     {
       "id": "architecture.style-selection",
@@ -135,7 +144,8 @@
       "path": "primitives/architecture/style-selection/SKILL.md",
       "why": "Default to a modular monolith; distributed complexity must be justified, not inherited.",
       "when": "always",
-      "enforces": []
+      "enforces": [],
+      "origin": "router"
     },
     {
       "id": "security.secrets-and-supply-chain",
@@ -143,7 +153,8 @@
       "path": "primitives/security/secrets-and-supply-chain/SKILL.md",
       "why": "Leaked keys and unpinned dependencies are the two cheapest attacks on a new product.",
       "when": "tier gte 1",
-      "enforces": []
+      "enforces": [],
+      "origin": "router"
     },
     {
       "id": "delivery.ci-gates",
@@ -153,7 +164,8 @@
       "when": "tier gte 1",
       "enforces": [
         "core.runnable"
-      ]
+      ],
+      "origin": "router"
     },
     {
       "id": "product.user-journeys",
@@ -163,7 +175,8 @@
       "when": "always",
       "enforces": [
         "core.primary-journey"
-      ]
+      ],
+      "origin": "router"
     },
     {
       "id": "domain.bounded-contexts",
@@ -173,7 +186,8 @@
       "when": "tier gte 1",
       "enforces": [
         "auth.tenant-isolation"
-      ]
+      ],
+      "origin": "router"
     },
     {
       "id": "architecture.api-contract-first",
@@ -184,7 +198,8 @@
       "enforces": [
         "api.contract",
         "api.error-envelope"
-      ]
+      ],
+      "origin": "router"
     },
     {
       "id": "data.schema-and-migrations",
@@ -194,7 +209,8 @@
       "when": "(kind in [\"api\",\"web-app\",\"data-pipeline\",\"mobile\"] OR traits includes \"persistence\")",
       "enforces": [
         "data.persistence"
-      ]
+      ],
+      "origin": "router"
     },
     {
       "id": "testing.test-budget",
@@ -202,7 +218,8 @@
       "path": "primitives/testing/test-budget/SKILL.md",
       "why": "Test suite shape must match risk: heavy on domain rules, thin on frameworks.",
       "when": "always",
-      "enforces": []
+      "enforces": [],
+      "origin": "router"
     },
     {
       "id": "security.authz-model",
@@ -213,7 +230,8 @@
       "enforces": [
         "auth.authorization",
         "auth.tenant-isolation"
-      ]
+      ],
+      "origin": "router"
     },
     {
       "id": "security.asvs-baseline",
@@ -224,7 +242,8 @@
       "enforces": [
         "auth.identity",
         "auth.authorization"
-      ]
+      ],
+      "origin": "router"
     },
     {
       "id": "frontend.design-system-tokens",
@@ -234,7 +253,8 @@
       "when": "kind in [\"web-app\",\"mobile\"]",
       "enforces": [
         "ui.design-tokens"
-      ]
+      ],
+      "origin": "router"
     },
     {
       "id": "frontend.accessibility-baseline",
@@ -244,7 +264,8 @@
       "when": "kind in [\"web-app\",\"mobile\"]",
       "enforces": [
         "ui.accessibility"
-      ]
+      ],
+      "origin": "router"
     },
     {
       "id": "frontend.ui-state-model",
@@ -255,7 +276,8 @@
       "enforces": [
         "ui.states",
         "ux.error-taxonomy"
-      ]
+      ],
+      "origin": "router"
     },
     {
       "id": "agent.review-protocol",
@@ -263,7 +285,8 @@
       "path": "primitives/agent/review-protocol/SKILL.md",
       "why": "Self-review is theatre when the reviewer shares the author's blind spots.",
       "when": "tier gte 1",
-      "enforces": []
+      "enforces": [],
+      "origin": "router"
     },
     {
       "id": "architecture.ports-and-adapters",
@@ -274,7 +297,8 @@
       "enforces": [
         "library.api-stability",
         "cli.ergonomics"
-      ]
+      ],
+      "origin": "router"
     }
   ],
   "deferred": [
@@ -358,8 +382,9 @@
       "id": "REQ-001",
       "key": "core.runnable",
       "area": "core",
+      "origin": "catalog",
       "title": "Runnable from a clean clone",
-      "statement": "A new contributor can install dependencies, start the project and run its tests from a clean clone using only the documented commands, with no manual database seeding, no hidden local state and no undocumented environment variables.",
+      "statement": "The application shall start, run its tests and name every missing environment variable from a clean clone using only the commands in the README.",
       "failurePath": "A missing environment variable produces a single actionable error naming the variable, not a stack trace deep in a startup path.",
       "acceptance": [
         {
@@ -375,8 +400,9 @@
       "id": "REQ-002",
       "key": "core.primary-journey",
       "area": "core",
+      "origin": "catalog",
       "title": "The primary journey works end to end",
-      "statement": "The single journey described in the product brief works from first step to last, through the real interface, persisting whatever it must persist, and produces the outcome the brief promises. It is exercised by one end-to-end test, not by unit tests of its parts.",
+      "statement": "The application shall carry one record through the journey in the product brief from first step to last, through the documented interface, and leave the promised outcome readable on a second visit.",
       "failurePath": "If any step of the journey fails, the user is left in a state they can retry from, with no partially written data and an explanation that names what failed.",
       "acceptance": [
         {
@@ -396,8 +422,9 @@
       "id": "REQ-003",
       "key": "core.non-goals",
       "area": "core",
+      "origin": "catalog",
       "title": "Explicit non-goals",
-      "statement": "The product brief lists at least three things this version deliberately does not do, and the codebase contains no partially built version of them.",
+      "statement": "The product brief shall name at least three capabilities this version deliberately does not provide, with no partially built version of them anywhere in the codebase.",
       "failurePath": "Out-of-scope work arrives as a failing review comment referencing a non-goal, rather than as silent extra code.",
       "acceptance": [
         {
@@ -413,8 +440,9 @@
       "id": "REQ-004",
       "key": "data.persistence",
       "area": "data",
+      "origin": "catalog",
       "title": "Durable state with forward-only migrations",
-      "statement": "Persistent state is defined by a schema kept in version control. Every schema change ships as a forward-only migration that can run on a non-empty database without data loss.",
+      "statement": "When the schema of stored state changes, the application shall apply a forward-only migration that runs against a non-empty database without losing data.",
       "failurePath": "A migration that fails halfway leaves the database in a known state, and the documented restore step returns it to the pre-migration snapshot.",
       "acceptance": [
         {
@@ -434,8 +462,9 @@
       "id": "REQ-005",
       "key": "auth.identity",
       "area": "security",
+      "origin": "catalog",
       "title": "Authentication with explicit session lifecycle",
-      "statement": "Users authenticate through a named mechanism. Sessions expire, can be revoked, and never rely on client-held claims that the server cannot verify.",
+      "statement": "While a session is open, the application shall accept it only after verifying it server-side, and expire or revoke it on the documented triggers.",
       "failurePath": "An expired or revoked session receives an unauthenticated response and performs no state change.",
       "acceptance": [
         {
@@ -459,8 +488,9 @@
       "id": "REQ-006",
       "key": "auth.authorization",
       "area": "security",
+      "origin": "catalog",
       "title": "Server-side authorization with deny-by-default",
-      "statement": "Every state-changing operation and every read of another subject's data checks permission on the server, keyed to a named role or policy, with deny as the default.",
+      "statement": "When a request reads or changes data belonging to another subject, the application shall deny it unless a named role or policy grants that action on that object.",
       "failurePath": "A forbidden request returns 403 or 404 as documented, writes nothing, and emits an authorization-denied log line without leaking the resource's contents.",
       "acceptance": [
         {
@@ -480,8 +510,9 @@
       "id": "REQ-007",
       "key": "ui.accessibility",
       "area": "frontend",
+      "origin": "catalog",
       "title": "Accessible primary journey",
-      "statement": "The primary journey is completable with a keyboard only and with a screen reader, with visible focus, labelled controls and no colour-only status encoding.",
+      "statement": "When the primary journey is run with a keyboard alone or with a screen reader, the interface shall complete every step with visible focus, labelled controls and no colour-only status.",
       "failurePath": "Validation errors are announced and focus moves to the first invalid field, rather than the form silently failing.",
       "acceptance": [
         {
@@ -501,8 +532,9 @@
       "id": "REQ-008",
       "key": "ui.states",
       "area": "frontend",
+      "origin": "catalog",
       "title": "Every screen has loading, empty, error and success states",
-      "statement": "Each data-driven screen defines four states before it is considered done, and the empty state tells the user the next action.",
+      "statement": "When a data-driven screen is empty, loading or has failed, the interface shall show that defined state and, when empty, name the next action.",
       "failurePath": "A failed request shows a retry affordance and preserves the user's input rather than discarding the form.",
       "acceptance": [
         {
@@ -526,8 +558,9 @@
       "id": "REQ-009",
       "key": "ui.design-tokens",
       "area": "frontend",
+      "origin": "catalog",
       "title": "One design token source",
-      "statement": "Colour, spacing, typography and radius come from a single token source. No component hard-codes a hex colour, pixel spacing value or font family.",
+      "statement": "The interface shall take colour, spacing, typography and radius from one token source, with no component hard-coding a hex value, pixel spacing or font family.",
       "failurePath": "A component using a raw value fails the design-token fitness check in CI.",
       "acceptance": [
         {
@@ -543,8 +576,9 @@
       "id": "REQ-010",
       "key": "ux.error-taxonomy",
       "area": "frontend",
+      "origin": "catalog",
       "title": "Errors are classified before they are rendered",
-      "statement": "Errors are classified as user-correctable, retryable or unexpected, and each class has one documented presentation and logging rule.",
+      "statement": "When an operation fails, the interface shall classify the failure as user-correctable, retryable or unexpected and apply that class's one presentation and logging rule.",
       "failurePath": "Unexpected errors never render internal messages, stack traces or identifiers to the user, and are logged with a correlation ID that is shown as a short support code.",
       "acceptance": [
         {
@@ -560,8 +594,9 @@
       "id": "REQ-011",
       "key": "api.contract",
       "area": "api",
+      "origin": "catalog",
       "title": "Versioned machine-readable interface contract",
-      "statement": "Every exposed or consumed interface is described in a machine-readable contract kept in the repository, and breaking changes are detected before merge.",
+      "statement": "When an exposed or consumed interface changes, the application shall update the machine-readable contract in the repository before merge, in a form a breaking-change check can reject.",
       "failurePath": "An incompatible change fails the contract check and names the field and the consumer affected.",
       "acceptance": [
         {
@@ -581,8 +616,9 @@
       "id": "REQ-012",
       "key": "api.error-envelope",
       "area": "api",
+      "origin": "catalog",
       "title": "One error envelope and one identifier scheme",
-      "statement": "All errors share one envelope containing a stable machine code, a human message, a correlation ID and optional field details. Identifiers are opaque and are never sequential integers in public interfaces.",
+      "statement": "The application shall return every error in one envelope carrying a stable machine code, a human message, a correlation ID and optional field details, with opaque identifiers instead of sequential ones.",
       "failurePath": "An unknown route and a failed validation return the same envelope shape with distinguishable machine codes.",
       "acceptance": [
         {
@@ -598,8 +634,9 @@
       "id": "REQ-013",
       "key": "ops.rate-limits",
       "area": "security",
+      "origin": "catalog",
       "title": "Abuse limits on public entry points",
-      "statement": "Public write and authentication endpoints are rate limited per identity and per IP, with a documented response that includes a retry hint.",
+      "statement": "When a public write or authentication endpoint is called, the application shall limit requests per identity and per IP and answer a refused request with a retry hint.",
       "failurePath": "Exceeding the limit returns 429 with a retry hint and performs no work; the limiter fails closed for authentication endpoints.",
       "acceptance": [
         {
@@ -615,8 +652,9 @@
       "id": "REQ-014",
       "key": "core.domain-invariants",
       "area": "core",
+      "origin": "catalog",
       "title": "The product's own rules are named and pinned",
-      "statement": "Every invariant listed in the domain model names a rule that makes this product itself, and each has at least one automated test whose failure mode is that rule being violated. An invariant with no test is a comment; a test that would pass with the rule inverted is not a test.",
+      "statement": "The domain model shall state every product-specific invariant as a rule, each pinned by an automated test that fails when the rule is inverted.",
       "failurePath": "If a core rule is inverted by a refactor, a test fails and names the rule, rather than the change being discovered by a user or a reviewer.",
       "acceptance": [
         {
@@ -637,42 +675,108 @@
     {
       "id": "G0-RUN",
       "statement": "The project starts from a clean clone with one documented command.",
-      "origin": "policy:tier-0"
+      "origin": "policy:tier-0",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [],
+        "kind": "local",
+        "proves": "The README contains a fenced command block a new contributor can copy.",
+        "doesNotProve": "The README itself. This check only proves a command is written down; G0-SMOKE proves it works."
+      }
     },
     {
       "id": "G0-CHECK",
       "statement": "Lint or typecheck runs in CI on every pull request.",
-      "origin": "policy:tier-0"
+      "origin": "policy:tier-0",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [],
+        "kind": "local",
+        "proves": "A CI workflow runs a lint or typecheck step on pull requests.",
+        "doesNotProve": "The workflow file. Add the same command to the README so a local run matches CI."
+      }
     },
     {
       "id": "G0-SMOKE",
       "statement": "One happy-path smoke test exercises the primary user journey.",
-      "origin": "policy:tier-0"
+      "origin": "policy:tier-0",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [],
+        "kind": "local",
+        "proves": "A smoke or end-to-end test file exists for the primary journey.",
+        "doesNotProve": "One end-to-end test, exercising the documented interface rather than the internals."
+      }
     },
     {
       "id": "G1-CI",
       "statement": "The full test suite runs in CI on every pull request and is required to merge.",
-      "origin": "policy:tier-1"
+      "origin": "policy:tier-1",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [],
+        "kind": "local",
+        "proves": "A CI workflow runs the test command.",
+        "doesNotProve": "The workflow file, plus a branch protection rule that makes the job required. The rule is in the forge, not in the repository."
+      }
     },
     {
       "id": "G1-DOMAIN-TESTS",
       "statement": "Every rule in the domain model has at least one automated test.",
-      "origin": "policy:tier-1"
+      "origin": "policy:tier-1",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [],
+        "kind": "local",
+        "proves": "Every core requirement carries an @req anchor in a test file.",
+        "doesNotProve": "`spec-check.mjs` counts the anchors; this gate fails while a core requirement has none."
+      }
     },
     {
       "id": "G1-AC-TRACE",
       "statement": "Every requirement marked automated maps to a named test through an @req anchor.",
-      "origin": "policy:tier-1"
+      "origin": "policy:tier-1",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [],
+        "kind": "local",
+        "proves": "Every requirement marked automated has a test anchor.",
+        "doesNotProve": "`spec-check.mjs --strict`, run in CI."
+      }
     },
     {
       "id": "G1-RUNBOOK",
       "statement": "README documents how to run, test and deploy, plus known limitations.",
-      "origin": "policy:tier-1"
+      "origin": "policy:tier-1",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [],
+        "kind": "local",
+        "proves": "The README covers running, testing and deploying.",
+        "doesNotProve": "Three headings. A runbook with none of them is a README for the author."
+      }
     },
     {
       "id": "G1-SECRETS",
       "statement": "No secret is committed; configuration comes from the environment and is validated at startup.",
-      "origin": "policy:tier-1"
+      "origin": "policy:tier-1",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [
+          "enforcement/gitleaks.toml"
+        ],
+        "kind": "local",
+        "proves": "No credential-shaped string is committed, and a gitleaks config is present for the pre-commit hook.",
+        "doesNotProve": "The runner scans the working tree; gitleaks scans history. Both are needed: this file cannot see what was already committed and deleted."
+      }
     }
   ],
   "docs": [

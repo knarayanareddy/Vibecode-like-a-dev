@@ -1,0 +1,364 @@
+{
+  "comment": "One mechanism per gate. `check` is a rule the shipped runner evaluates against the repository; `files` are the config fragments the runner cannot replace (a real linter's config, a policy, a mutation config). A gate with no machine check still gets an attestation file, because a gate nobody records is a gate nobody meets.",
+  "gates": {
+    "G0-RUN": {
+      "check": {
+        "kind": "contains",
+        "glob": [
+          "README.md",
+          "README",
+          "readme.md"
+        ],
+        "patterns": [
+          "```"
+        ]
+      },
+      "how": "The README contains a fenced command block a new contributor can copy.",
+      "mechanism": "The README itself. This check only proves a command is written down; G0-SMOKE proves it works."
+    },
+    "G0-CHECK": {
+      "check": {
+        "kind": "ci",
+        "patterns": [
+          "lint|typecheck|tsc|ruff|eslint|golangci|clippy",
+          "pull_request"
+        ]
+      },
+      "how": "A CI workflow runs a lint or typecheck step on pull requests.",
+      "mechanism": "The workflow file. Add the same command to the README so a local run matches CI."
+    },
+    "G0-SMOKE": {
+      "check": {
+        "kind": "exists",
+        "glob": [
+          "**/*smoke*",
+          "**/*e2e*",
+          "**/*journey*",
+          "**/e2e/**/*",
+          "**/tests/**/*journey*"
+        ]
+      },
+      "how": "A smoke or end-to-end test file exists for the primary journey.",
+      "mechanism": "One end-to-end test, exercising the documented interface rather than the internals."
+    },
+    "G1-CI": {
+      "check": {
+        "kind": "ci",
+        "patterns": [
+          "test|pytest|go test|vitest|jest|rspec|dotnet test"
+        ]
+      },
+      "how": "A CI workflow runs the test command.",
+      "mechanism": "The workflow file, plus a branch protection rule that makes the job required. The rule is in the forge, not in the repository."
+    },
+    "G1-DOMAIN-TESTS": {
+      "check": {
+        "kind": "anchors",
+        "scope": "core"
+      },
+      "how": "Every core requirement carries an @req anchor in a test file.",
+      "mechanism": "`spec-check.mjs` counts the anchors; this gate fails while a core requirement has none."
+    },
+    "G1-AC-TRACE": {
+      "check": {
+        "kind": "anchors",
+        "scope": "automated"
+      },
+      "how": "Every requirement marked automated has a test anchor.",
+      "mechanism": "`spec-check.mjs --strict`, run in CI."
+    },
+    "G1-RUNBOOK": {
+      "check": {
+        "kind": "contains",
+        "glob": [
+          "README.md",
+          "README",
+          "readme.md"
+        ],
+        "patterns": [
+          "(?i)(run|start|develop)",
+          "(?i)test",
+          "(?i)deploy|release|ship"
+        ]
+      },
+      "how": "The README covers running, testing and deploying.",
+      "mechanism": "Three headings. A runbook with none of them is a README for the author."
+    },
+    "G1-SECRETS": {
+      "check": {
+        "kind": "no-secrets"
+      },
+      "files": [
+        {
+          "template": "gitleaks.toml",
+          "path": "enforcement/gitleaks.toml"
+        }
+      ],
+      "how": "No credential-shaped string is committed, and a gitleaks config is present for the pre-commit hook.",
+      "mechanism": "The runner scans the working tree; gitleaks scans history. Both are needed: this file cannot see what was already committed and deleted."
+    },
+    "G2-AUTHZ": {
+      "check": {
+        "kind": "contains",
+        "glob": [
+          "**/*test*",
+          "**/*spec*"
+        ],
+        "patterns": [
+          "(?i)denied|forbidden|403|unauthori[sz]ed|not allowed"
+        ]
+      },
+      "files": [
+        {
+          "template": "policy/authz.rego",
+          "path": "enforcement/policy/authz.rego"
+        }
+      ],
+      "how": "A denial-path test exists, and the authorization policy has a home outside the handlers.",
+      "mechanism": "The rego policy is evaluated with `conftest test --policy enforcement/policy`; the runner only proves a denial test exists."
+    },
+    "G2-THREAT": {
+      "check": {
+        "kind": "contains",
+        "glob": [
+          "docs/threat-model.md",
+          "THREAT-MODEL.md",
+          "**/threat-model.md"
+        ],
+        "patterns": [
+          "(?i)accepted risk",
+          "(?i)owner"
+        ]
+      },
+      "how": "A threat model lists accepted risks, each with an owner.",
+      "mechanism": "The document. A threat model without an owner column is a list of worries."
+    },
+    "G2-CONTRACTS": {
+      "check": {
+        "kind": "exists",
+        "glob": [
+          "contracts/**/*",
+          "**/*.contract.json",
+          "**/*.openapi.*",
+          "**/openapi.*"
+        ]
+      },
+      "files": [
+        {
+          "template": "contracts/contract.test.ts",
+          "path": "enforcement/contracts/contract.test.ts"
+        }
+      ],
+      "how": "A machine-readable contract or contract test exists in the repository.",
+      "mechanism": "The skeleton consumes a recorded fixture; replace the fixture with a real capture, not a mock written from the docs."
+    },
+    "G2-OBSERVABILITY": {
+      "check": {
+        "kind": "contains",
+        "glob": [
+          "**/*.ts",
+          "**/*.js",
+          "**/*.py",
+          "**/*.go",
+          "**/*.rb",
+          "**/*.cs",
+          "**/*.java",
+          "**/*.kt",
+          "**/*.rs"
+        ],
+        "patterns": [
+          "(?i)correlation[_-]?id|request[_-]?id|trace[_-]?id"
+        ]
+      },
+      "how": "Source code propagates a correlation or request id.",
+      "mechanism": "A grep is the weakest form of this check. It proves the identifier exists, not that every path carries it."
+    },
+    "G2-MIGRATIONS": {
+      "check": {
+        "kind": "exists",
+        "glob": [
+          "**/migrations/**/*",
+          "**/migrate/**/*",
+          "**/db/migrate/**/*",
+          "**/alembic/**/*"
+        ]
+      },
+      "how": "Schema changes live as migrations in version control.",
+      "mechanism": "The migration directory. Forward-only is a convention the runner cannot see; the restore drill in G3-RESTORE is what proves it."
+    },
+    "G2-ADR": {
+      "check": {
+        "kind": "contains",
+        "glob": [
+          "docs/adr/*.md",
+          "docs/decisions/*.md",
+          "adr/*.md",
+          "**/adr/*.md"
+        ],
+        "patterns": [
+          "(?i)consequence"
+        ]
+      },
+      "how": "At least one ADR records a decision and its consequence.",
+      "mechanism": "The ADR directory. An ADR with no consequence section is a changelog entry."
+    },
+    "G2-DRIFT": {
+      "check": {
+        "kind": "drift"
+      },
+      "how": "`spec-check.mjs --repo .` passes: every anchor resolves and every done requirement is proven.",
+      "mechanism": "`spec-check.mjs`, shipped with the packet. This gate is the one check that needs no project code to be honest."
+    },
+    "G3-MUTATION": {
+      "check": {
+        "kind": "exists",
+        "glob": [
+          "enforcement/mutation.config.json",
+          "stryker.conf.*",
+          "**/stryker.conf.*",
+          "pyproject.toml"
+        ]
+      },
+      "files": [
+        {
+          "template": "mutation.config.json",
+          "path": "enforcement/mutation.config.json"
+        }
+      ],
+      "how": "A mutation configuration exists and names the domain scope.",
+      "mechanism": "The config, run with Stryker (TS), mutmut (Python) or PIT (Java). The runner checks the config, not the score: the score lives in CI output."
+    },
+    "G3-PROPERTY": {
+      "check": {
+        "kind": "contains",
+        "glob": [
+          "**/*test*",
+          "**/*spec*",
+          "**/package.json",
+          "**/pyproject.toml",
+          "**/requirements*.txt"
+        ],
+        "patterns": [
+          "fast-check|hypothesis|proptest|jqwik|fscheck"
+        ]
+      },
+      "how": "A property-based testing library is present and used by a test.",
+      "mechanism": "The generated-seed corpus is not checked; a property test without a recorded seed is an example test in disguise."
+    },
+    "G3-SLO": {
+      "check": {
+        "kind": "contains",
+        "glob": [
+          "docs/slo.md",
+          "docs/slos.md",
+          "docs/reliability.md",
+          "SLO.md"
+        ],
+        "patterns": [
+          "(?i)\\d+(\\.\\d+)?%",
+          "(?i)error budget"
+        ]
+      },
+      "how": "An SLO document states a target percentage and an error budget.",
+      "mechanism": "The document plus the alert rule. The number is a policy decision; this check only proves someone wrote it down."
+    },
+    "G3-RESTORE": {
+      "check": {
+        "kind": "attest",
+        "file": "enforcement/restore-drill.md",
+        "requires": [
+          "date:",
+          "restored:",
+          "verified by:"
+        ]
+      },
+      "how": "A restore drill is recorded with a date, what was restored and who verified it.",
+      "mechanism": "An attestation, because the drill happens against production data the repository cannot see."
+    },
+    "G3-SECURITY": {
+      "check": {
+        "kind": "contains",
+        "glob": [
+          "docs/threat-model.md",
+          "**/threat-model.md"
+        ],
+        "patterns": [
+          "(?i)reviewed",
+          "(?i)release"
+        ]
+      },
+      "how": "The threat model records a per-release review.",
+      "mechanism": "The document plus the security regression suite. A review nobody signed for is a meeting."
+    },
+    "G3-ROLLBACK": {
+      "check": {
+        "kind": "attest",
+        "file": "enforcement/rollback.md",
+        "requires": [
+          "executed:",
+          "date:",
+          "flag:"
+        ]
+      },
+      "how": "A rollback or kill switch has been executed once, and the record says when.",
+      "mechanism": "An attestation, because executing the rollback is the evidence. An unexecuted rollback procedure is a paragraph."
+    },
+    "G1-INCIDENT": {
+      "check": {
+        "kind": "attest",
+        "file": "docs/runbook.md",
+        "requires": [
+          "owner",
+          "escalation",
+          "diagnostic"
+        ]
+      },
+      "how": "docs/runbook.md names an owner, an escalation channel and first-response steps.",
+      "mechanism": "The runbook file. This proves the fields are present, not that the named person knows the product; the three diagnostic steps are the part to read.",
+      "files": [
+        {
+          "path": "enforcement/templates/docs/runbook.md",
+          "template": "attest/runbook.md"
+        }
+      ]
+    },
+    "G2-CONSENT": {
+      "check": {
+        "kind": "attest",
+        "file": "docs/consent-basis.md",
+        "requires": [
+          "lawful basis",
+          "retention",
+          "withdraw"
+        ]
+      },
+      "how": "docs/consent-basis.md records a lawful basis, a withdrawal path and a retention period.",
+      "mechanism": "The document. It cannot tell whether the basis is the right one — that is a legal judgement, and the reviewer's, not the runner's.",
+      "files": [
+        {
+          "path": "enforcement/templates/docs/consent-basis.md",
+          "template": "attest/consent-basis.md"
+        }
+      ]
+    },
+    "G2-REVIEW": {
+      "check": {
+        "kind": "attest",
+        "file": "docs/review-record.md",
+        "requires": [
+          "reviewer",
+          "date",
+          "author"
+        ]
+      },
+      "how": "docs/review-record.md carries at least one row with a date, an author and a different reviewer.",
+      "mechanism": "The record. A table you fill in alone proves nothing; the gate is the habit of opening it.",
+      "files": [
+        {
+          "path": "enforcement/templates/docs/review-record.md",
+          "template": "attest/review-record.md"
+        }
+      ]
+    }
+  }
+}

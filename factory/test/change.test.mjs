@@ -7,11 +7,11 @@
  */
 
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { applyChange, emitChange, planChange, renderChange, validateChange, verifyChange } from '../lib/change.mjs';
+import { applyChange, archiveChange, emitChange, planChange, recompilePacket, renderChange, validateChange, verifyChange } from '../lib/change.mjs';
 import { emitPacket } from '../lib/emit/index.mjs';
 import { buildIndex } from '../lib/indexer.mjs';
 import { buildPlan } from '../lib/planner.mjs';
@@ -46,7 +46,7 @@ function change(overrides = {}) {
         key: 'feature.export',
         title: 'A facilitator can export a board',
         area: 'api',
-        statement: 'The facilitator of a board can download one file containing every card, its column and its vote count, for a board they own.',
+        statement: 'When the facilitator of a board requests an export, the application shall produce one file containing every card, its column and its vote count for that board.',
         failurePath: 'An export of an empty board returns a header-only file rather than an error.',
         acceptance: ['Given a board with cards, when the facilitator exports, then one row per card is present.'],
         verify: 'automated'
@@ -102,7 +102,7 @@ test('references are resolved against the packet, not invented', (t) => {
 
   const bogusModify = planChange({
     packetDir: p.outDir,
-    change: change({ modify: [{ key: 'does.not-exist', statement: 'x'.repeat(50) }] })
+    change: change({ modify: [{ key: 'does.not-exist', statement: `The application shall ${'x'.repeat(50)}.` }] })
   });
   assert.match(bogusModify.errors.join('\n'), /is not in this packet/);
 
@@ -303,4 +303,142 @@ test('a change directory without its artefacts does not verify', (t) => {
   const report = verifyChange(out);
   assert.equal(report.ok, false);
   assert.match(report.errors.join('\n'), /no proposal\.md/);
+});
+
+// ---------------------------------------------------------------- archive
+
+/**
+ * A packet whose profile is on disk, the way the CLI produces one. The archive step
+ * needs to know where the profile is, so this fixture reproduces that link instead
+ * of hand-writing `spec.project.profile`.
+ */
+function packetWithProfile() {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'vld-archive-'));
+  const profileFile = path.join(root, 'profile.json');
+  const raw = {
+    name: 'retro-board',
+    idea: 'A retrospective board where a team votes on cards and leaves with three agreed actions.',
+    kind: 'web-app',
+    stage: 'mvp',
+    traits: ['auth', 'persistence'],
+    risks: { pii: true }
+  };
+  writeFileSync(profileFile, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+  const plan = buildPlan(normalizeProfile(raw), { index, profileDir: root });
+  plan.profileLabel = 'profile.json';
+  const { outDir } = emitPacket(plan, path.join(root, 'spec'));
+
+  const delta = planChange({ packetDir: outDir, change: change() });
+  const changeDir = path.join(root, 'changes', 'add-export');
+  emitChange(delta, changeDir);
+
+  return { root, profileFile, outDir, changeDir, delta, cleanup: () => rmSync(root, { recursive: true, force: true }) };
+}
+
+/** Write a profile fixture, creating its directory. */
+function writeFileSyncSafe(file, value) {
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+}
+
+const snapshot = (root) => {
+  const files = new Map();
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else files.set(path.relative(root, full), readFileSync(full, 'utf8'));
+    }
+  };
+  walk(root);
+  return files;
+};
+
+test('archiving folds the delta into the profile, the history and the packet', async (t) => {
+  const p = packetWithProfile();
+  t.after(p.cleanup);
+
+  const result = await archiveChange({ packetDir: p.outDir, changeDir: p.changeDir, profilePath: p.profileFile });
+
+  // 1. The source of truth: the profile now lists an overlay, and the overlay carries
+  //    the delta, so the next compile cannot drop it.
+  const profile = JSON.parse(readFileSync(p.profileFile, 'utf8'));
+  assert.deepEqual(profile.overlays, ['change-add-export']);
+  const overlay = JSON.parse(readFileSync(result.overlayPath, 'utf8'));
+  assert.equal(overlay.layer, 'team');
+  assert.equal(overlay.provenance.change, 'add-export');
+  assert.deepEqual(overlay.addRequirements.map((requirement) => requirement.key), ['feature.export']);
+  assert.match(overlay.addRequirements[0].statement, / shall /, 'the archived requirement is still an EARS statement');
+
+  // 2. The recompiled packet keeps the requirement, with its provenance and its id.
+  const spec = JSON.parse(readFileSync(path.join(p.outDir, 'spec.json'), 'utf8'));
+  const added = spec.requirements.find((requirement) => requirement.key === 'feature.export');
+  assert.ok(added, 'the requirement survives the recompile');
+  assert.equal(added.id, p.delta.added[0].id, 'the id the delta assigned is the id the packet keeps: anchors stay valid');
+  assert.equal(added.origin, 'overlay:change-add-export');
+  assert.ok(spec.overlays.some((entry) => entry.id === 'change-add-export'));
+
+  // 3. History shows the merge.
+  const history = JSON.parse(readFileSync(path.join(p.outDir, 'changes', 'history.json'), 'utf8'));
+  assert.equal(history.entries.length, 1);
+  assert.equal(history.entries[0].id, 'add-export');
+  assert.deepEqual(history.entries[0].added, ['feature.export']);
+  assert.deepEqual(history.entries[0].modified, ['api.error-envelope']);
+  assert.deepEqual(history.entries[0].compile.dropped, ['ui.design-tokens'], 'the removal is recorded as a drop, next to the change that caused it');
+  assert.equal(spec.history, undefined, 'the manifest stays a pure function of its inputs');
+
+  // 4. The change directory is kept with the packet that absorbed it.
+  assert.ok(existsSync(path.join(p.outDir, 'changes', 'archive', 'add-export', 'delta.json')));
+});
+
+test('apply -> archive -> recompile is idempotent', async (t) => {
+  const p = packetWithProfile();
+  t.after(p.cleanup);
+
+  await archiveChange({ packetDir: p.outDir, changeDir: p.changeDir, profilePath: p.profileFile });
+  const first = snapshot(p.root);
+
+  await archiveChange({ packetDir: p.outDir, changeDir: p.changeDir, profilePath: p.profileFile });
+  const second = snapshot(p.root);
+  assert.deepEqual([...second.keys()].sort(), [...first.keys()].sort(), 'a second archive adds no files');
+  for (const [file, content] of first) {
+    assert.equal(second.get(file), content, `${file} changed on the second archive`);
+  }
+
+  // A fresh compile from the same profile must land on the same manifest: that is
+  // what "the overlay is the source of truth" has to mean.
+  const before = readFileSync(path.join(p.outDir, 'spec.json'), 'utf8');
+  recompilePacket(p.profileFile, p.outDir);
+  assert.equal(readFileSync(path.join(p.outDir, 'spec.json'), 'utf8'), before);
+
+  const history = JSON.parse(readFileSync(path.join(p.outDir, 'changes', 'history.json'), 'utf8'));
+  assert.equal(history.entries.length, 1, 'the same change is one history entry, not two');
+});
+
+test('a recorded profile path that resolves to a different project is refused', async (t) => {
+  const p = packetWithProfile();
+  t.after(p.cleanup);
+
+  // The packet records "profile.json" as the CLI was given it. Resolved from a
+  // directory where that name belongs to another project, the archive must refuse:
+  // writing an overlay into the wrong profile looks like success and loses the delta.
+  const elsewhere = path.join(p.root, 'elsewhere');
+  const decoy = path.join(elsewhere, 'profile.json');
+  writeFileSyncSafe(decoy, { name: 'some-other-product', idea: 'A decoy profile that must never receive this overlay.', kind: 'api', stage: 'mvp' });
+
+  await assert.rejects(
+    () => archiveChange({ packetDir: p.outDir, changeDir: p.changeDir, profilePath: decoy }),
+    /is the profile for "some-other-product", not "retro-board"/
+  );
+  assert.equal(existsSync(path.join(elsewhere, 'overlays')), false, 'nothing was written next to the decoy');
+});
+
+test('archiving without a profile path refuses instead of dropping the delta', async (t) => {
+  const p = packet();
+  t.after(p.cleanup);
+
+  const out = path.join(p.root, 'changes', 'add-export');
+  emitChange(planChange({ packetDir: p.outDir, change: change() }), out);
+
+  await assert.rejects(() => archiveChange({ packetDir: p.outDir, changeDir: out }), /does not record where its profile lives/);
 });

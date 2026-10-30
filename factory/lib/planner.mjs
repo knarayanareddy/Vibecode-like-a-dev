@@ -14,6 +14,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { ROOT } from './indexer.mjs';
+import { applyOverlays, checkOverlayTargets, overlayGates, resolveOverlays } from './overlays.mjs';
 import { evaluate, explain, getPath } from './predicate.mjs';
 
 const POLICY_PATH = path.join(ROOT, 'factory', 'policy.json');
@@ -166,6 +167,61 @@ export function selectPrimitives(profile, index, routing, rigor) {
 }
 
 /**
+ * A practice an overlay forces into the packet.
+ *
+ * The router answers "does this profile need it?"; an overlay answers "does this
+ * organisation require it regardless?". Both are legitimate, so the forced entry
+ * carries its own `why` and is never counted as a predicate match.
+ */
+function forcePractices(index, overlays, rigor, selection) {
+  const byId = new Map(index.primitives.map((primitive) => [primitive.id, primitive]));
+  const forced = [];
+  for (const { overlay } of overlays) {
+    for (const id of overlay.addPrimitives ?? []) {
+      const primitive = byId.get(id);
+      if (!primitive || primitive.tier_min > rigor.tier) continue;
+      if (forced.some((entry) => entry.id === id) || selection.selected.some((entry) => entry.id === id)) continue;
+      forced.push({
+        id: primitive.id,
+        module: primitive.module,
+        title: primitive.title,
+        summary: primitive.summary,
+        cost: primitive.cost,
+        priority: primitive.priority,
+        tier_min: primitive.tier_min,
+        path: primitive.path,
+        enforces: primitive.enforces ?? [],
+        artifacts: primitive.artifacts ?? [],
+        gates: primitive.gates ?? [],
+        obligation: primitive.obligation ?? '',
+        advisory: primitive.advisory === true,
+        advisoryReason: primitive.advisory_reason ?? '',
+        why: `required by overlay ${overlay.id}`,
+        when: `overlay:${overlay.id}`
+      });
+    }
+  }
+  return forced;
+}
+
+/**
+ * Forced practices keep their place; the budget is spent on the router's picks.
+ * A layer that requires a practice outranks a ceiling the layer did not write.
+ */
+function forceBudget(selection, forced, rigor) {
+  if (forced.length === 0) return { selected: selection.selected };
+  const room = Math.max(0, rigor.maxPrimitives - forced.length);
+  const kept = selection.selected.slice(0, room);
+  const dropped = selection.selected.slice(room).map((entry) => ({
+    id: entry.id,
+    title: entry.title,
+    reason: 'budget',
+    detail: `fits at tier ${rigor.tier} only above ${rigor.maxPrimitives} primitives (${forced.length} are required by overlays); deferred, not deleted`
+  }));
+  return { selected: [...kept, ...forced], deferredExtra: dropped };
+}
+
+/**
  * Requirement identifiers must outlive the catalog.
  *
  * Anchors in a product repository cite `REQ-###`. If ids were a position in the
@@ -214,6 +270,9 @@ export function selectRequirements(profile, catalog, rigor, previousIds = {}) {
   const requirements = chosen.map((requirement) => ({
     id: ids.get(requirement.key),
     key: requirement.key,
+    // `catalog` unless an overlay added or changed it. Provenance travels with the
+    // requirement so spec.json can answer "why is this here?" without a Slack search.
+    origin: requirement.origin ?? 'catalog',
     render: requirement.render,
     title: requirement.title,
     statement: requirement.statement,
@@ -238,7 +297,7 @@ export function selectRequirements(profile, catalog, rigor, previousIds = {}) {
  * Gates from lower tiers are labelled with the tier that introduced them so a
  * reader can see which obligations are new.
  */
-export function collectGates(profile, policy, rigor, primitives) {
+export function collectGates(profile, policy, rigor, primitives, extraGates = []) {
   const gates = new Map();
   for (let tier = 0; tier <= rigor.tier; tier += 1) {
     for (const gate of policy.gates[String(tier)] ?? []) {
@@ -269,20 +328,58 @@ export function collectGates(profile, policy, rigor, primitives) {
     }
   }
 
+  // Overlay gates are declared by a layer rather than by policy, so they carry their
+  // own statement and only bind at or below the tier the layer claims.
+  for (const gate of extraGates) {
+    if (gates.has(gate.id)) continue;
+    if ((gate.tier ?? 0) > rigor.tier) continue;
+    gates.set(gate.id, { id: gate.id, statement: gate.statement, origin: gate.origin });
+  }
+
   return [...gates.values()];
 }
 
 export function buildPlan(
   profile,
-  { index, routing = loadRouting(), policy = loadPolicy(), catalog = loadCatalog(), previousIds = {} }
+  {
+    index,
+    routing = loadRouting(),
+    policy = loadPolicy(),
+    catalog = loadCatalog(),
+    previousIds = {},
+    overlays: givenOverlays = null,
+    profileDir = ROOT
+  }
 ) {
   const rigor = computeRigor(profile, policy);
-  const { selected, skipped, deferred, missing } = selectPrimitives(profile, index, routing, rigor);
-  const { requirements } = selectRequirements(profile, catalog, rigor, previousIds);
-  const gates = collectGates(profile, policy, rigor, selected);
+
+  // Overlays are policy, so they are resolved before anything is selected: a layer
+  // can add a requirement, a gate or a practice, and every later decision has to see
+  // the merged catalog rather than the baseline one.
+  const resolved = givenOverlays ? { overlays: givenOverlays, errors: [] } : resolveOverlays(profile, { profileDir, index });
+  if (resolved.errors.length > 0) {
+    const error = new Error(`overlay stack is not valid:\n  - ${resolved.errors.join('\n  - ')}`);
+    error.code = 'INVALID_OVERLAY';
+    throw error;
+  }
+  const targetErrors = checkOverlayTargets(catalog, resolved.overlays);
+  if (targetErrors.length > 0) {
+    const error = new Error(`overlay stack does not apply to this catalog:\n  - ${targetErrors.join('\n  - ')}`);
+    error.code = 'INVALID_OVERLAY';
+    throw error;
+  }
+  const merged = applyOverlays(catalog, resolved.overlays);
+
+  const selection = selectPrimitives(profile, index, routing, rigor);
+  const forced = forcePractices(index, resolved.overlays, rigor, selection);
+  const { selected, deferredExtra = [] } = forceBudget(selection, forced, rigor);
+  selection.deferred = [...deferredExtra, ...selection.deferred];
+
+  const { requirements } = selectRequirements(profile, merged.catalog, rigor, previousIds);
+  const gates = collectGates(profile, policy, rigor, selected, overlayGates(resolved.overlays));
   const docs = policy.requiredDocs[rigor.packet];
 
-  const knownEnforces = new Set(catalog.requirements.map((requirement) => requirement.key));
+  const knownEnforces = new Set(merged.catalog.requirements.map((requirement) => requirement.key));
   const dangling = selected
     .flatMap((primitive) => (primitive.enforces ?? []).map((key) => ({ primitive: primitive.id, key })))
     .filter((entry) => !knownEnforces.has(entry.key));
@@ -294,8 +391,11 @@ export function buildPlan(
     packet: rigor.packet,
     docs,
     primitives: selected,
-    deferred,
-    skipped,
+    // `skipped`/`deferred` come from the routing decision; a forced practice is not a
+    // selection the predicates made, and the packet says so instead.
+    deferred: selection.deferred,
+    skipped: selection.skipped,
+    overlays: merged.provenance,
     requirements,
     gates,
     config: {
@@ -309,10 +409,10 @@ export function buildPlan(
       acceptanceCriteria: requirements.reduce((sum, r) => sum + r.acceptance.length, 0),
       automated: requirements.filter((r) => r.verify === 'automated').length,
       gates: gates.length,
-      deferred: deferred.length,
-      skipped: skipped.length
+      deferred: selection.deferred.length,
+      skipped: selection.skipped.length
     },
-    warnings: missing.map((id) => `routing references unknown primitive "${id}"`),
+    warnings: selection.missing.map((id) => `routing references unknown primitive "${id}"`),
     danglingEnforces: dangling
   };
 }

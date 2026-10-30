@@ -80,11 +80,14 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - run: node specs/spec-check.mjs
+      - run: node specs/enforcement/gates.mjs
 ```
 
 Run it locally with `node specs/spec-check.mjs --repo .`; add `--strict` in release CI so pending requirements cannot ship silently.
 
 What it fails on: a missing document, one of the 10 automated requirements without an anchor, an anchor naming a requirement that does not exist, a requirement with no criteria, and a practice reference that has disappeared.
+
+The gates in section 4 are also a command: `node specs/enforcement/gates.mjs`, generated from this packet, 8 checks, no dependencies. It is deliberately blunt — it proves a runbook exists and names an owner, not that the owner knows the product — and every check prints what it cannot see. `enforcement/README.md` is the table.
 
 
 ## 6. Manual checks

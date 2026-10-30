@@ -1,0 +1,36 @@
+{
+  "id": "two-person-review",
+  "layer": "team",
+  "title": "Two-person review for rule changes",
+  "why": "This team has been burned by a single pair of eyes approving a change to a pricing rule. The catalog asks for an independent review; the team requires a recorded second approver on anything that changes a rule.",
+  "extends": "org-baseline",
+  "addRequirements": [
+    {
+      "key": "ops.review-record",
+      "title": "A rule change carries two approvers",
+      "area": "core",
+      "statement": "When a change alters a domain rule or a gate, the pull request shall record two approvers, one of whom did not write the change.",
+      "failurePath": "A one-approver merge on a rule change becomes an incident review with no accountable second signature.",
+      "acceptance": [
+        "Given a pull request that edits a domain rule, when it is merged, then the recorded approvals name two people and neither is the author."
+      ],
+      "verify": "manual"
+    }
+  ],
+  "addGates": [
+    {
+      "id": "G2-REVIEW",
+      "tier": 2,
+      "statement": "Rule and gate changes carry two recorded approvers, one of them not the author."
+    }
+  ],
+  "addPrimitives": ["agent.review-protocol"],
+  "modify": [
+    {
+      "key": "core.primary-journey",
+      "addAcceptance": [
+        "Given the primary journey, when its rules changed in this release, then the journey test still passes and the change carries two approvers."
+      ]
+    }
+  ]
+}

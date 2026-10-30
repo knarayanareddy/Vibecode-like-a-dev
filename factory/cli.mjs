@@ -12,7 +12,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { adoptRepo, writeAdoptedProfile } from './lib/adopt.mjs';
-import { CHANGE_TEMPLATE, applyChange, emitChange, planChange, verifyChange } from './lib/change.mjs';
+import { CHANGE_TEMPLATE, applyChange, archiveChange, emitChange, planChange, verifyChange } from './lib/change.mjs';
 import { emitPacket } from './lib/emit/index.mjs';
 import { buildIndex, loadIndex, writeIndex } from './lib/indexer.mjs';
 import { buildPlan, loadPolicy } from './lib/planner.mjs';
@@ -47,6 +47,8 @@ Usage
   vld change <packet-dir> <change.json> -o <dir> [--apply] [--force] [--json]
                                      render a delta spec for a brownfield change
   vld change verify <change-dir>     validate a change proposal
+  vld change archive <change-dir> <packet-dir> [--profile <p>]
+                                     fold an applied change into the profile's overlay stack
   vld change init <dir>              write change.json to fill in
   vld mcp                            run the MCP server over stdio
   vld index [--check]                rebuild primitives/index.json
@@ -135,7 +137,13 @@ function loadPlanOrFail(profilePath, { previousIds = {} } = {}) {
     index = buildIndex();
   }
 
-  return buildPlan(profile, { index, previousIds });
+  // Overlays resolve beside the profile first, so a team can keep its own layers in
+  // the same directory as the profile instead of editing the tool.
+  const plan = buildPlan(profile, { index, previousIds, profileDir: path.dirname(path.resolve(profilePath)) });
+  // Recorded in spec.json so an archive can find the source of truth later. As typed,
+  // so two compiles of the same profile produce the same manifest.
+  plan.profileLabel = profilePath.split(path.sep).join('/');
+  return plan;
 }
 
 function printPlan(plan) {
@@ -185,10 +193,20 @@ function printPlan(plan) {
     for (const entry of skippedByPredicate) lines.push(`  ${entry.id.padEnd(38)} ${entry.detail}`);
   }
 
+  if (plan.overlays.length > 0) {
+    lines.push('');
+    lines.push(`overlays (${plan.overlays.length}) — applied org -> domain -> team:`);
+    for (const overlay of plan.overlays) {
+      const adds = overlay.adds.requirements.length + overlay.adds.gates.length + overlay.adds.practices.length;
+      lines.push(`  ${overlay.id.padEnd(24)} ${overlay.layer.padEnd(7)} +${adds} · ${overlay.title}`);
+    }
+  }
+
   lines.push('');
   lines.push('requirements:');
   for (const requirement of plan.requirements) {
-    lines.push(`  ${requirement.id}  ${requirement.verify.padEnd(9)} ${requirement.title}`);
+    const origin = requirement.origin && requirement.origin !== 'catalog' ? ` [${requirement.origin}]` : '';
+    lines.push(`  ${requirement.id}  ${requirement.verify.padEnd(9)} ${requirement.title}${origin}`);
   }
 
   if (plan.warnings.length > 0) {
@@ -324,6 +342,7 @@ Next
   1. Read ${plan.packet === 'full' ? `${entry}/00-constitution.md` : `${entry}/spec.md`} and decide whether you agree.
   2. Hand ${entry}/ to your agent, starting at AGENTS.md.
   3. Wire the drift guard: node ${entry}/spec-check.mjs --repo .
+  4. Check the gates: node ${entry}/enforcement/gates.mjs --repo .
 `);
 }
 
@@ -369,6 +388,33 @@ function runChange() {
     if (existsSync(file) && !hasFlag('--force')) fail(`${file} already exists; pass --force to replace it`);
     writeFileSync(file, `${JSON.stringify(CHANGE_TEMPLATE, null, 2)}\n`, 'utf8');
     console.log(`\n✓ wrote ${file}\n\nFill in id, title, why and at least one of add/modify/remove. Then:\n  vld change specs ${file} -o changes/<id>\n`);
+    return;
+  }
+
+  if (first === 'archive') {
+    const changeDir = second;
+    const packetDir = positional[2] ?? option('--packet', null);
+    if (!changeDir || !packetDir) fail('Usage: vld change archive <change-dir> <packet-dir> [--profile <profile.json>]');
+    archiveChange({
+      packetDir,
+      changeDir,
+      profilePath: option('--profile', null),
+      force: hasFlag('--force')
+    })
+      .then((result) => {
+        console.log(`\n✓ archived ${changeDir} into ${displayPath(result.archiveDir)}\n`);
+        console.log(`  overlay    ${displayPath(result.overlayPath)} ${result.changed.overlay ? '(written)' : '(unchanged)'}`);
+        console.log(`  profile    ${displayPath(result.profilePath)} ${result.changed.profile ? `now lists ${result.overlayId}` : `already listed ${result.overlayId}`}`);
+        console.log(`  history    ${displayPath(result.historyPath)}`);
+        if (result.compiled) {
+          console.log(`  recompiled ${result.compiled.requirements} requirements · ${result.compiled.gates} gates in ${displayPath(result.compiled.outDir)}`);
+        }
+        console.log(
+          `\n  The delta now lives in the profile's overlay stack, so the next compile keeps it.\n` +
+            `  Re-running this command is safe: the overlay, the history entry and the packet are rewritten identically.\n`
+        );
+      })
+      .catch((error) => fail(error.message));
     return;
   }
 
