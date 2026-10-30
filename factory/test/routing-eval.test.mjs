@@ -132,6 +132,30 @@ test('polysemous "token" in LLM token-spend prompts does not falsely activate fr
         kind: 'colloquial',
         prompt: 'Blinded sponsor auditors can view anonymized trial totals while site coordinators only see patients at their own hospital site.',
         expected: ['security.authz-model']
+      },
+      {
+        id: 'vpp-reconnect-replay',
+        kind: 'colloquial',
+        prompt: 'Edge gateway buffers charge-discharge setpoints while LTE backhaul is down and replays acknowledgements on reconnect without double counting MWh.',
+        expected: ['reliability.idempotency-and-retries']
+      },
+      {
+        id: 'vpp-llm-bill-redaction',
+        kind: 'distractor',
+        prompt: 'AI tariff copilot parses uploaded utility bills while capping monthly LLM spend per tenant and stripping meter service addresses before calling OpenAI.',
+        expected: ['security.threat-model']
+      },
+      {
+        id: 'vpp-grid-zone-command',
+        kind: 'colloquial',
+        prompt: 'Regional dispatchers can only command batteries in their assigned grid zone while aggregator admins manage the whole tenant.',
+        expected: ['security.authz-model']
+      },
+      {
+        id: 'vpp-nullable-column-lock',
+        kind: 'colloquial',
+        prompt: 'Add a new nullable column to the high-volume telemetry table without locking writes during a live grid dispatch event.',
+        expected: ['data.schema-and-migrations']
       }
     ],
     thresholds: { minMicroRecall: 1, minMicroPrecision: 1, maxFalsePositivesPerPractice: 0, maxZeroRecallPractices: 99 },

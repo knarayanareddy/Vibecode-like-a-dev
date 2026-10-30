@@ -299,3 +299,18 @@ test('compound tenant scoping column names like tenant_sponsor_id infer risks.mu
   assert.match(tenantEv.evidence.join(' '), /backend\/app\/models\.py: tenant\/org scoping column/);
 });
 
+test('adoptRepo accepts explicit name and idea overrides and drops the placeholder idea question', (t) => {
+  const repo = fixture(NEXT_APP);
+  t.after(repo.cleanup);
+
+  const customIdea = 'A multi-tenant virtual power plant dispatch and revenue-settlement platform for grid aggregators.';
+  const report = adoptRepo(repo.root, { name: 'gridpulse-dispatch', idea: customIdea });
+  assert.equal(report.profile.name, 'gridpulse-dispatch');
+  assert.equal(report.profile.idea, customIdea);
+  assert.ok(!report.questions.some((q) => /Replace the draft idea/i.test(q)), 'idea question must be omitted when --idea is given');
+  const nameEv = report.evidence.find((e) => e.field === 'name');
+  assert.deepEqual(nameEv.evidence, ['supplied via --name']);
+  assert.deepEqual(validateProfile(report.profile), []);
+});
+
+

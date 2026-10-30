@@ -427,6 +427,30 @@
       "kind": "colloquial",
       "prompt": "Blinded sponsor auditors can view anonymized trial totals while site coordinators only see patients at their own hospital site.",
       "expected": ["security.authz-model"]
+    },
+    {
+      "id": "rt-71-colloq-reconnect-replay",
+      "kind": "colloquial",
+      "prompt": "Edge gateway buffers charge-discharge setpoints while LTE backhaul is down and replays acknowledgements on reconnect without double counting MWh.",
+      "expected": ["reliability.idempotency-and-retries"]
+    },
+    {
+      "id": "rt-72-distractor-llm-bill-redaction",
+      "kind": "distractor",
+      "prompt": "AI tariff copilot parses uploaded utility bills while capping monthly LLM spend per tenant and stripping meter service addresses before calling OpenAI.",
+      "expected": ["security.threat-model"]
+    },
+    {
+      "id": "rt-73-colloq-grid-zone-command",
+      "kind": "colloquial",
+      "prompt": "Regional dispatchers can only command batteries in their assigned grid zone while aggregator admins manage the whole tenant.",
+      "expected": ["security.authz-model"]
+    },
+    {
+      "id": "rt-74-colloq-nullable-column-lock",
+      "kind": "colloquial",
+      "prompt": "Add a new nullable column to the high-volume telemetry table without locking writes during a live grid dispatch event.",
+      "expected": ["data.schema-and-migrations"]
     }
   ]
 }

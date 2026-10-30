@@ -325,3 +325,46 @@ test('G2-AUTHZ does not self-satisfy against specs/spec.json or changes/*/spec.a
   }
 });
 
+test('every attestation gate (including G3-RESTORE and G3-ROLLBACK) ships a starter template containing its required fields', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'vld-gates-all-attest-'));
+  try {
+    const profile = normalizeProfile({
+      name: 'gridpulse-dispatch',
+      idea: 'Aggregators dispatch batteries and settle market payouts.',
+      kind: 'web-app',
+      stage: 'production',
+      traits: ['auth', 'payments', 'persistence'],
+      risks: { pii: true, payments: true, regulated: true, multiTenant: true, publicFacing: true },
+      overlays: ['two-person-review', 'health-data', 'org-baseline']
+    });
+    const plan = buildPlan(profile, { index, profileDir: root });
+    const specsDir = path.join(root, 'specs');
+    emitPacket(plan, specsDir, { force: true });
+
+    const registry = loadGateRegistry().gates;
+    const attestGates = Object.entries(registry).filter(([, entry]) => entry.check?.kind === 'attest');
+    assert.ok(attestGates.length >= 5, `expected at least 5 attestation gates, got ${attestGates.length}`);
+
+    const repo = path.join(root, 'repo');
+    mkdirSync(repo, { recursive: true });
+
+    for (const [gateId, entry] of attestGates) {
+      const relTarget = entry.check.file;
+      const templatePath = path.join(specsDir, 'enforcement', 'templates', relTarget);
+      assert.ok(existsSync(templatePath), `${gateId}: missing emitted starter template at enforcement/templates/${relTarget}`);
+      const content = readFileSync(templatePath, 'utf8');
+      write(repo, relTarget, content);
+    }
+
+    const summary = JSON.parse(run(specsDir, ['--repo', repo, '--json']).stdout);
+    for (const [gateId] of attestGates) {
+      const res = summary.results.find((entry) => entry.id === gateId);
+      assert.ok(res, `${gateId} missing from gate results`);
+      assert.equal(res.status, 'pass', `${gateId} starter template did not satisfy its own required fields: ${JSON.stringify(res)}`);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+

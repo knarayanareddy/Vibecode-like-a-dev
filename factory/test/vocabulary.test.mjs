@@ -145,3 +145,19 @@ test('idea nouns are candidates with counts, not conclusions', () => {
     assert.equal(typeof noun.count, 'number');
   }
 });
+
+test('industry -or/-er actors like aggregator and dispatcher land in secondary while primary keeps the domain object', () => {
+  const vocab = vocabularyFor({
+    name: 'gridpulse-dispatch',
+    idea:
+      'A multi-tenant virtual power plant dispatch, live battery telemetry, and wholesale revenue-settlement platform for commercial fleet operators, solar-plus-storage site hosts, and grid aggregators replacing manual curtailment spreadsheets. Every aggregator tenant is isolated from competing aggregators, and regional dispatch operators may only command batteries assigned to their grid zone. Cleared market settlements credit host revenue-share accounts and trigger ACH payouts where webhook retries or partial settlement reversals never create duplicate disbursements.',
+    kind: 'web-app',
+    traits: ['auth', 'payments', 'realtime', 'offline'],
+    risks: { pii: true, payments: true, regulated: true, multiTenant: true }
+  });
+
+  assert.notEqual(vocab.primary, 'aggregator', 'aggregator is an actor/tenant role, not the primary domain object');
+  assert.ok(['settlement', 'curtailment', 'battery'].includes(vocab.primary), `unexpected primary: "${vocab.primary}"`);
+  assert.ok(['aggregator', 'operator', 'host'].includes(vocab.secondary), `unexpected secondary: "${vocab.secondary}"`);
+});
+

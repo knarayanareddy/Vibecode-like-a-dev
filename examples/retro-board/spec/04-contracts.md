@@ -58,7 +58,7 @@ One shape for every failure. A caller must be able to handle an unknown route wi
 | Status | Meaning | When |
 | --- | --- | --- |
 | 401 | No valid session | Missing, expired or revoked credential. No board is created and no state changes. |
-| 403 | Authenticated but not permitted | Policy denied for this a team. Never reveal whether the board exists. |
+| 403 | Authenticated but not permitted | Policy denied for this team. Never reveal whether the board exists. |
 | 404 | Not found, or not visible to this actor | One response for both cases, so a board id cannot be used to probe. |
 | 409 | Conflict with current state | The board would be left in a state `02-domain-model.md` calls illegal, or a replay carries a different payload. |
 | 422 | Semantically invalid | Well-formed but breaks a rule that makes a board valid. |
@@ -66,7 +66,7 @@ One shape for every failure. A caller must be able to handle an unknown route wi
 ## 5. Contract tests
 
 - Each of the 3 surfaces gets one test for its success shape and one for the board failure it is most likely to hit.
-- Anything this product consumes is tested against a recorded response; a hand-written mock of a a team drifts silently.
+- Anything this product consumes is tested against a recorded response; a hand-written mock of a team drifts silently.
 - Changing a shape in section 2 fails the build before review, because the test that pins it lives beside the board it serialises.
 
 Before implementing any row above: shape written, error code chosen, one failure example recorded.

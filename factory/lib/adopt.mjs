@@ -300,7 +300,7 @@ function sanitizeName(raw, fallback) {
   return /^[a-z0-9][a-z0-9-]{1,60}$/.test(name) ? name : fallback;
 }
 
-export function adoptRepo(root) {
+export function adoptRepo(root, options = {}) {
   const repoRoot = path.resolve(root);
   const scan = scanRepo(repoRoot);
   const deps = collectDependencies(scan);
@@ -322,8 +322,11 @@ export function adoptRepo(root) {
     .find(Boolean) ?? null;
   const pyproject = scan.has('pyproject.toml') ? scan.contents('pyproject.toml') : '';
   const pyName = pyproject.match(/^\s*name\s*=\s*["']([^"']+)["']/m)?.[1];
-  const name = sanitizeName(pkg?.name ?? pyName ?? path.basename(repoRoot), 'adopted-project');
-  if (pkg?.name || pyName) note('name', name, 'high', [`manifest name: ${pkg?.name ?? pyName}`]);
+  const explicitName = typeof options.name === 'string' && options.name.trim() !== '' ? options.name.trim() : null;
+  const explicitIdea = typeof options.idea === 'string' && options.idea.trim() !== '' ? options.idea.trim() : null;
+  const name = explicitName ?? sanitizeName(pkg?.name ?? pyName ?? path.basename(repoRoot), 'adopted-project');
+  if (explicitName) note('name', name, 'high', ['supplied via --name']);
+  else if (pkg?.name || pyName) note('name', name, 'high', [`manifest name: ${pkg?.name ?? pyName}`]);
 
   // ---- language
   const language = dominantLanguage(scan);
@@ -462,18 +465,22 @@ export function adoptRepo(root) {
     observations.push(`This repository already contains a specification packet at ${existing.packet}. Use \`vld verify ${existing.packet} --repo .\` and \`vld change\` instead of adopting over it.`);
   }
 
-  questions.push('Replace the draft idea with one paragraph: who it is for, what it does, and what they do today instead.');
+  if (!explicitIdea) {
+    questions.push('Replace the draft idea with one paragraph: who it is for, what it does, and what they do today instead.');
+  }
   questions.push('How many people will use this in the first three months? Nothing in the code implies scale.');
   questions.push('How many engineers will work on it, and for how long?');
   if (risks.pii) questions.push('Which stored fields are personal data, and what is the retention period?');
 
+  const draftIdea =
+    `TODO replace with one paragraph. Adopted draft: ${kind} built with ${language?.language ?? 'an undetected stack'}` +
+    `${traits.length ? `, using ${traits.join(', ')}` : ''}${deploy.length ? ', deployed' : ''}. ` +
+    'Describe who it is for, what it does, and what they do today instead.';
+
   const profile = normalizeProfile({
     $comment: `Adopted from ${repoRoot}. Fields marked $adopted are inferences with evidence, not requirements: review them before compiling.`,
     name,
-    idea:
-      `TODO replace with one paragraph. Adopted draft: ${kind} built with ${language?.language ?? 'an undetected stack'}` +
-      `${traits.length ? `, using ${traits.join(', ')}` : ''}${deploy.length ? ', deployed' : ''}. ` +
-      'Describe who it is for, what it does, and what they do today instead.',
+    idea: explicitIdea ?? draftIdea,
     kind,
     stage,
     users: { scale: 'small' },

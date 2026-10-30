@@ -285,7 +285,13 @@
         ]
       },
       "how": "A restore drill is recorded with a date, what was restored and who verified it.",
-      "mechanism": "An attestation, because the drill happens against production data the repository cannot see."
+      "mechanism": "An attestation, because the drill happens against production data the repository cannot see.",
+      "files": [
+        {
+          "path": "enforcement/templates/enforcement/restore-drill.md",
+          "template": "attest/restore-drill.md"
+        }
+      ]
     },
     "G3-SECURITY": {
       "check": {
@@ -313,7 +319,13 @@
         ]
       },
       "how": "A rollback or kill switch has been executed once, and the record says when.",
-      "mechanism": "An attestation, because executing the rollback is the evidence. An unexecuted rollback procedure is a paragraph."
+      "mechanism": "An attestation, because executing the rollback is the evidence. An unexecuted rollback procedure is a paragraph.",
+      "files": [
+        {
+          "path": "enforcement/templates/enforcement/rollback.md",
+          "template": "attest/rollback.md"
+        }
+      ]
     },
     "G1-INCIDENT": {
       "check": {

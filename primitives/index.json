@@ -55,7 +55,7 @@
       "gates": [],
       "advisory": true,
       "advisory_reason": "An independent review is a session habit; CI sees the diff, not who read it or with what memory.",
-      "obligation": "In {project}, every change to a {primary} rule is reviewed by a session that did not write it, against `spec.json` rather than against the diff.",
+      "obligation": "In {project}, every change to {aPrimary} rule is reviewed by a session that did not write it, against `spec.json` rather than against the diff.",
       "artifacts": [
         "07-agent-handoff.md"
       ],
@@ -90,7 +90,7 @@
       "gates": [],
       "advisory": false,
       "advisory_reason": "",
-      "obligation": "In {project}, a {primary} requirement that loses its test anchor fails the build instead of quietly becoming documentation.",
+      "obligation": "In {project}, {aPrimary} requirement that loses its test anchor fails the build instead of quietly becoming documentation.",
       "artifacts": [
         "05-verification.md",
         "spec-check.mjs"
@@ -400,7 +400,14 @@
         "migration",
         "database change",
         "alter table",
-        "migration rollback"
+        "migration rollback",
+        "add column",
+        "nullable column",
+        "drop column",
+        "locking writes",
+        "table lock",
+        "expand contract",
+        "backfill"
       ],
       "path": "primitives/data/schema-and-migrations/SKILL.md",
       "dir": "data/schema-and-migrations"
@@ -838,7 +845,12 @@
         "idempotency",
         "queue",
         "at-least-once",
-        "double charge"
+        "double charge",
+        "on reconnect",
+        "double count",
+        "duplicate delivery",
+        "deduplicate",
+        "replay ack"
       ],
       "path": "primitives/reliability/idempotency-and-retries/SKILL.md",
       "dir": "reliability/idempotency-and-retries"
@@ -959,7 +971,11 @@
         "object-level access",
         "only view",
         "only see",
-        "assigned site"
+        "only command",
+        "only approve",
+        "assigned site",
+        "assigned zone",
+        "whole tenant"
       ],
       "path": "primitives/security/authz-model/SKILL.md",
       "dir": "security/authz-model"
@@ -1043,7 +1059,12 @@
         "vulnerability",
         "llm guardrails",
         "token spend",
+        "llm spend",
+        "model spend",
+        "cost ceiling",
         "external model",
+        "calling openai",
+        "calling anthropic",
         "structured json output"
       ],
       "path": "primitives/security/threat-model/SKILL.md",

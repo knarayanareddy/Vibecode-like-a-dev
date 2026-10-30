@@ -70,7 +70,7 @@ Three consequences that make this different from a prompt template:
 | You have | Command | What you get |
 | --- | --- | --- |
 | An idea and nothing else | `vld init` → `plan` → `compile` | A greenfield packet |
-| A repository and no spec | `vld adopt <repo>` | A profile inferred from code, with evidence per field and the questions code cannot answer |
+| A repository and no spec | `vld adopt <repo> [--name … --idea "…"]` | A profile inferred from code, with evidence per field and the questions code cannot answer |
 | An existing packet and a change to make | `vld change <packet> <change.json>` | A delta spec: ADDED / MODIFIED / REMOVED, blast radius, probe, rollback, `spec.after.json` |
 | An agent that needs the library | `vld mcp` | 8 MCP tools so the agent queries selection instead of reading 34 files |
 
@@ -307,21 +307,21 @@ What this proves: the loop closes — profile in, packet out, guard passes, and 
 ```bash
 node scripts/eval-library.mjs       # 34 practices x 36 profiles: self-recall, collisions, obligations, consequences
 node scripts/eval-specificity.mjs   # 157 same-tier packet pairs: shared prose ceiling
-node scripts/eval-routing.mjs       # 70 practitioner prompts -> expected practices (supports --driver mcp|openai|anthropic|cmd)
+node scripts/eval-routing.mjs       # 74 practitioner prompts -> expected practices (supports --driver mcp|openai|anthropic|cmd)
 node scripts/eval-outcome.mjs       # 24 tasks x 3 arms: no-spec vs generic-spec vs vld-packet (--runner calibration|cmd|openai|anthropic)
 ```
 
 ### 1. MCP practice routing (`eval-routing.mjs`)
 
-70 labelled practitioner prompts (34 single-practice, 13 distractor-heavy, 6 multi-practice, 9 colloquial, 8 off-topic negatives) across all 34 practices, enforcing CI floors of **precision ≥ 90%** and **recall ≥ 70%**:
+74 labelled practitioner prompts (34 single-practice, 14 distractor-heavy, 6 multi-practice, 12 colloquial, 8 off-topic negatives) across all 34 practices, enforcing CI floors of **precision ≥ 90%** and **recall ≥ 70%**:
 
 | Configuration | Micro-precision | Micro-recall | F1 | Negative prompts quiet |
 | --- | --- | --- | --- | --- |
 | Uncalibrated top-10 search (`limit: 10`) | 9.7% | 100.0% | 17.7% | 0 / 8 |
-| Title-only ablation (`summary + triggers + tags` stripped) | 58.2% | 67.6% | 62.5% | 8 / 8 |
-| **`search_primitives({ activate: true })` (shipped)** | **94.4%** | **100.0%** | **97.1%** | **8 / 8** |
+| Title-only ablation (`summary + triggers + tags` stripped) | 58.2% | 63.9% | 60.9% | 8 / 8 |
+| **`search_primitives({ activate: true })` (shipped)** | **94.7%** | **100.0%** | **97.3%** | **8 / 8** |
 
-Practice metadata (`summary`, `triggers`, `tags`) contributes **+36.2pp precision** and **+32.4pp recall** over title matching, all **34/34** practices activate on their labelled prompts with **0** false-positive absorbers, and corrupting a practice's metadata fails CI (`factory/test/routing-eval.test.mjs`). Passing `--driver openai`, `--driver anthropic`, or `--driver cmd --cmd "<router>"` runs the identical 70-prompt benchmark with a live model in the loop choosing which `SKILL.md` practices to open from `primitives/index.json`.
+Practice metadata (`summary`, `triggers`, `tags`) contributes **+36.5pp precision** and **+36.1pp recall** over title matching, all **34/34** practices activate on their labelled prompts with **0** false-positive absorbers, and corrupting a practice's metadata fails CI (`factory/test/routing-eval.test.mjs`). Passing `--driver openai`, `--driver anthropic`, or `--driver cmd --cmd "<router>"` runs the identical 74-prompt benchmark with a live model in the loop choosing which `SKILL.md` practices to open from `primitives/index.json`.
 
 ### 2. Multi-arm outcome harness (`eval-outcome.mjs`)
 
@@ -418,7 +418,7 @@ factory/
   catalog/
     requirements.json  27 requirement templates with acceptance criteria
   evals/
-    routing-cases.json 70 labelled practitioner prompts across all 34 practices
+    routing-cases.json 74 labelled practitioner prompts across all 34 practices
     tasks/             24 executable multi-arm outcome tasks (greenfield, brownfield, bugfix, refactor, systems)
   lib/                 frontmatter, predicates, planner, emitter, verifier,
                        scan + adopt, change (delta specs), mcp (server),
@@ -428,7 +428,7 @@ factory/
     gate-runner.mjs    the gate checker shipped into every packet
   schema/
     spec.schema.json   the manifest contract
-  test/                147 tests: data integrity, planning, reproducibility, adoption,
+  test/                152 tests: data integrity, planning, reproducibility, adoption,
                        delta specs, overlays, gates, EARS, MCP protocol, routing & outcome evals
 profile.json           this repository's own profile
 specs/                 this repository's own compiled packet, guarded in CI
@@ -437,7 +437,7 @@ scripts/
   stress-adversarial.mjs  24 hostile packets and 6 inputs that must be refused
   eval-library.mjs     library health: self-recall@1, trigger collisions, dead weight
   eval-specificity.mjs  is a packet about this product, or a form letter with a name in it
-  eval-routing.mjs     70-prompt MCP routing precision/recall + metadata ablation (--driver mcp|openai|anthropic|cmd)
+  eval-routing.mjs     74-prompt MCP routing precision/recall + metadata ablation (--driver mcp|openai|anthropic|cmd)
   eval-outcome.mjs     24-task x 3-arm outcome harness (--runner calibration|cmd|openai|anthropic)
   lib/packet-audit.mjs    the shared judgement both suites use
 examples/retro-board/  a profile and its compiled packet
@@ -446,8 +446,8 @@ docs/                  research notes, authoring guide, stress test, landscape s
 ```
 
 ```bash
-npm test        # 147 tests
-npm run eval    # library health + packet specificity + 70-prompt routing + 24-task outcome calibration
+npm test        # 152 tests
+npm run eval    # library health + packet specificity + 74-prompt routing + 24-task outcome calibration
 npm run stress  # 10 representative + 24 hostile ideas, and 6 refusals; scored on soundness
 npm run check   # lint + index + tests + verify + self-guard + gates + eval + stress
 ```
