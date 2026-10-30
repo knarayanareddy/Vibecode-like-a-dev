@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "github-copilot",
+  "version": "0.1.0",
+  "title": "GitHub Copilot skills",
+  "target": ".agents/skills",
+  "format": "skill",
+  "files": ["vld-discovery/SKILL.md", "vld-feature-delivery/SKILL.md"]
+}

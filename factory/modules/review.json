@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "review",
+  "version": "0.1.0",
+  "title": "Evidence-led review",
+  "summary": "Prepare code and specification reviews around requirement evidence, changed invariants and declared risk.",
+  "capabilities": ["code-review", "change-review", "release-review"],
+  "outputs": ["review brief", "evidence checklist", "risk triage"],
+  "requires": ["delivery"]
+}

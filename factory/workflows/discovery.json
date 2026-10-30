@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "id": "discovery",
+  "version": "0.1.0",
+  "title": "Discovery to approved brief",
+  "summary": "Establish intent, calculate the VLD plan, then hand a bounded product brief to an agent or reviewer.",
+  "requiresModules": ["product"],
+  "steps": [
+    {
+      "id": "capture-intent",
+      "type": "human-input",
+      "description": "Confirm the profile's users, problem, non-goals and risk flags before any generated artifact is trusted."
+    },
+    {
+      "id": "plan",
+      "type": "command",
+      "dependsOn": ["capture-intent"],
+      "description": "Calculate and review the deterministic VLD plan.",
+      "run": ["plan", "{profile}"]
+    },
+    {
+      "id": "draft-brief",
+      "type": "agent-handoff",
+      "module": "product",
+      "skill": "vld-discovery",
+      "dependsOn": ["plan"],
+      "description": "Draft a product brief without changing policy, tier, requirements or acceptance evidence."
+    },
+    {
+      "id": "approve-brief",
+      "type": "approval",
+      "dependsOn": ["draft-brief"],
+      "description": "A responsible human accepts, revises or rejects the brief before architecture and delivery work begin."
+    }
+  ]
+}

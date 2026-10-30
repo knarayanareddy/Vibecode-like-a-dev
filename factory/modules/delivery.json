@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "delivery",
+  "version": "0.1.0",
+  "title": "Delivery planning",
+  "summary": "Decompose approved requirements into independently verifiable increments and a reviewable delivery sequence.",
+  "capabilities": ["epics", "stories", "release-planning"],
+  "outputs": ["delivery plan", "story map", "release checklist"],
+  "requires": ["product", "architecture"]
+}

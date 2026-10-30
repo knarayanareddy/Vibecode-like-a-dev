@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "release-readiness",
+  "version": "0.1.0",
+  "title": "Release readiness",
+  "summary": "Require explicit delivery evidence and a strict packet verification before a release decision.",
+  "requiresModules": ["review", "qa"],
+  "steps": [
+    {
+      "id": "collect-evidence",
+      "type": "human-input",
+      "description": "Collect the actual test, deployment and operational evidence for this release; do not substitute a completion claim."
+    },
+    {
+      "id": "verify-packet",
+      "type": "validation",
+      "dependsOn": ["collect-evidence"],
+      "description": "Verify the packet structure and release-facing requirement metadata.",
+      "run": ["verify", "{packet}", "--strict"]
+    },
+    {
+      "id": "release-decision",
+      "type": "approval",
+      "dependsOn": ["verify-packet"],
+      "description": "An accountable human records the release decision and any accepted residual risk."
+    }
+  ]
+}

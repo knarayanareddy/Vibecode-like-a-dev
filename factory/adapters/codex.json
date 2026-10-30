@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "codex",
+  "version": "0.1.0",
+  "title": "Codex skills",
+  "target": ".agents/skills",
+  "format": "skill",
+  "files": ["vld-discovery/SKILL.md", "vld-feature-delivery/SKILL.md"]
+}

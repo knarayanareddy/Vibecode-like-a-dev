@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "architecture",
+  "version": "0.1.0",
+  "title": "Architecture decisions",
+  "summary": "Record boundaries, trade-offs and durable decisions before implementation turns them into accidental architecture.",
+  "capabilities": ["decision-records", "boundaries", "trade-offs"],
+  "outputs": ["architecture decision record", "boundary map", "fitness checks"],
+  "requires": ["product"]
+}

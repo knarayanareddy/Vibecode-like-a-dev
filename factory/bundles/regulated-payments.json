@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "regulated-payments",
+  "version": "0.1.0",
+  "title": "Regulated payments delivery",
+  "summary": "A higher-rigor setup for products that handle money and regulated personal information.",
+  "profile": {
+    "traits": ["auth", "payments", "persistence", "webhooks"],
+    "risks": { "payments": true, "regulated": true, "pii": true, "integrations": true }
+  },
+  "modules": ["product", "architecture", "delivery", "review", "qa"],
+  "workflows": ["discovery", "feature-delivery", "release-readiness"]
+}
