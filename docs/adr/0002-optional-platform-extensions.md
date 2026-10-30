@@ -20,7 +20,7 @@ VLD keeps its existing `profile -> plan -> packet -> verify` path pure. It adds 
 2. **Bundles** may only add traits, true risk signals, overlays and absent constraints to a profile. They also enable declared modules. A bundle may not lower risk, replace a project scalar or change a stage silently.
 3. **Agent adapters** generate version-locked skills/commands for supported environments. They do not invoke a model, receive credentials or change VLD policy. A modified generated file or changed module set is reported as drift.
 4. **Workflows** are typed DAGs persisted under `.vld/workflows/`. Human input, agent handoffs and approvals need explicit evidence. Builtin executable steps invoke only an allowlisted `vld plan`, `vld compile` or `vld verify` argv through `execFileSync`, never a shell. Runtime command output is represented by a digest, not stored as unbounded or potentially sensitive text.
-5. **Shared stores** are read-only Git snapshots of a small `vld-store.json` manifest and declared advisory assets. `vld store add` clones a repository without executing a shell, records its resolved commit plus manifest and asset digests in `.vld/stores.json`, and `vld store status` detects local cache drift without contacting the network. Updating a snapshot is explicit. Store assets do not alter a profile, packet, policy, module, or workflow definition.
+5. **Shared stores** are read-only Git snapshots of a small `vld-store.json` manifest and declared advisory Markdown assets. `vld store add` clones a repository without executing a shell, records its resolved commit plus manifest and asset digests in `.vld/stores.json`, and `vld store status` detects local cache drift without contacting the network. A verified asset may be copied into a project, or an explicitly typed `artifact-template` may seed the matching human-authored artifact with source provenance. Updating a snapshot is explicit. Store assets do not alter a profile, packet, policy, module, or workflow definition.
 
 The `.vld/` directory is project state, not compiled packet content. It is intended to be reviewed and committed when a team wants repeatable process state. The portable `specs/` packet remains independently runnable in a downstream repository.
 
@@ -39,7 +39,7 @@ The `.vld/` directory is project state, not compiled packet content. It is inten
 - VLD does not automatically run cloud models. Users choose their agent application, account and permission model.
 - Workflows do not promise to discover a repository's own test command. Product test execution remains a declared project gate, not a generic unsafe shell hook.
 - Modules and shared stores provide protocols, templates and handoffs, not a claim that a generated or human-authored brief, architecture document or review is semantically correct.
-- Stores are deliberately advisory and read-only: they cannot supply executable workflows, policy, modules or compiler inputs. The existing deterministic `vld change` lifecycle remains the source of truth for requirement deltas.
+- Stores are deliberately advisory and read-only: they cannot supply executable workflows, policy, modules or compiler inputs. An imported template is a starting document, not an authoritative artifact or requirement source. The existing deterministic `vld change` lifecycle remains the source of truth for requirement deltas.
 
 ## Alternatives rejected
 

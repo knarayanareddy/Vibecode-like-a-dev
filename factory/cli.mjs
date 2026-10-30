@@ -20,7 +20,7 @@ import { CHANGE_TEMPLATE, applyChange, archiveChange, emitChange, planChange, ve
 import { emitPacket } from './lib/emit/index.mjs';
 import { buildIndex, loadIndex, writeIndex } from './lib/indexer.mjs';
 import { enableModules, listModules, moduleStatus } from './lib/modules.mjs';
-import { addStore, initStore, readStoreState, refreshStore, storeStatus } from './lib/stores.mjs';
+import { addStore, copyStoreAsset, initStore, readStoreState, refreshStore, storeStatus } from './lib/stores.mjs';
 import { buildPlan, loadPolicy } from './lib/planner.mjs';
 import { loadProfile, KINDS, STAGES, SCALES, TRAITS, RISK_FLAGS } from './lib/profile.mjs';
 import { completeWorkflowStep, getWorkflow, listWorkflows, runWorkflow, workflowStatus } from './lib/workflows.mjs';
@@ -40,7 +40,7 @@ const option = (name, fallback) => {
 };
 const VALUE_FLAGS = new Set([
   '-o', '--out', '--repo', '--name', '--idea', '--profile', '--packet',
-  '--project', '--modules', '--evidence', '--file', '--ref', '--title'
+  '--project', '--modules', '--evidence', '--file', '--ref', '--title', '--from-store'
 ]);
 const positional = rest.filter((item, index) => !item.startsWith('-') && !(index > 0 && VALUE_FLAGS.has(rest[index - 1])));
 
@@ -61,9 +61,9 @@ Usage
   vld change archive <change-dir> <packet-dir> [--profile <p>]
                                      fold an applied change into the profile's overlay stack
   vld change init <dir>              write change.json to fill in
-  vld artifact list|init|validate|status <type> [id] [--project <dir>]
+  vld artifact list|init|validate|status <type> [id] [--from-store store/asset] [--project <dir>]
                                      generate and validate product, architecture, delivery, review and QA artifacts
-  vld store init <dir> [--id <id>] | add <id> <git-url> | update|status [id]
+  vld store init <dir> [--id <id>] | add <id> <git-url> | update|status [id] | assets|copy <id> [asset]
                                      fetch, pin and verify read-only Git-backed shared delivery stores
   vld module list|enable|status|verify [ids] [--project <dir>] [--json]
                                      manage version-locked optional delivery modules
@@ -552,7 +552,7 @@ function reportModuleStatus(status, { json = false, verify = false } = {}) {
 function runArtifact() {
   const [action = 'list', kind, id] = positional;
   const project = option('--project', '.');
-  const common = { projectDir: project, packetDir: option('--packet', null), profilePath: option('--profile', null), id: id ?? null, file: option('--file', null) };
+  const common = { projectDir: project, packetDir: option('--packet', null), profilePath: option('--profile', null), id: id ?? null, file: option('--file', null), fromStore: option('--from-store', null) };
   try {
     if (action === 'list') {
       const types = listArtifacts();
@@ -564,7 +564,7 @@ function runArtifact() {
       if (!kind) fail('Usage: vld artifact init <type> [id] [--project <dir>] [--packet <dir>]');
       const result = initArtifact({ ...common, kind, out: option('--out', null), force: hasFlag('--force') });
       if (hasFlag('--json')) console.log(JSON.stringify(result, null, 2));
-      else console.log(`\n✓ wrote ${displayPath(result.file)}\n\n  Fill the artifact, then run:\n  vld artifact validate ${kind}${id ? ` ${id}` : ''} --project ${displayPath(result.project)} --strict\n`);
+      else console.log(`\n✓ wrote ${displayPath(result.file)}${result.source ? ` from verified store ${result.source.store}/${result.source.asset} @ ${result.source.commit.slice(0, 12)}` : ''}\n\n  Fill the artifact, then run:\n  vld artifact validate ${kind}${id ? ` ${id}` : ''} --project ${displayPath(result.project)} --strict\n`);
       return;
     }
     if (action === 'validate') {
@@ -610,6 +610,28 @@ function runStore() {
       else console.log(`\n✓ refreshed store ${result.store.id} at ${result.store.commit}\n`);
       return;
     }
+    if (action === 'assets') {
+      if (!id) fail('Usage: vld store assets <store-id> [--project <dir>]');
+      const report = storeStatus(project, id);
+      if (hasFlag('--json')) console.log(JSON.stringify(report, null, 2));
+      else {
+        const store = report.stores[0];
+        console.log(`\nstore assets · ${id}\n`);
+        for (const asset of store?.assets ?? []) console.log(`  ${asset.id.padEnd(22)} ${asset.kind}${asset.artifact ? ` · ${asset.artifact}` : ''}`);
+        for (const error of report.errors) console.log(`  ✗ ${error}`);
+        for (const drift of store?.drift ?? []) console.log(`  ! ${drift}`);
+        console.log(`\n${report.ok ? 'PASS' : 'FAIL'}\n`);
+      }
+      if (!report.ok) process.exit(1);
+      return;
+    }
+    if (action === 'copy') {
+      if (!id || !repository) fail('Usage: vld store copy <store-id> <asset-id> [--out <relative.md>] [--project <dir>]');
+      const result = copyStoreAsset({ projectDir: project, storeId: id, assetId: repository, out: option('--out', null), force: hasFlag('--force') });
+      if (hasFlag('--json')) console.log(JSON.stringify({ ...result, content: undefined }, null, 2));
+      else console.log(`\n✓ copied verified ${result.asset.kind} ${id}/${repository} to ${displayPath(result.output)}\n`);
+      return;
+    }
     if (action === 'status' || action === 'list') {
       const report = action === 'list' ? readStoreState(project) : storeStatus(project, id ?? null);
       if (hasFlag('--json')) console.log(JSON.stringify(action === 'list' ? { ...report, stores: report.state?.stores ?? [] } : report, null, 2));
@@ -624,7 +646,7 @@ function runStore() {
       if (report.ok === false) process.exit(1);
       return;
     }
-    fail('Usage: vld store init|add|update|list|status');
+    fail('Usage: vld store init|add|update|list|status|assets|copy');
   } catch (error) { fail(error.message); }
 }
 

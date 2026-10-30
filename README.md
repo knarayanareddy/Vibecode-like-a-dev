@@ -166,6 +166,10 @@ vld store init ../team-playbook --id team-playbook
 # Commit ../team-playbook with Git, then pin its resolved commit in this project:
 vld store add team-playbook https://github.com/acme/team-playbook.git --ref main --project .
 vld store status --project .
+vld store assets team-playbook --project .
+vld store copy team-playbook review-guidance --project .
+# A declared artifact-template must match the selected artifact type; the result records source provenance.
+vld artifact init product-brief --from-store team-playbook/product-brief-template --project .
 vld store update team-playbook --project .  # explicit refresh after review
 
 vld module verify --project .
@@ -479,7 +483,7 @@ factory/
     gate-runner.mjs    the gate checker shipped into every packet
   schema/
     spec.schema.json   the manifest contract
-  test/                176 tests: data integrity, planning, reproducibility, adoption,
+  test/                177 tests: data integrity, planning, reproducibility, adoption,
                        delta specs, overlays, gates, EARS, MCP protocol, routing & outcome evals
 profile.json           this repository's own profile
 specs/                 this repository's own compiled packet, guarded in CI
@@ -497,7 +501,7 @@ docs/                  research notes, authoring guide, stress test, landscape s
 ```
 
 ```bash
-npm test        # 176 tests
+npm test        # 177 tests
 npm run eval    # library health + packet specificity + 74-prompt routing + 24-task outcome calibration
 npm run stress  # 10 representative + 24 hostile ideas, and 6 refusals; scored on soundness
 npm run check   # lint + index + tests + verify + self-guard + gates + eval + stress

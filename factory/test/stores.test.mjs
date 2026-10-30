@@ -4,15 +4,19 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { addStore, initStore, readStoreState, storeStatus, validateRepository } from '../lib/stores.mjs';
+import { addStore, copyStoreAsset, initStore, readStoreAsset, readStoreState, storeStatus, validateRepository } from '../lib/stores.mjs';
 
 function git(cwd, args) { return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: 'pipe' }).trim(); }
 function makeStore(root, id = 'team-playbook') {
   const source = path.join(root, 'source');
   initStore({ directory: source, id, title: 'Team delivery playbook' });
   writeFileSync(path.join(source, 'templates.md'), '# Review notes\n\nKeep requirement links and release evidence reviewable.\n');
+  writeFileSync(path.join(source, 'product-brief.md'), '# Product Brief: shared\n\n**Status:** Draft\n\n## Problem\n\n[Describe the user problem.]\n');
   const manifest = JSON.parse(readFileSync(path.join(source, 'vld-store.json'), 'utf8'));
-  manifest.assets.push({ id: 'review-notes', kind: 'guidance', file: 'templates.md' });
+  manifest.assets.push(
+    { id: 'review-notes', kind: 'guidance', file: 'templates.md' },
+    { id: 'product-brief-template', kind: 'artifact-template', artifact: 'product-brief', file: 'product-brief.md' }
+  );
   writeFileSync(path.join(source, 'vld-store.json'), `${JSON.stringify(manifest, null, 2)}\n`);
   git(source, ['init']); git(source, ['add', '.']);
   git(source, ['-c', 'user.name=VLD Test', '-c', 'user.email=vld@example.test', 'commit', '-m', 'initial store']);
@@ -30,6 +34,12 @@ test('Git-backed stores pin a validated snapshot and detect cached asset drift w
   assert.equal(added.store.assets[0].id, 'review-notes');
   assert.ok(existsSync(path.join(project, '.vld', 'stores', 'team-playbook', 'templates.md')));
   assert.equal(storeStatus(project).ok, true);
+  const template = readStoreAsset({ projectDir: project, storeId: 'team-playbook', assetId: 'product-brief-template', kind: 'artifact-template' });
+  assert.equal(template.asset.artifact, 'product-brief');
+  const copied = copyStoreAsset({ projectDir: project, storeId: 'team-playbook', assetId: 'review-notes' });
+  assert.match(copied.output, /docs\/shared\/team-playbook\/review-notes\.md$/);
+  assert.match(readFileSync(copied.output, 'utf8'), /requirement links/);
+  assert.throws(() => copyStoreAsset({ projectDir: project, storeId: 'team-playbook', assetId: 'review-notes', out: '../escape.md' }), /inside the project/);
   assert.throws(() => addStore({ projectDir: project, id: 'team-playbook', repository: `file://${source}` }), /already locked/);
 
   writeFileSync(path.join(project, '.vld', 'stores', 'team-playbook', 'templates.md'), 'locally changed');

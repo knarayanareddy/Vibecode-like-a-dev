@@ -2,6 +2,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { requireVerifiedModules } from './modules.mjs';
+import { readStoreAsset } from './stores.mjs';
 import { ensureProjectDir, extensionError } from './extension-utils.mjs';
 
 export const ARTIFACTS = {
@@ -36,6 +37,11 @@ function headingBody(content, heading) {
   return lines.slice(start + 1, end === -1 ? undefined : end).join('\n').trim();
 }
 function links(content) { return [...new Set(content.match(/REQ-\d{3}/g) ?? [])]; }
+function storeReference(value) {
+  const [storeId, assetId, ...extra] = String(value ?? '').split('/');
+  if (!storeId || !assetId || extra.length) throw extensionError('store template must be written as <store-id>/<asset-id>', 'INVALID_STORE_TEMPLATE');
+  return { storeId, assetId };
+}
 function template(kind, { profile = {}, requirements = [], id }) {
   const name = profile.name ?? 'project';
   const reqs = requirements.length ? requirements.map((r) => `- ${r.id} — ${r.title}`).join('\n') : '- [Link relevant REQ-### identifiers after compiling the packet.]';
@@ -46,11 +52,19 @@ function template(kind, { profile = {}, requirements = [], id }) {
   if (kind === 'review-brief') return `# Review Brief: ${name}\n\n${common}## Change Summary\n\n[Describe the changed behavior and blast radius.]\n\n## Requirements Under Review\n\n${reqs}\n\n## Risk and Invariants\n\n- [State the invariant a reviewer must protect.]\n\n## Evidence\n\n- [Record an executed command and its outcome.]\n\n## Review Questions\n\n- [Ask a falsifiable review question.]\n\n## Decision\n\n[Record approve, reject, or the blocking concern.]\n`;
   return `# QA Plan: ${name}\n\n${common}## Risk-based Strategy\n\n[Explain which failure paths need the strongest evidence.]\n\n## Requirement Coverage\n\n| Requirement | Test level | Evidence | Status |\n| --- | --- | --- | --- |\n${requirements.length ? requirements.filter((r) => r.verify === 'automated').map((r) => `| ${r.id} | [unit/integration/e2e] | [test path] | planned |`).join('\n') : '| REQ-### | [test level] | [test path] | planned |'}\n\n## End-to-End Scenarios\n\n### [Scenario name]\n\n- Given: [state]\n- When: [action]\n- Then: [observable result]\n\n## Release Evidence\n\n- [Record required test and gate evidence.]\n`;
 }
-export function initArtifact({ kind, projectDir='.', packetDir=null, profilePath=null, id=null, out=null, force=false }) {
+export function initArtifact({ kind, projectDir='.', packetDir=null, profilePath=null, id=null, out=null, fromStore=null, force=false }) {
   const project=ensureProjectDir(projectDir), type=typeOrThrow(kind); requireVerifiedModules(project,[type.module]);
   const file=fileFor(project,kind,id,out); if (existsSync(file)&&!force) throw extensionError(`${file} exists; pass --force to replace it`, 'ARTIFACT_EXISTS');
   let profile={}; const p=path.resolve(profilePath ?? path.join(project,'profile.json')); if (existsSync(p)) try { profile=JSON.parse(readFileSync(p,'utf8')); } catch {}
-  const requirements=packetRequirements(path.resolve(packetDir ?? path.join(project,'specs'))); mkdirSync(path.dirname(file),{recursive:true}); writeFileSync(file,template(kind,{profile,requirements,id}),'utf8'); return {project,kind,file,requirements:requirements.length};
+  const requirements=packetRequirements(path.resolve(packetDir ?? path.join(project,'specs'))); let source=null;
+  let content=template(kind,{profile,requirements,id});
+  if (fromStore) {
+    const reference=storeReference(fromStore); const imported=readStoreAsset({ projectDir: project, ...reference, kind: 'artifact-template' });
+    if (imported.asset.artifact !== kind) throw extensionError(`store template "${fromStore}" is for ${imported.asset.artifact}, not ${kind}`, 'STORE_TEMPLATE_TYPE_MISMATCH');
+    source={ store: imported.store.id, asset: imported.asset.id, commit: imported.store.commit, digest: imported.asset.digest };
+    content=`${imported.content.trimEnd()}\n\n<!-- VLD template source: ${source.store}/${source.asset} @ ${source.commit} · sha256 ${source.digest} -->\n`;
+  }
+  mkdirSync(path.dirname(file),{recursive:true}); writeFileSync(file,content,'utf8'); return {project,kind,file,requirements:requirements.length,source};
 }
 export function validateArtifact({ kind, projectDir='.', packetDir=null, id=null, file=null, strict=false }) {
   const project=ensureProjectDir(projectDir), type=typeOrThrow(kind); requireVerifiedModules(project,[type.module]);
