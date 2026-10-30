@@ -8,7 +8,7 @@ tier_min: 0
 cost: low
 priority: 3
 tags: [journeys, slices, vertical-slice, ux]
-triggers: [user journey, user story, flow, slice, walkthrough]
+triggers: [user journey, user story, vertical slice, end-to-end slice, slice, walkthrough]
 enforces: [core.primary-journey]
 artifacts: [01-product-brief.md, 06-delivery-plan.md]
 ---

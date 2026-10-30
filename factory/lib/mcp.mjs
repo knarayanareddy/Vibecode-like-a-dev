@@ -52,16 +52,217 @@ function readPrimitiveBody(id) {
   return body;
 }
 
+const SEARCH_STOP = new Set([
+  'a', 'an', 'and', 'are', 'as', 'at', 'be', 'because', 'been', 'before', 'being', 'between', 'both', 'but', 'by',
+  'can', 'cannot', 'could', 'did', 'do', 'does', 'doing', 'done', 'during', 'each', 'either', 'even', 'every',
+  'first', 'for', 'from', 'get', 'gets', 'got', 'had', 'has', 'have', 'having', 'how', 'i', 'if', 'in', 'into',
+  'is', 'it', 'its', 'just', 'keep', 'keeps', 'let', 'lets', 'like', 'made', 'make', 'makes', 'making', 'may',
+  'might', 'more', 'most', 'much', 'must', 'my', 'need', 'needs', 'new', 'no', 'nor', 'not', 'now', 'of', 'off',
+  'on', 'once', 'one', 'only', 'onto', 'or', 'other', 'our', 'out', 'over', 'own', 'put', 'run', 'runs', 'running',
+  'same', 'see', 'set', 'sets', 'shall', 'should', 'so', 'some', 'still', 'such', 'take', 'than', 'that', 'the',
+  'their', 'them', 'then', 'there', 'these', 'they', 'this', 'those', 'through', 'to', 'too', 'turn', 'two',
+  'under', 'until', 'up', 'use', 'used', 'uses', 'using', 'very', 'via', 'want', 'wants', 'was', 'way', 'we',
+  'were', 'what', 'when', 'whenever', 'where', 'whether', 'which', 'while', 'who', 'why', 'will', 'with',
+  'within', 'without', 'would', 'write', 'writes', 'writing', 'you', 'your',
+  // Generic software nouns that appear in nearly every prompt and carry no routing signal on their own.
+  'add', 'app', 'application', 'build', 'change', 'changes', 'code', 'codebase', 'create', 'customer', 'customers',
+  'day', 'developer', 'developers', 'engineer', 'engineers', 'file', 'files', 'fix', 'function', 'helper',
+  'implement', 'line', 'lines', 'method', 'number', 'numbers', 'page', 'people', 'practice', 'practices', 'product',
+  'project', 'repo', 'repository', 'service', 'services', 'software', 'string', 'strings', 'system', 'team', 'update',
+  'user', 'users', 'work', 'worker', 'workers'
+]);
+
+const KEEP_S = new Set([
+  'asvs', 'access', 'address', 'alias', 'analysis', 'basis', 'bus', 'canvas', 'chaos', 'class', 'cors', 'css',
+  'focus', 'gas', 'glass', 'harness', 'headless', 'ingress', 'less', 'loss', 'mass', 'nexus', 'pass', 'postgres',
+  'process', 'progress', 'redis', 'rss', 'sass', 'serverless', 'status', 'stress', 'success', 'tls', 'xss'
+]);
+
 /**
- * Metadata matches are worth more than body matches: a term in the title or
- * triggers means the practice is about it, a term in the body may be a caveat.
+ * Light, deterministic stemmer for routing tokens.
+ * Both the raw token and its stem are indexed so acronyms (`asvs`, `rbac`, `wcag`)
+ * match verbatim while inflections (`webhooks`/`webhook`, `retries`/`retry`,
+ * `migrations`/`migration`) collapse cleanly.
  */
-function searchScore(primitive, terms) {
-  const meta = [primitive.id, primitive.title, primitive.summary, ...(primitive.tags ?? []), ...(primitive.triggers ?? [])]
-    .join(' ')
-    .toLowerCase();
-  const body = (readPrimitiveBody(primitive.id) ?? '').toLowerCase();
-  return terms.reduce((total, term) => total + (meta.includes(term) ? 3 : 0) + (body.includes(term) ? 1 : 0), 0);
+export function stemToken(word) {
+  if (word.length <= 3 || KEEP_S.has(word)) return word;
+  let w = word;
+  if (w.endsWith('ies') && w.length > 4) return `${w.slice(0, -3)}y`;
+  if (/(ches|shes|xes|zes|sses)$/.test(w) && w.length > 5) w = w.slice(0, -2);
+  else if (w.endsWith('s') && !w.endsWith('ss') && !w.endsWith('us') && !w.endsWith('is') && w.length >= 4) {
+    w = w.slice(0, -1);
+  }
+  if (w.endsWith('ing') && w.length >= 6) {
+    const base = w.slice(0, -3);
+    if (/(.)\1$/.test(base) && !/[lsz]$/.test(base)) return base.slice(0, -1);
+    if (/(at|iz|is|ur|rc|rg|nc|ng|lv|rv|tl|dl|gl|pl|bl|fl|cl|kl)$/.test(base)) return `${base}e`;
+    return base;
+  }
+  if (w.endsWith('ed') && w.length >= 6) {
+    const base = w.slice(0, -2);
+    if (/(.)\1$/.test(base) && !/[lsz]$/.test(base)) return base.slice(0, -1);
+    if (/(at|iz|is|ur|rc|rg|nc|lv|rv|tl|dl|gl|pl|bl|fl|cl|kl)$/.test(base)) return `${base}e`;
+    return base;
+  }
+  return w;
+}
+
+export function tokenizeQuery(text, { dropStop = true } = {}) {
+  const normalized = String(text ?? '')
+    .toLowerCase()
+    .replace(/@req\b/g, ' reqanchor ')
+    .replace(/[^a-z0-9]+/g, ' ');
+  const tokens = [];
+  for (const part of normalized.split(/\s+/)) {
+    if (!part || part.length < 2) continue;
+    if (dropStop && SEARCH_STOP.has(part)) continue;
+    tokens.push(part);
+  }
+  return tokens;
+}
+
+function tokenBag(text, opts) {
+  const tokens = tokenizeQuery(text, opts);
+  const stems = tokens.map(stemToken);
+  return { tokens, stems, set: new Set([...tokens, ...stems]) };
+}
+
+/**
+ * Check whether every content stem in `phraseStems` appears in `queryStems` in order
+ * within a compact span (`phraseStems.length + 2` tokens), so "alter a live orders table"
+ * matches trigger "alter table" while unrelated words at opposite ends of a paragraph do not.
+ */
+function matchesPhrase(phraseStems, queryStems) {
+  if (phraseStems.length === 0) return false;
+  if (phraseStems.length === 1) return queryStems.includes(phraseStems[0]);
+  const maxSpan = phraseStems.length + 3;
+  for (let start = 0; start < queryStems.length; start += 1) {
+    if (queryStems[start] !== phraseStems[0]) continue;
+    let cursor = start;
+    let ok = true;
+    for (let k = 1; k < phraseStems.length; k += 1) {
+      const limit = Math.min(queryStems.length, start + maxSpan);
+      let found = -1;
+      for (let pos = cursor + 1; pos < limit; pos += 1) {
+        if (queryStems[pos] === phraseStems[k]) {
+          found = pos;
+          break;
+        }
+      }
+      if (found === -1) {
+        ok = false;
+        break;
+      }
+      cursor = found;
+    }
+    if (ok) return true;
+  }
+  return false;
+}
+
+const MIN_ACTIVATE_SCORE = 9.5;
+const ACTIVATE_RATIO = 0.52;
+const MAX_ACTIVATED = 3;
+
+/**
+ * Rank primitives against a natural-language prompt or keyword query using their
+ * progressive-disclosure metadata (`title`, `summary`, `triggers`, `tags`, `id`).
+ *
+ * Exported so `eval-routing.mjs` can measure the exact router MCP exposes and run
+ * metadata-ablation checks (e.g. blanking `summary` or `triggers` to verify CI fails).
+ */
+export function rankPrimitives(
+  primitives,
+  query,
+  { maxTier = 3, module = null, activate = false, limit = 10, includeBodyFallback = true } = {}
+) {
+  const q = tokenBag(query, { dropStop: true });
+  const qRaw = tokenBag(query, { dropStop: false });
+  if (q.stems.length === 0 && qRaw.stems.length === 0) return [];
+
+  // Inverse document frequency across the full catalog so specialist terms (`gdpr`,
+  // `idor`, `stryker`, `wcag`, `openapi`) outweigh shared words (`test`, `model`, `data`).
+  const docFreq = new Map();
+  const prepared = primitives.map((primitive) => {
+    const slugText = String(primitive.id ?? '').split('.').slice(1).join(' ');
+    const title = tokenBag(primitive.title ?? '', { dropStop: true });
+    const summary = tokenBag(primitive.summary ?? '', { dropStop: true });
+    const tags = tokenBag([...(primitive.tags ?? []), slugText].join(' '), { dropStop: true });
+    const triggerBags = (primitive.triggers ?? []).map((trigger) => {
+      const content = tokenBag(trigger, { dropStop: true });
+      return content.stems.length > 0 ? content : tokenBag(trigger, { dropStop: false });
+    });
+    const allMeta = new Set([...title.set, ...summary.set, ...tags.set]);
+    for (const tb of triggerBags) for (const t of tb.set) allMeta.add(t);
+    for (const term of allMeta) docFreq.set(term, (docFreq.get(term) ?? 0) + 1);
+    return { primitive, title, summary, tags, triggerBags };
+  });
+
+  const totalDocs = Math.max(1, primitives.length);
+  const idf = (term) => 1 + Math.log((totalDocs + 1) / ((docFreq.get(term) ?? 0) + 1));
+  const uniqueQueryStems = [...new Set(q.stems)];
+
+  const eligible = prepared
+    .filter(({ primitive }) => primitive.tier_min <= maxTier)
+    .filter(({ primitive }) => !module || primitive.module === module);
+
+  const scored = eligible.map(({ primitive, title, summary, tags, triggerBags }) => {
+    let metaScore = 0;
+
+    // 1. Trigger matches: phrase triggers are explicit routing rules written by the author.
+    for (const tb of triggerBags) {
+      const uniqueTriggerStems = [...new Set(tb.stems)];
+      if (uniqueTriggerStems.length >= 2) {
+        if (matchesPhrase(uniqueTriggerStems, q.stems) || matchesPhrase(uniqueTriggerStems, qRaw.stems)) {
+          const rarity = uniqueTriggerStems.reduce((sum, s) => sum + idf(s), 0) / uniqueTriggerStems.length;
+          metaScore += 6.5 + 2.2 * uniqueTriggerStems.length * rarity;
+        }
+      } else if (uniqueTriggerStems.length === 1) {
+        const stem = uniqueTriggerStems[0];
+        if (q.set.has(stem)) metaScore += 3.8 * idf(stem);
+      }
+    }
+
+    // 2. Title, summary (description), and tag/slug matches weighted by catalog rarity.
+    for (const stem of uniqueQueryStems) {
+      const weight = idf(stem);
+      if (title.set.has(stem)) metaScore += 2.8 * weight;
+      if (summary.set.has(stem)) metaScore += 2.4 * weight;
+      if (tags.set.has(stem)) metaScore += 1.4 * weight;
+    }
+
+    let score = metaScore;
+    if (score === 0 && !activate && includeBodyFallback) {
+      const body = (readPrimitiveBody(primitive.id) ?? '').toLowerCase();
+      let bodyHits = 0;
+      for (const tok of new Set(q.tokens)) {
+        if (tok.length >= 4 && new RegExp(`\\b${tok.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(body)) {
+          bodyHits += 1;
+        }
+      }
+      score = bodyHits * 0.5;
+    }
+
+    return { primitive, score: Number(score.toFixed(2)), metaScore: Number(metaScore.toFixed(2)) };
+  });
+
+  const nonZero = scored
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score || a.primitive.tier_min - b.primitive.tier_min || a.primitive.id.localeCompare(b.primitive.id));
+
+  const topMeta = nonZero[0]?.metaScore ?? 0;
+  let activatedCount = 0;
+  const annotated = nonZero.map((entry) => {
+    const canActivate =
+      activatedCount < MAX_ACTIVATED &&
+      entry.metaScore >= MIN_ACTIVATE_SCORE &&
+      entry.metaScore >= topMeta * ACTIVATE_RATIO;
+    if (canActivate) activatedCount += 1;
+    return { ...entry, activated: canActivate };
+  });
+
+  const filtered = activate ? annotated.filter((entry) => entry.activated) : annotated;
+  return filtered.slice(0, Math.min(limit ?? 10, 50));
 }
 
 // ------------------------------------------------------------------- tools
@@ -110,7 +311,7 @@ const TOOLS = [
   {
     name: 'search_primitives',
     description:
-      'Find practices by keyword across id, title, summary, tags and triggers. Use when you know the problem (e.g. "webhook duplicates", "accessibility") but not which practice covers it.',
+      'Find practices by keyword or natural-language prompt across title, summary, triggers and tags. Pass activate: true when routing a task prompt to only the high-confidence practices that should be opened (0..3), suppressing low-score neighbours.',
     inputSchema: {
       type: 'object',
       required: ['query'],
@@ -118,7 +319,11 @@ const TOOLS = [
         query: { type: 'string' },
         module: { type: 'string', description: 'Optional module filter: product, domain, architecture, data, testing, security, reliability, delivery, frontend, agent' },
         maxTier: { type: 'integer', minimum: 0, maximum: 3, description: 'Only return practices allowed at or below this tier' },
-        limit: { type: 'integer', minimum: 1, maximum: 50 }
+        limit: { type: 'integer', minimum: 1, maximum: 50 },
+        activate: {
+          type: 'boolean',
+          description: 'When true, return only calibrated high-confidence practices (0..3) rather than every weak keyword match'
+        }
       }
     }
   },
@@ -249,28 +454,34 @@ const HANDLERS = {
   },
 
   search_primitives(args) {
-    const terms = String(args.query ?? '').toLowerCase().split(/\s+/).filter(Boolean);
     const maxTier = Number.isInteger(args.maxTier) ? args.maxTier : 3;
     const limit = Math.min(args.limit ?? 10, 50);
-
-    const scored = index()
-      .primitives.filter((primitive) => primitive.tier_min <= maxTier)
-      .filter((primitive) => !args.module || primitive.module === args.module)
-      .map((primitive) => ({ primitive, score: searchScore(primitive, terms) }))
-      .filter((entry) => entry.score > 0)
-      .sort((a, b) => b.score - a.score || a.primitive.tier_min - b.primitive.tier_min);
+    const activate = args.activate === true;
+    const ranked = rankPrimitives(index().primitives, args.query, {
+      maxTier,
+      module: args.module ?? null,
+      activate,
+      limit
+    });
 
     return {
       query: args.query,
-      matches: scored.slice(0, limit).map(({ primitive }) => ({
+      matches: ranked.map(({ primitive, score, activated }) => ({
         id: primitive.id,
         title: primitive.title,
         summary: primitive.summary,
         module: primitive.module,
         tier_min: primitive.tier_min,
-        cost: primitive.cost
+        cost: primitive.cost,
+        score,
+        activated
       })),
-      hint: scored.length === 0 ? 'No match. Try a broader term, or browse by module with search_primitives({query: "testing", module: "testing"}).' : 'Call get_primitive on the id you need.'
+      hint:
+        ranked.length === 0
+          ? activate
+            ? 'No practice crossed the activation threshold for this prompt.'
+            : 'No match. Try a broader term, or browse by module with search_primitives({query: "testing", module: "testing"}).'
+          : 'Call get_primitive on the id you need.'
     };
   },
 

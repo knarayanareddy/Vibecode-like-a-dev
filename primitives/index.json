@@ -32,9 +32,10 @@
       ],
       "triggers": [
         "handoff",
-        "prompt",
+        "handoff prompt",
         "handoff brief",
         "hand to agent",
+        "new session",
         "lovable",
         "replit",
         "claude code"
@@ -138,7 +139,8 @@
       "triggers": [
         "adr",
         "decision record",
-        "why",
+        "architectural decision",
+        "rejected alternatives",
         "rationale",
         "trade-off"
       ],
@@ -173,13 +175,12 @@
         "interfaces"
       ],
       "triggers": [
-        "api",
+        "api contract",
         "endpoint",
-        "contract",
         "openapi",
-        "request",
-        "response",
-        "error shape"
+        "status codes",
+        "error shape",
+        "error envelope"
       ],
       "path": "primitives/architecture/api-contract-first/SKILL.md",
       "dir": "architecture/api-contract-first"
@@ -318,10 +319,10 @@
         "modules"
       ],
       "triggers": [
-        "architecture",
+        "modular monolith",
         "monolith",
         "microservices",
-        "structure",
+        "service split",
         "folder layout"
       ],
       "path": "primitives/architecture/style-selection/SKILL.md",
@@ -430,7 +431,8 @@
         "ci",
         "pipeline",
         "github actions",
-        "gate",
+        "branch protection",
+        "required check",
         "pull request checks"
       ],
       "path": "primitives/delivery/ci-gates/SKILL.md",
@@ -571,10 +573,10 @@
       "triggers": [
         "domain model",
         "glossary",
-        "naming",
+        "inconsistent naming",
+        "synonyms",
         "ubiquitous language",
         "ddd",
-        "entity",
         "term definition"
       ],
       "path": "primitives/domain/ubiquitous-language/SKILL.md",
@@ -751,11 +753,12 @@
         "brief"
       ],
       "triggers": [
-        "idea",
+        "product brief",
         "brief",
         "one-liner",
-        "what are we building",
-        "requirements"
+        "vague pitch",
+        "problem statement",
+        "what are we building"
       ],
       "path": "primitives/product/product-brief/SKILL.md",
       "dir": "product/product-brief"
@@ -788,7 +791,8 @@
       "triggers": [
         "user journey",
         "user story",
-        "flow",
+        "vertical slice",
+        "end-to-end slice",
         "slice",
         "walkthrough"
       ],
@@ -942,6 +946,8 @@
         "permissions",
         "roles",
         "rbac",
+        "idor",
+        "cross-tenant",
         "tenant isolation",
         "access control"
       ],
@@ -1016,9 +1022,11 @@
         "owasp"
       ],
       "triggers": [
-        "security",
         "threat model",
-        "attack",
+        "prompt injection",
+        "abuse case",
+        "untrusted upload",
+        "attack surface",
         "trust boundary",
         "stride",
         "vulnerability"
@@ -1127,6 +1135,7 @@
       "triggers": [
         "mutation testing",
         "mutation score",
+        "weak assertions",
         "test quality",
         "stryker",
         "mutmut",
@@ -1232,7 +1241,7 @@
       ],
       "triggers": [
         "test suite",
-        "coverage",
+        "test pyramid",
         "pyramid",
         "slow tests",
         "flaky tests"

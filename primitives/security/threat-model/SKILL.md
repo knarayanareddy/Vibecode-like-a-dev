@@ -8,7 +8,7 @@ tier_min: 2
 cost: medium
 priority: 5
 tags: [security, threat-model, stride, trust-boundary, owasp]
-triggers: [security, threat model, attack, trust boundary, stride, vulnerability]
+triggers: [threat model, prompt injection, abuse case, untrusted upload, attack surface, trust boundary, stride, vulnerability]
 enforces: [auth.authorization, ops.rate-limits, data.uploads, ai.guardrails]
 artifacts: [04-contracts.md, 05-verification.md]
 ---

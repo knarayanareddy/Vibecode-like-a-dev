@@ -129,7 +129,7 @@ An MCP server over stdio, zero dependencies, 8 tools:
 | --- | --- |
 | `compute_rigor` | What tier, from which signals, with which ceilings |
 | `select_primitives` | Which practices apply, why, and what was deliberately skipped |
-| `search_primitives` | Keyword search with tier filtering |
+| `search_primitives` | IDF-weighted search with tier filtering and calibrated `activate: true` skill routing |
 | `get_primitive` | One practice in full, read only when needed |
 | `get_requirements` | Requirement templates with criteria, failure paths and anchors |
 | `get_gates` | Cumulative definition of done for a tier |
@@ -298,7 +298,54 @@ The interesting part is what it refused to accept. Running the tool on itself fo
 
 And it forced two policy corrections: a local CLI was being told to apply OWASP ASVS (now gated on a network surface or a credential), and the catalog had no requirement of the form *"the product's own rules are pinned by tests"* — which is exactly what a spec tool owes its users, so `core.domain-invariants` is now always on, anchored to the very tests you are reading.
 
-What this proves: the loop closes — profile in, packet out, guard passes, and the packet's own requirements are anchored in real tests. What it does not prove: that the packet makes an agent produce *better* software. That is the evaluation harness in the roadmap, and until it exists this section is evidence of internal consistency, not of effectiveness.
+What this proves: the loop closes — profile in, packet out, guard passes, and the packet's own requirements are anchored in real tests. What self-hosting alone does not prove is whether routing and multi-arm enforcement hold up on outside tasks; the evaluation suites below measure both.
+
+## Measured evaluations: routing and multi-arm outcomes
+
+`npm run eval` runs four suites in CI on every commit — two deterministic library/packet checks and the two Tier-3 benchmarks from [`docs/LANDSCAPE.md`](docs/LANDSCAPE.md) §8:
+
+```bash
+node scripts/eval-library.mjs       # 34 practices x 36 profiles: self-recall, collisions, obligations, consequences
+node scripts/eval-specificity.mjs   # 157 same-tier packet pairs: shared prose ceiling
+node scripts/eval-routing.mjs       # 68 practitioner prompts -> expected practices (supports --driver mcp|openai|anthropic|cmd)
+node scripts/eval-outcome.mjs       # 24 tasks x 3 arms: no-spec vs generic-spec vs vld-packet (--runner calibration|cmd|openai|anthropic)
+```
+
+### 1. MCP practice routing (`eval-routing.mjs`)
+
+68 labelled practitioner prompts (34 single-practice, 12 distractor-heavy, 6 multi-practice, 8 colloquial, 8 off-topic negatives) across all 34 practices, enforcing CI floors of **precision ≥ 90%** and **recall ≥ 70%**:
+
+| Configuration | Micro-precision | Micro-recall | F1 | Negative prompts quiet |
+| --- | --- | --- | --- | --- |
+| Uncalibrated top-10 search (`limit: 10`) | 9.7% | 100.0% | 17.7% | 0 / 8 |
+| Title-only ablation (`summary + triggers + tags` stripped) | 56.1% | 69.7% | 62.2% | 8 / 8 |
+| **`search_primitives({ activate: true })` (shipped)** | **94.3%** | **100.0%** | **97.1%** | **8 / 8** |
+
+Practice metadata (`summary`, `triggers`, `tags`) contributes **+38.2pp precision** and **+30.3pp recall** over title matching, all **34/34** practices activate on their labelled prompts with **0** false-positive absorbers, and corrupting a practice's metadata fails CI (`factory/test/routing-eval.test.mjs`). Passing `--driver openai`, `--driver anthropic`, or `--driver cmd --cmd "<router>"` runs the identical 68-prompt benchmark with a live model in the loop choosing which `SKILL.md` practices to open from `primitives/index.json`.
+
+### 2. Multi-arm outcome harness (`eval-outcome.mjs`)
+
+24 executable software tasks across 5 categories (`greenfield` ×6, `brownfield` + `vld change` delta ×6, `bugfix` ×4, `refactor` ×4, `systems` ×4) and tiers 0–3, each evaluated across three arms (`no-spec`, a ~125-line `generic-spec`, and the compiled `vld-packet`) against hidden functional acceptance oracles, hidden review-defect probes (IDOR, non-atomic writes, replay/idempotency bugs, secret leakage, cursor duplication, architecture boundary leaks), and three post-merge drift mutations:
+
+| Arm | Pre-review naive-patch block | Post-merge drift caught (overall) | Anchor / req-test drop | Secret / gate regression | Co-mutated semantic weaken | Markdown context tokens (mean) |
+| --- | --- | --- | --- | --- | --- | --- |
+| `no-spec` (ticket only) | 0.0% (0/24) | 0.0% (0/72) | 0.0% | 0.0% | 0.0% | 167 |
+| `generic-spec` (~125 lines) | 0.0% (0/24) | 0.0% (0/72) | 0.0% | 0.0% | 0.0% | 728 |
+| **`vld-packet` (`vld compile` + `vld change`)** | **100.0% (24/24)** | **63.9% (46/72)** | **100.0% (24/24)** | **91.7% (22/24)** | **0.0% (0/24)** | **15,816** |
+| **Delta vs `no-spec`** | **+100.0pp** | **+63.9pp** | **+100.0pp** | **+91.7pp** | **+0.0pp** | **+15,649 tok** |
+| **Delta vs `generic-spec`** | **+100.0pp** | **+63.9pp** | **+100.0pp** | **+91.7pp** | **+0.0pp** | **+15,088 tok** |
+
+Three honest takeaways from those numbers:
+
+- **What CI calibration proves deterministically (no live LLM called):** across all 24 tasks, a naive implementation that passes smoke tests is **0% blocked** before review under `no-spec` or `generic-spec` and **100% blocked** by `spec-check.mjs` + `enforcement/gates.mjs` under `vld-packet`. After merge, `vld-packet` catches **100%** of dropped requirement tests (`24/24`) and **91.7%** of credential/gate regressions (`22/24` — the 2 misses are tier-0 single-file sketches that omit `G1-SECRETS` by design).
+- **What `vld-packet` explicitly fails to catch (`0.0%` on semantic weakening):** when a post-merge commit weakens an edge-case invariant *and* weakens the test assertion while leaving the `// @req REQ-xxx` comment intact, `spec-check` and `gates.mjs` pass (`0/24` caught). Anchors enforce test *presence* and gate *structure*, not assertion strength.
+- **What requires a live agent run:** calibration runs starter/naive/reference fixtures (`100%` reference mergeable across all 3 arms) to verify oracle solvability, defect-probe sensitivity, gate catch rates and context token cost (`+15,088` markdown tokens over `generic-spec`). Measuring live LLM merge-rate lift, defect reduction and API dollar spend requires running a coding agent against the 72 isolated workspaces:
+
+```bash
+node scripts/eval-outcome.mjs --runner cmd --agent-cmd "claude -p 'Read TASK.md (and specs/AGENTS.md or SPEC.md if present) and complete the task.'" --out /tmp/outcome-claude.json
+node scripts/eval-outcome.mjs --runner openai --model gpt-4o --out /tmp/outcome-gpt4o.json
+node scripts/eval-outcome.mjs --runner anthropic --out /tmp/outcome-sonnet.json
+```
 
 ## Does it hold up? Ten ideas, judged
 
@@ -370,14 +417,19 @@ factory/
   routing.json         which practice applies when, and why
   catalog/
     requirements.json  27 requirement templates with acceptance criteria
+  evals/
+    routing-cases.json 68 labelled practitioner prompts across all 34 practices
+    tasks/             24 executable multi-arm outcome tasks (greenfield, brownfield, bugfix, refactor, systems)
   lib/                 frontmatter, predicates, planner, emitter, verifier,
-                       scan + adopt, change (delta specs), mcp (server)
+                       scan + adopt, change (delta specs), mcp (server),
+                       routing-eval, outcome-eval
   templates/
     spec-check.mjs     the drift guard shipped into every packet
+    gate-runner.mjs    the gate checker shipped into every packet
   schema/
     spec.schema.json   the manifest contract
-  test/                98 tests: data integrity, planning, reproducibility, adoption,
-                       delta specs, MCP protocol, CLI contract, end-to-end enforcement
+  test/                141 tests: data integrity, planning, reproducibility, adoption,
+                       delta specs, overlays, gates, EARS, MCP protocol, routing & outcome evals
 profile.json           this repository's own profile
 specs/                 this repository's own compiled packet, guarded in CI
 scripts/
@@ -385,6 +437,8 @@ scripts/
   stress-adversarial.mjs  24 hostile packets and 6 inputs that must be refused
   eval-library.mjs     library health: self-recall@1, trigger collisions, dead weight
   eval-specificity.mjs  is a packet about this product, or a form letter with a name in it
+  eval-routing.mjs     68-prompt MCP routing precision/recall + metadata ablation (--driver mcp|openai|anthropic|cmd)
+  eval-outcome.mjs     24-task x 3-arm outcome harness (--runner calibration|cmd|openai|anthropic)
   lib/packet-audit.mjs    the shared judgement both suites use
 examples/retro-board/  a profile and its compiled packet
 examples/ideas/        ten representative profiles, plus adversarial/cases.json
@@ -392,17 +446,17 @@ docs/                  research notes, authoring guide, stress test, landscape s
 ```
 
 ```bash
-npm test        # 98 tests
-npm run eval    # library health + packet specificity (how much of two packets is identical)
+npm test        # 141 tests
+npm run eval    # library health + packet specificity + 68-prompt routing + 24-task outcome calibration
 npm run stress  # 10 representative + 24 hostile ideas, and 6 refusals; scored on soundness
-npm run check   # index freshness + tests + example packet + own drift guard + stress
+npm run check   # lint + index + tests + verify + self-guard + gates + eval + stress
 ```
 
 ## Honest limitations
 
 - **The selection heuristics are opinions.** The tier math is defensible; the practice priorities encode a particular view of software. Both are in `policy.json` and `routing.json` so you can disagree with them in a diff instead of in a review argument.
-- **The drift guard needs honest statuses.** Nothing but discipline stops an agent marking a requirement `done` without writing the test. The ratchet makes that visible in the diff and `--strict` makes it fail late, but it is not self-enforcing. Automatic detection of *semantic* drift is an open research problem.
-- **No benchmark of this specific tool yet.** The evidence that specs raise agent success rates is real (spec completeness ≥6 correlates with ~92% merge rate in one 2026 benchmark); the evidence that *this packet* beats Kiro or Spec Kit on the same tickets does not exist. `docs/RESEARCH.md` proposes the evaluation.
+- **The drift guard needs honest statuses — and measured semantic drift catch is 0%.** Across the 24-task outcome suite, `spec-check.mjs` + `gates.mjs` catch **100%** of dropped requirement tests and **91.7%** of secret/gate regressions, and **0%** of co-mutated semantic weakenings where an edit weakens both the code and the test while keeping `@req` intact. Automatic detection of *semantic* drift still requires mutation testing (`G3-MUTATION`) or an independent reviewer.
+- **CI runs deterministic calibration, not live paid model calls.** `eval-routing.mjs` and `eval-outcome.mjs` ship live `openai`, `anthropic` and arbitrary CLI-agent (`cmd`) runners, and run deterministic `mcp` / `calibration` baselines in CI so every PR is reproducible without API keys. Do not read calibration's `100%` reference mergeability or `+100pp` naive-gate catch as a claim about a specific LLM's first-pass merge rate until you run `--runner cmd|openai|anthropic` against that model and inspect the paired JSON report; note also the `+15,088`-token context cost over a generic spec, which ETH Zurich's AGENTBENCH cautions can hurt if an agent reads every document instead of following `specs/AGENTS.md` progressive disclosure.
 - **Chat-only builders do not follow the loop.** Lovable and Replit are given a paste-ready brief and per-tool guidance, but they will not run `spec-check.mjs`. Treat their output as a first draft that a code agent or a human finishes.
 - **Adoption infers, it does not understand.** A profile derived from code is a starting point with evidence, not a description of intent. Re-read the inferred fields before compiling; the questions it asks are the ones that matter.
 - **Delta specs are declarative.** `vld change` produces the proposal, the manifest diff and the verification rules, but it cannot apply a migration or prove the blast radius is complete for you.
@@ -418,11 +472,12 @@ npm run check   # index freshness + tests + example packet + own drift guard + s
 Shipped in v0.2: `vld adopt`, `vld change` (delta specs), `vld mcp`.
 Shipped in v0.3: progress that survives recompiles, anchor suppression (`@req-ignore`, `anchors.exclude`), stable requirement ids across catalog changes, unmapped-obligation reporting, Go stack support, the always-on `core.domain-invariants` requirement, a self-spec packet guarded in CI, and a ten-idea stress run in `npm run check`.
 Shipped in v0.4: per-product obligations and red-flag/anti-rationalization tables on all 34 practices, EARS-shaped requirement statements enforced by `verify` and `spec-check`, org → domain → team overlays with provenance, `vld change archive`, and `enforcement/gates.mjs` plus config fragments per gate (see [`docs/LANDSCAPE.md`](docs/LANDSCAPE.md) §8).
+Shipped in v0.5: calibrated `search_primitives({ activate: true })` MCP routing + 68-prompt precision/recall & ablation benchmark (`eval-routing.mjs`, 94.3% precision / 100.0% recall in CI, plus live LLM drivers), and the 24-task × 3-arm outcome evaluation harness (`eval-outcome.mjs`, hidden acceptance oracles, review-defect probes, post-merge drift mutations, and live `cmd`/`openai`/`anthropic` agent runners).
 
-1. **An evaluation harness** — the same set of tickets built with no spec, a generic spec, and this packet, scored on merge rate, review defects, spec drift and cost. Until that exists, every claim here is a design argument.
+1. **Published live-agent comparison runs** — run `eval-outcome.mjs --runner cmd` across Claude Code, Codex and open-weight coding agents, plus head-to-head arms exported into Spec Kit and Kiro layouts, and commit the raw JSON run logs.
 2. **Exports** — `spec-kit` and `kiro` formats from one source of truth, so the packet is portable rather than a new ecosystem.
 3. **`vld change --quick`** — for one-line changes that do not deserve a delta: an explicit, labelled path with no probe, for teams that accept the trade.
-4. **Semantic drift detection** — anchors catch a requirement losing its test; they cannot catch a test proving the wrong thing. The honest answer today is a second reader, human or model.
+4. **Semantic drift detection** — `eval-outcome.mjs` now measures the gap directly (`0/24` co-mutated semantic weakenings caught by `@req` anchors alone); closing it requires wiring lightweight per-requirement mutation or property checks into `gates.mjs`.
 
 ## Prior art and reading
 

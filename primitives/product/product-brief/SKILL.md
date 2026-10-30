@@ -8,7 +8,7 @@ tier_min: 0
 cost: low
 priority: 1
 tags: [requirements, ambiguity, scope, brief]
-triggers: [idea, brief, one-liner, what are we building, requirements]
+triggers: [product brief, brief, one-liner, vague pitch, problem statement, what are we building]
 enforces: []
 advisory_reason: "A brief is judged by the person who owns the product. The packet can require that it exists; it cannot check that it is right."
 advisory: true

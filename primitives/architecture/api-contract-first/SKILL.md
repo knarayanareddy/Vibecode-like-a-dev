@@ -8,7 +8,7 @@ tier_min: 1
 cost: medium
 priority: 3
 tags: [api, contract, openapi, versioning, errors, interfaces]
-triggers: [api, endpoint, contract, openapi, request, response, error shape]
+triggers: [api contract, endpoint, openapi, status codes, error shape, error envelope]
 enforces: [api.contract, api.error-envelope]
 artifacts: [04-contracts.md]
 ---
