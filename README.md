@@ -435,7 +435,7 @@ The finding that is only partly fixed, because it is the product's actual bounda
 
 ## Why not just use Spec Kit / Kiro / BMAD / OpenSpec?
 
-They solved the first half — making the spec a real artifact. What follows is what I took from each, and what I deliberately left.
+They solved the first half — making the spec a real artifact. What follows is what I took from each, and what I deliberately left. For a current, decision-oriented comparison of VLD with those tools plus Spec Kitty, GSD Core and Superpowers—including VLD's real gaps—see [the comparative study](docs/COMPARATIVE-STUDY.md).
 
 | Project | Strongest idea | Why it is not enough here |
 | --- | --- | --- |

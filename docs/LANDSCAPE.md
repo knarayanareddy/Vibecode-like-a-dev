@@ -2,7 +2,7 @@
 
 A survey of the projects this one overlaps with, the evidence about whether any of it works, and a measured answer to the question *"is this thin and boilerplate?"*
 
-Surveyed October 2026. Claims about other projects come from their own documentation, release notes and independent comparisons; claims about this repository are measured by scripts in `scripts/` and reproducible with `npm run check`.
+Surveyed October 2026. Claims about other projects come from their own documentation, release notes and independent comparisons; claims about this repository are measured by scripts in `scripts/` and reproducible with `npm run check`. For the current decision-oriented comparison, source snapshots, explicit limits and recommendation matrix, read [COMPARATIVE-STUDY.md](COMPARATIVE-STUDY.md); this document preserves the wider historical/research landscape.
 
 **Short answer: you are half right.** The *specification* half of this project is measurable boilerplate — 90% of a compiled packet is byte-identical across two completely unrelated products. The *selection, rigor and enforcement* half is not: no surveyed tool computes rigor from risk, ships a drift guard, or binds requirements to test anchors. The gap is real, it is specific, and most of it is fixable without abandoning the design.
 
