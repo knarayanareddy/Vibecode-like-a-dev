@@ -13,7 +13,7 @@ First: **REQ-001** — A clean clone of Retro Board runs with one documented com
 | Question | Document |
 | --- | --- |
 | The rules you cannot break | `00-constitution.md` — 14 requirements, 22 practices |
-| What this product is and is not | `01-product-brief.md` — board, facilitator, non-goals |
+| What this product is and is not | `01-product-brief.md` — board, team, non-goals |
 | The nouns to use in code | `02-domain-model.md` — 4 aggregates, 6 candidate terms |
 | What may import what | `03-architecture.md` — 3 contexts, 4 ADRs |
 | Interface shapes | `04-contracts.md` — 3 surfaces on PostgreSQL |
@@ -47,5 +47,5 @@ An agent that cannot run the checks will claim success instead.
 
 - REQ-001 or another requirement contradicts a document in this packet.
 - A gate fails for a reason outside the board change you made.
-- The packet does not decide something about the facilitator — most often permissions or deletion.
+- The packet does not decide something about the team — most often permissions or deletion.
 - You have tried the same fix three times.

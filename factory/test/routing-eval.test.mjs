@@ -117,3 +117,26 @@ test('model-in-the-loop cmd driver executes an external model process over stdio
     rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('polysemous "token" in LLM token-spend prompts does not falsely activate frontend.design-system-tokens, and domain-scoped visibility routes to security.authz-model', async () => {
+  const report = await evaluateRouting({
+    cases: [
+      {
+        id: 'polysemy-llm-token',
+        kind: 'distractor',
+        prompt: 'AI receipt extraction pipeline must validate structured JSON output, cap token spend, and never send patient names or IBANs to OpenAI.',
+        expected: ['security.threat-model']
+      },
+      {
+        id: 'domain-site-scoping',
+        kind: 'colloquial',
+        prompt: 'Blinded sponsor auditors can view anonymized trial totals while site coordinators only see patients at their own hospital site.',
+        expected: ['security.authz-model']
+      }
+    ],
+    thresholds: { minMicroRecall: 1, minMicroPrecision: 1, maxFalsePositivesPerPractice: 0, maxZeroRecallPractices: 99 },
+    includeAblation: false
+  });
+  assert.equal(report.ok, true, JSON.stringify({ findings: report.findings, results: report.results }));
+});
+

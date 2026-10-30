@@ -41,12 +41,12 @@ Anchor column: suggested path, followed by `?` until the file exists. Toggle the
 | REQ-002 | One board goes from created to finished end to end through the documented interface, with no manual step in the middle and nothing reachable only by a developer. | automated | `tests/core/core-primary-journey.test.ts?` | ☐ |
 | REQ-003 | The three things Retro Board will not do in v1 are written down, reviewed before the first sprint, and cited the first time someone asks for a fourth thing. | manual | manual script | ☐ |
 | REQ-004 | What Retro Board knows about a board survives a restart in PostgreSQL, and every schema change is a forward-only migration with a restore step that has been run once. | automated | `tests/data/data-persistence.test.ts?` | ☐ |
-| REQ-005 | A facilitator signs in and signs out, and a revoked session stops working on the server immediately rather than at the next token expiry. | automated | `tests/security/auth-identity.test.ts?` | ☐ |
-| REQ-006 | Reading or changing another facilitator's board is refused by the server; the interface is allowed to hide the control but never to be the control. | automated | `tests/security/auth-authorization.test.ts?` | ☐ |
+| REQ-005 | A team signs in and signs out, and a revoked session stops working on the server immediately rather than at the next token expiry. | automated | `tests/security/auth-identity.test.ts?` | ☐ |
+| REQ-006 | Reading or changing another team's board is refused by the server; the interface is allowed to hide the control but never to be the control. | automated | `tests/security/auth-authorization.test.ts?` | ☐ |
 | REQ-007 | The main board journey completes with a keyboard and a screen reader, error states included, and focus lands somewhere sensible after every navigation. | manual | manual script | ☐ |
 | REQ-008 | Every board screen has loading, empty, error and success states, and the error state carries the next action rather than an apology. | manual | manual script | ☐ |
 | REQ-009 | Colour, spacing and type come from one token source, so restyling the board views is a change to one file and not to every component. | automated | `tests/frontend/ui-design-tokens.test.ts?` | ☐ |
-| REQ-010 | A board failure is classified before it is rendered, so the message tells the facilitator what to do next and never leaks an identifier they cannot act on. | automated | `tests/frontend/ux-error-taxonomy.test.ts?` | ☐ |
+| REQ-010 | A board failure is classified before it is rendered, so the message tells the team what to do next and never leaks an identifier they cannot act on. | automated | `tests/frontend/ux-error-taxonomy.test.ts?` | ☐ |
 | REQ-011 | The board interface has a versioned, machine-readable contract kept in the repository, and a breaking change fails before merge rather than after a consumer notices. | automated | `tests/api/api-contract.test.ts?` | ☐ |
 | REQ-012 | Every failure on the board interface returns one envelope shape, with an opaque identifier a support conversation can quote. | automated | `tests/api/api-error-envelope.test.ts?` | ☐ |
 | REQ-013 | Public entry points that create or change board data are limited per identity and per address, and say how long to wait when they refuse. | automated | `tests/security/ops-rate-limits.test.ts?` | ☐ |
@@ -58,9 +58,9 @@ Anchor column: suggested path, followed by `?` until the file exists. Toggle the
 
 - [ ] **G0-RUN** — The project starts from a clean clone with one documented command. _Here: for Retro Board: one command, and a missing variable is named._
 - [ ] **G0-CHECK** — Lint or typecheck runs in CI on every pull request.
-- [ ] **G0-SMOKE** — One happy-path smoke test exercises the primary user journey. _Here: one board taken from creation to done through the documented interface._
+- [ ] **G0-SMOKE** — One happy-path smoke test exercises the primary user journey. _Here: one team taken from creation to done through the documented interface._
 - [ ] **G1-CI** — The full test suite runs in CI on every pull request and is required to merge.
-- [ ] **G1-DOMAIN-TESTS** — Every rule in the domain model has at least one automated test. _Here: 4 core requirements, each with a test on the board rules._
+- [ ] **G1-DOMAIN-TESTS** — Every rule in the domain model has at least one automated test. _Here: 4 core requirements, each with a test on the team rules._
 - [ ] **G1-AC-TRACE** — Every requirement marked automated maps to a named test through an @req anchor. _Here: 10 automated requirements, 3 manual — anchor in the test file, not the doc._
 - [ ] **G1-RUNBOOK** — README documents how to run, test and deploy, plus known limitations.
 - [ ] **G1-SECRETS** — No secret is committed; configuration comes from the environment and is validated at startup.
@@ -100,7 +100,7 @@ The gates in section 4 are also a command: `node specs/enforcement/gates.mjs`, g
 - [ ] The failure path of the board change exists in code and in a test.
 - [ ] No test was weakened, skipped or deleted to make CI pass.
 - [ ] The traceability row is updated and its anchor is green.
-- [ ] No personal field of a facilitator reaches a log, fixture or error detail.
-- [ ] Every new read of another facilitator's board is authorized server-side.
+- [ ] No personal field of a team reaches a log, fixture or error detail.
+- [ ] Every new read of another team's board is authorized server-side.
 
 Deliberately absent: a coverage percentage target (it rewards executing code, not checking it), mocks of the domain to test the domain, and tests of framework behaviour. Reasoning: `testing.test-budget` in the library.

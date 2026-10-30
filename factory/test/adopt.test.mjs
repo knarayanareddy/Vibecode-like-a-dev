@@ -284,3 +284,18 @@ test('scanning ignores node_modules and build output', (t) => {
   assert.ok(report.facts.filesScanned < 15, `scanned ${report.facts.filesScanned} files, so ignored directories leaked in`);
   assert.equal(report.profile.kind, 'web-app');
 });
+
+test('compound tenant scoping column names like tenant_sponsor_id infer risks.multiTenant', (t) => {
+  const repo = fixture({
+    'backend/pyproject.toml': '[project]\nname = "trialbridge"\ndependencies = ["fastapi>=0.111.0", "sqlalchemy>=2.0.0"]\n',
+    'backend/app/models.py': 'class ParticipantClaim:\n    id: str\n    tenant_sponsor_id: str\n    patient_email: str\n'
+  });
+  t.after(repo.cleanup);
+
+  const report = adoptRepo(repo.root);
+  assert.equal(report.profile.risks.multiTenant, true);
+  assert.equal(report.profile.risks.pii, true);
+  const tenantEv = report.evidence.find((e) => e.field === 'risks.multiTenant');
+  assert.match(tenantEv.evidence.join(' '), /backend\/app\/models\.py: tenant\/org scoping column/);
+});
+

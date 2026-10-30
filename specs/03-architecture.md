@@ -6,16 +6,16 @@
 
 **Hexagonal single artifact.** A CLI is a thin adapter over a pure core. Keeping IO at the edges is what makes the commands testable without spawning processes.
 
-- Rejected: microservices — a specification write would need a distributed transaction, and there is no team boundary to gain.
-- Rejected: serverless-per-endpoint — the specification lifecycle crosses several calls, and cold starts would be paid by a developer.
-- Rejected: framework-shaped folders — they would put the specification rules next to the transport code that is supposed to be the thinnest layer.
+- Rejected: microservices — an agent write would need a distributed transaction, and there is no team boundary to gain.
+- Rejected: serverless-per-endpoint — the agent lifecycle crosses several calls, and cold starts would be paid by a specification.
+- Rejected: framework-shaped folders — they would put the agent rules next to the transport code that is supposed to be the thinnest layer.
 
 ## 2. Shape
 
 ```text
 transport   argv · stdin                    (thin: parses, validates, maps errors)
      │ calls interfaces it does not own
-application specification use cases · input checks · transaction boundary
+application agent use cases · input checks · transaction boundary
      │ domain types and errors only
 domain      core                    (pure: no PostgreSQL + Drizzle (forward-only SQL migrations), no framework)
      ▲ implemented by
@@ -28,8 +28,8 @@ Imports point downward only. Anything pointing back up is a bug in Vibecode Like
 
 | Module | Responsibility | May import | Must not import |
 | --- | --- | --- | --- |
-| Core | the product's central aggregate (name it) | its own specification rules only | web framework, database driver, vendor SDK |
-| Infrastructure / adapters | PostgreSQL, http clients | every context's interfaces for specification | the specification rules of any context |
+| Core | the product's central aggregate (name it) | its own agent rules only | web framework, database driver, vendor SDK |
+| Infrastructure / adapters | PostgreSQL, http clients | every context's interfaces for agent | the agent rules of any context |
 
 ## 4. Stack
 
@@ -63,19 +63,19 @@ Written for **REQ-001 Runnable from a clean clone** — the first requirement, a
 
 1. Transport receives the request and validates it against a schema.
 2. The actor, if any, is resolved and attached to the request context.
-3. The application layer loads the specification, checks policy, and calls one domain operation.
+3. The application layer loads the agent, checks policy, and calls one domain operation.
 4. The domain operation enforces the invariants in `02-domain-model.md` and returns a result or a typed error.
 5. The adapter writes to PostgreSQL in one transaction and emits any domain event after commit.
 6. Transport maps the result to the contract shape in `04-contracts.md`, including the correlation id.
 
 ## 7. Decision records
 
-Non-functional targets for Vibecode Like A Dev go here too: latency on the specification write path, availability, recovery time. A number with no measurement method is a slogan, so write "not measured in v1" instead of pretending.
+Non-functional targets for Vibecode Like A Dev go here too: latency on the agent write path, availability, recovery time. A number with no measurement method is a slogan, so write "not measured in v1" instead of pretending.
 
 **ADR-001 — Architecture: Hexagonal single artifact**
 A CLI is a thin adapter over a pure core. Keeping IO at the edges is what makes the commands testable without spawning processes. _Consequence:_ Boundaries are checked by an import rule in CI, not by review.
 
-Add an ADR for every dependency around a specification that would take more than a day to remove, and for every boundary decision a future reader would otherwise reverse-engineer from this repository.
+Add an ADR for every dependency around an agent that would take more than a day to remove, and for every boundary decision a future reader would otherwise reverse-engineer from this repository.
 
 ## 9. Fitness functions
 
@@ -91,6 +91,6 @@ Architecture that is not executable is decoration, so each of these runs in CI f
 
 ## 10. When this architecture should change
 
-- A single specification operation needs to scale on a different curve from the rest, measured rather than predicted.
-- A specification write starts spanning more than two of the 1 contexts and cannot be made eventually consistent without rewriting the rules.
-- The tests for specification rules need PostgreSQL running to pass: that is a broken boundary, not a reason to add a service.
+- A single agent operation needs to scale on a different curve from the rest, measured rather than predicted.
+- A agent write starts spanning more than two of the 1 contexts and cannot be made eventually consistent without rewriting the rules.
+- The tests for agent rules need PostgreSQL running to pass: that is a broken boundary, not a reason to add a service.

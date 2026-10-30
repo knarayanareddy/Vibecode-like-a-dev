@@ -353,7 +353,8 @@
         "retention",
         "deletion",
         "pii",
-        "compliance"
+        "compliance",
+        "redaction"
       ],
       "triggers": [
         "pii",
@@ -361,7 +362,10 @@
         "delete account",
         "retention",
         "data export",
-        "privacy"
+        "privacy",
+        "right to erasure",
+        "crypto-shred",
+        "patient names"
       ],
       "path": "primitives/data/data-lifecycle/SKILL.md",
       "dir": "data/data-lifecycle"
@@ -641,14 +645,14 @@
       "tags": [
         "frontend",
         "design-system",
-        "tokens",
+        "design-tokens",
         "css",
         "consistency",
         "ui"
       ],
       "triggers": [
         "design system",
-        "tokens",
+        "design tokens",
         "styling",
         "css variables",
         "consistent ui",
@@ -939,6 +943,7 @@
         "rbac",
         "abac",
         "tenancy",
+        "row-level",
         "security"
       ],
       "triggers": [
@@ -949,7 +954,12 @@
         "idor",
         "cross-tenant",
         "tenant isolation",
-        "access control"
+        "access control",
+        "row-level access",
+        "object-level access",
+        "only view",
+        "only see",
+        "assigned site"
       ],
       "path": "primitives/security/authz-model/SKILL.md",
       "dir": "security/authz-model"
@@ -1019,7 +1029,8 @@
         "threat-model",
         "stride",
         "trust-boundary",
-        "owasp"
+        "owasp",
+        "llm-guardrails"
       ],
       "triggers": [
         "threat model",
@@ -1029,7 +1040,11 @@
         "attack surface",
         "trust boundary",
         "stride",
-        "vulnerability"
+        "vulnerability",
+        "llm guardrails",
+        "token spend",
+        "external model",
+        "structured json output"
       ],
       "path": "primitives/security/threat-model/SKILL.md",
       "dir": "security/threat-model"

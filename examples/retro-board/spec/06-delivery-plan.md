@@ -19,7 +19,7 @@ _A running, tested, documented box that can create and delete a board and nothin
 - [ ] Initialise the repository with TypeScript (strict) and PostgreSQL; commit the lockfile.
 - [ ] Add the CI workflow with lint, typecheck and test jobs, and make it required on the default branch.
 - [ ] Add configuration validation that names every missing variable before the first board is created.
-- [ ] Write the runbook: install, run, test, deploy, and what facilitators see when the board service is down.
+- [ ] Write the runbook: install, run, test, deploy, and what teams see when the board service is down.
 - [ ] Copy the specification packet into specs/ and wire the spec check into CI.
 - [ ] Answer the open questions that block the board slice; the rest can wait for their phase.
 
@@ -53,8 +53,8 @@ _Every boundary around a board fixed while changing it is still free._
 _Working board behaviour end to end, one requirement at a time._
 
 - [ ] REQ-004 What Retro Board knows about a board survives a restart in PostgreSQL, and every schema change is a forward-only migration with a restore step that has been run once. Test first, then implement, then trace.
-- [ ] REQ-005 A facilitator signs in and signs out, and a revoked session stops working on the server immediately rather than at the next token expiry. Test first, then implement, then trace.
-- [ ] REQ-006 Reading or changing another facilitator's board is refused by the server; the interface is allowed to hide the control but never to be the control. Test first, then implement, then trace.
+- [ ] REQ-005 A team signs in and signs out, and a revoked session stops working on the server immediately rather than at the next token expiry. Test first, then implement, then trace.
+- [ ] REQ-006 Reading or changing another team's board is refused by the server; the interface is allowed to hide the control but never to be the control. Test first, then implement, then trace.
 - [ ] REQ-013 Public entry points that create or change board data are limited per identity and per address, and say how long to wait when they refuse. Test first, then implement, then trace.
 - [ ] REQ-011 The board interface has a versioned, machine-readable contract kept in the repository, and a breaking change fails before merge rather than after a consumer notices. Test first, then implement, then trace.
 - [ ] REQ-012 Every failure on the board interface returns one envelope shape, with an opaque identifier a support conversation can quote. Test first, then implement, then trace.
@@ -63,12 +63,12 @@ _Working board behaviour end to end, one requirement at a time._
 
 ### Phase 4 — Interface and hardening · week 5-4
 
-_Retro Board feels finished to a facilitator and fails predictably._
+_Retro Board feels finished to a team and fails predictably._
 
 - [ ] REQ-007 The main board journey completes with a keyboard and a screen reader, error states included, and focus lands somewhere sensible after every navigation.
 - [ ] REQ-008 Every board screen has loading, empty, error and success states, and the error state carries the next action rather than an apology.
 - [ ] REQ-009 Colour, spacing and type come from one token source, so restyling the board views is a change to one file and not to every component.
-- [ ] REQ-010 A board failure is classified before it is rendered, so the message tells the facilitator what to do next and never leaks an identifier they cannot act on.
+- [ ] REQ-010 A board failure is classified before it is rendered, so the message tells the team what to do next and never leaks an identifier they cannot act on.
 - [ ] Bind every component to design tokens; remove raw values.
 - [ ] Exercise every failure path in the requirements, manually or by test.
 - [ ] Mutation testing is deferred; keep assertions specific anyway.
@@ -81,10 +81,10 @@ _Ship a board change with a way back._
 
 - [ ] Write the release checklist and the rollback procedure for a PostgreSQL migration.
 - [ ] Deploy to staging and take one board through the primary journey there.
-- [ ] Observe for one window: error rate, latency, and one board created by a real facilitator.
+- [ ] Observe for one window: error rate, latency, and one board created by a real team.
 - [ ] Record what changed in the spec as a result, then archive the changed requirements.
 
-**Exit:** A release has been observed with real facilitators data, and the rollback has been rehearsed or explicitly accepted as untested.
+**Exit:** A release has been observed with real teams data, and the rollback has been rehearsed or explicitly accepted as untested.
 
 ## 3. Commit and branch protocol
 

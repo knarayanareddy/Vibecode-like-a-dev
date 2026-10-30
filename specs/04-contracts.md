@@ -19,7 +19,7 @@ These are the four that other code will be written against. Naming them now is c
 
 | Shape | Behaviour | Why it is on this list |
 | --- | --- | --- |
-| `<tool> specification <action> [flags]` | exit codes are part of the contract | one command per user-facing operation, documented grammar |
+| `<tool> agent <action> [flags]` | exit codes are part of the contract | one command per user-facing operation, documented grammar |
 
 ## 3. Conventions that bind you
 
@@ -27,9 +27,9 @@ Only the conventions this profile makes load-bearing are listed. The rest are in
 
 | Concern | Rule |
 | --- | --- |
-| Identifiers | Every specification id is opaque and sortable (ULID); a sequential integer never appears in an external shape, because it invites enumeration. |
-| Timestamps | Instants on a specification are ISO-8601 UTC with `Z`; a local time or a bare date is a bug, not a style choice. |
-| Errors | One envelope for every failure — including an unknown route and a rejected specification — and an absent field is absent, not `null`. |
+| Identifiers | Every agent id is opaque and sortable (ULID); a sequential integer never appears in an external shape, because it invites enumeration. |
+| Timestamps | Instants on a agent are ISO-8601 UTC with `Z`; a local time or a bare date is a bug, not a style choice. |
+| Errors | One envelope for every failure — including an unknown route and a rejected agent — and an absent field is absent, not `null`. |
 
 ## 4. Error envelope
 
@@ -38,12 +38,12 @@ One shape for every failure. A caller must be able to handle an unknown route wi
 ```json
 {
   "error": {
-    "code": "SPECIFICATION_CONFLICT",
-    "message": "The specification is not in a state that allows this.",
+    "code": "AGENT_CONFLICT",
+    "message": "The agent is not in a state that allows this.",
     "correlationId": "01J8Z9W3Q4K5M6N7P8R9S0T1V2",
     "details": [
       {
-        "field": "developer",
+        "field": "specification",
         "reason": "conflict"
       }
     ]
@@ -53,14 +53,14 @@ One shape for every failure. A caller must be able to handle an unknown route wi
 
 | Status | Meaning | When |
 | --- | --- | --- |
-| 404 | Not found, or not visible to this actor | One response for both cases, so a specification id cannot be used to probe. |
-| 409 | Conflict with current state | The specification would be left in a state `02-domain-model.md` calls illegal, or a replay carries a different payload. |
-| 422 | Semantically invalid | Well-formed but breaks a rule that makes a specification valid. |
+| 404 | Not found, or not visible to this actor | One response for both cases, so a agent id cannot be used to probe. |
+| 409 | Conflict with current state | The agent would be left in a state `02-domain-model.md` calls illegal, or a replay carries a different payload. |
+| 422 | Semantically invalid | Well-formed but breaks a rule that makes an agent valid. |
 
 ## 5. Contract tests
 
-- Each of the 1 surfaces gets one test for its success shape and one for the specification failure it is most likely to hit.
-- Anything this product consumes is tested against a recorded response; a hand-written mock of a a developer drifts silently.
-- Changing a shape in section 2 fails the build before review, because the test that pins it lives beside the specification it serialises.
+- Each of the 1 surfaces gets one test for its success shape and one for the agent failure it is most likely to hit.
+- Anything this product consumes is tested against a recorded response; a hand-written mock of a a specification drifts silently.
+- Changing a shape in section 2 fails the build before review, because the test that pins it lives beside the agent it serialises.
 
 Before implementing any row above: shape written, error code chosen, one failure example recorded.

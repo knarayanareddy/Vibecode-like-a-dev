@@ -164,6 +164,16 @@ const MIN_ACTIVATE_SCORE = 9.5;
 const ACTIVATE_RATIO = 0.52;
 const MAX_ACTIVATED = 3;
 
+// Engineering terms that carry completely different meanings across domains ("design token"
+// vs "LLM token spend" vs "JWT bearer token", "UI state" vs "database state"). In calibrated
+// `activate` mode on multi-word prompts, a lone match on one of these stems without a
+// matching trigger phrase or a second corroborating term cannot activate a practice alone.
+const POLYSEMOUS_STEMS = new Set([
+  'token', 'state', 'model', 'budget', 'window', 'record', 'event', 'key', 'layer',
+  'scope', 'pipeline', 'table', 'check', 'guard', 'rule', 'flow', 'store', 'field',
+  'type', 'value', 'source'
+]);
+
 /**
  * Rank primitives against a natural-language prompt or keyword query using their
  * progressive-disclosure metadata (`title`, `summary`, `triggers`, `tags`, `id`).
@@ -189,8 +199,12 @@ export function rankPrimitives(
     const summary = tokenBag(primitive.summary ?? '', { dropStop: true });
     const tags = tokenBag([...(primitive.tags ?? []), slugText].join(' '), { dropStop: true });
     const triggerBags = (primitive.triggers ?? []).map((trigger) => {
+      const raw = tokenBag(trigger, { dropStop: false });
       const content = tokenBag(trigger, { dropStop: true });
-      return content.stems.length > 0 ? content : tokenBag(trigger, { dropStop: false });
+      // Never collapse a multi-word phrase trigger ("only view", "only see") down to a
+      // noisy single word just because one of its words is a stopword.
+      if (raw.stems.length >= 2 && content.stems.length < 2) return raw;
+      return content.stems.length > 0 ? content : raw;
     });
     const allMeta = new Set([...title.set, ...summary.set, ...tags.set]);
     for (const tb of triggerBags) for (const t of tb.set) allMeta.add(t);
@@ -208,6 +222,8 @@ export function rankPrimitives(
 
   const scored = eligible.map(({ primitive, title, summary, tags, triggerBags }) => {
     let metaScore = 0;
+    let triggerHit = false;
+    const matchedStems = new Set();
 
     // 1. Trigger matches: phrase triggers are explicit routing rules written by the author.
     for (const tb of triggerBags) {
@@ -216,19 +232,36 @@ export function rankPrimitives(
         if (matchesPhrase(uniqueTriggerStems, q.stems) || matchesPhrase(uniqueTriggerStems, qRaw.stems)) {
           const rarity = uniqueTriggerStems.reduce((sum, s) => sum + idf(s), 0) / uniqueTriggerStems.length;
           metaScore += 6.5 + 2.2 * uniqueTriggerStems.length * rarity;
+          triggerHit = true;
+          for (const s of uniqueTriggerStems) matchedStems.add(s);
         }
       } else if (uniqueTriggerStems.length === 1) {
         const stem = uniqueTriggerStems[0];
-        if (q.set.has(stem)) metaScore += 3.8 * idf(stem);
+        if (q.set.has(stem)) {
+          metaScore += 3.8 * idf(stem);
+          triggerHit = true;
+          matchedStems.add(stem);
+        }
       }
     }
 
     // 2. Title, summary (description), and tag/slug matches weighted by catalog rarity.
     for (const stem of uniqueQueryStems) {
       const weight = idf(stem);
-      if (title.set.has(stem)) metaScore += 2.8 * weight;
-      if (summary.set.has(stem)) metaScore += 2.4 * weight;
-      if (tags.set.has(stem)) metaScore += 1.4 * weight;
+      const inTitle = title.set.has(stem);
+      const inSummary = summary.set.has(stem);
+      const inTags = tags.set.has(stem);
+      if (inTitle) metaScore += 2.8 * weight;
+      if (inSummary) metaScore += 2.4 * weight;
+      if (inTags) metaScore += 1.4 * weight;
+      if (inTitle || inSummary || inTags) matchedStems.add(stem);
+    }
+
+    // Dampen uncorroborated single-word polysemous hits ("token" in "cap token spend")
+    // during calibrated activation so they neither fire nor inflate `topMeta`.
+    if (activate && uniqueQueryStems.length >= 3 && !triggerHit && matchedStems.size === 1) {
+      const [soleStem] = matchedStems;
+      if (POLYSEMOUS_STEMS.has(soleStem)) metaScore *= 0.2;
     }
 
     let score = metaScore;

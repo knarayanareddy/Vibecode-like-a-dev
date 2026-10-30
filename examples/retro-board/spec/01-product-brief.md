@@ -13,7 +13,7 @@ Answer from the board side, in the user's words. These four answers are what an 
 | Question | Answer for Retro Board |
 | --- | --- |
 | Who handles the board today? | _confirm_ |
-| What do they do instead — a spreadsheet, a chat thread, a facilitator in another tool? | _confirm_ |
+| What do they do instead — a spreadsheet, a chat thread, a team in another tool? | _confirm_ |
 | What does Retro Board remove from that day? | _confirm_ |
 | What makes them abandon it after one use? | _confirm_ |
 
@@ -34,8 +34,8 @@ Answer from the board side, in the user's words. These four answers are what an 
 
 **Security**
 
-- `REQ-005` A facilitator signs in and signs out, and a revoked session stops working on the server immediately rather than at the next token expiry. _(authentication with explicit session lifecycle)_
-- `REQ-006` Reading or changing another facilitator's board is refused by the server; the interface is allowed to hide the control but never to be the control. _(server-side authorization with deny-by-default)_
+- `REQ-005` A team signs in and signs out, and a revoked session stops working on the server immediately rather than at the next token expiry. _(authentication with explicit session lifecycle)_
+- `REQ-006` Reading or changing another team's board is refused by the server; the interface is allowed to hide the control but never to be the control. _(server-side authorization with deny-by-default)_
 - `REQ-013` Public entry points that create or change board data are limited per identity and per address, and say how long to wait when they refuse. _(abuse limits on public entry points)_
 
 **Interface**
@@ -43,7 +43,7 @@ Answer from the board side, in the user's words. These four answers are what an 
 - `REQ-007` The main board journey completes with a keyboard and a screen reader, error states included, and focus lands somewhere sensible after every navigation. _(accessible primary journey)_
 - `REQ-008` Every board screen has loading, empty, error and success states, and the error state carries the next action rather than an apology. _(every screen has loading, empty, error and success states)_
 - `REQ-009` Colour, spacing and type come from one token source, so restyling the board views is a change to one file and not to every component. _(one design token source)_
-- `REQ-010` A board failure is classified before it is rendered, so the message tells the facilitator what to do next and never leaks an identifier they cannot act on. _(errors are classified before they are rendered)_
+- `REQ-010` A board failure is classified before it is rendered, so the message tells the team what to do next and never leaks an identifier they cannot act on. _(errors are classified before they are rendered)_
 
 **Interface & contracts**
 
@@ -55,11 +55,11 @@ Answer from the board side, in the user's words. These four answers are what an 
 Written for Retro Board specifically. Confirm or replace before Phase 2 — the list is worth more than any single line on it.
 
 - Any board capability the idea does not name. When in doubt, it is out of scope and gets its own version.
-- Importing board data from an existing system: v1 starts empty and the first facilitator enters it by hand.
-- Any generated or summarised board content. Every word in v1 is written by a facilitator.
-- Notifying facilitator outside the product: no email, no push, no digest.
+- Importing board data from an existing system: v1 starts empty and the first team enters it by hand.
+- Any generated or summarised board content. Every word in v1 is written by a team.
+- Notifying teams outside the product: no email, no push, no digest.
 - A public board API for third parties, SDKs and published integrations.
-- A native client for the board. If facilitator need it offline, that is a v2 decision with its own sync contract.
+- A native client for the board. If teams need it offline, that is a v2 decision with its own sync contract.
 - Custom reporting and exports over board data beyond what one screen shows.
 
 ## Success measures
@@ -88,8 +88,8 @@ These do not block Phase 0; they block the board slice they belong to. An answer
 
 1. Who creates the first board, and what do they use today instead?
 2. What must never happen to a board — and what does it cost when it does?
-3. Which part of the board workflow could be dropped without losing the reason facilitator open it?
-4. How many board records exist in year one, and how many facilitator touch them at once?
+3. Which part of the board workflow could be dropped without losing the reason teams open it?
+4. How many board records exist in year one, and how many teams touch them at once?
 5. Who notices first when a board is wrong, and how do they find out?
 6. Which fields are personal data, and what is the retention period and lawful basis for each?
 7. Which sign-in methods are in scope for v1 — password, magic link, OAuth provider?

@@ -7,7 +7,7 @@
 **Modular monolith with enforced boundaries.** One deployable, several modules, boundaries checked mechanically. Microservices multiply failure modes before a product has found its shape; the seams here are the ones that survive the split if it ever comes.
 
 - Rejected: microservices — a board write would need a distributed transaction, and there is no team boundary to gain.
-- Rejected: serverless-per-endpoint — the board lifecycle crosses several calls, and cold starts would be paid by a facilitator.
+- Rejected: serverless-per-endpoint — the board lifecycle crosses several calls, and cold starts would be paid by a team.
 - Rejected: framework-shaped folders — they would put the board rules next to the transport code that is supposed to be the thinnest layer.
 
 ## 2. Shape
@@ -67,7 +67,7 @@ Written for **REQ-001 Runnable from a clean clone** — the first requirement, a
 
 1. Transport receives the request and validates it against a schema.
 2. The actor is resolved from the session; a request without one stops here.
-3. The application layer loads the board, checks policy, and calls one domain operation.
+3. The application layer loads the team, checks policy, and calls one domain operation.
 4. The domain operation enforces the invariants in `02-domain-model.md` and returns a result or a typed error.
 5. The adapter writes to PostgreSQL in one transaction and emits any domain event after commit.
 6. Transport maps the result to the contract shape in `04-contracts.md`, including the correlation id.
