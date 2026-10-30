@@ -100,7 +100,10 @@ test('singular and plural round-trip on the words ideas actually use, including 
     invoices: 'invoice',
     exercises: 'exercise',
     warehouses: 'warehouse',
-    cases: 'case'
+    cases: 'case',
+    customs: 'customs',
+    logistics: 'logistics',
+    series: 'series'
   };
   for (const [plural, singular] of Object.entries(cases)) {
     assert.equal(singularOf(plural), singular, plural);
@@ -159,5 +162,23 @@ test('industry -or/-er actors like aggregator and dispatcher land in secondary w
   assert.notEqual(vocab.primary, 'aggregator', 'aggregator is an actor/tenant role, not the primary domain object');
   assert.ok(['settlement', 'curtailment', 'battery'].includes(vocab.primary), `unexpected primary: "${vocab.primary}"`);
   assert.ok(['aggregator', 'operator', 'host'].includes(vocab.secondary), `unexpected secondary: "${vocab.secondary}"`);
+});
+
+test('hyphenated compound modifiers (cross-border, append-only, multi-tenant, role-based) are vetoed while domain nouns (cold-chain, line-item) remain', () => {
+  const vocab = vocabularyFor({
+    name: 'portclear-coldchain',
+    idea:
+      'A multi-tenant cross-border cold-chain freight customs clearance and bonded duty-escrow platform for maritime carriers, licensed customs brokers, and port health inspectors. An append-only customs audit log records every consignment and temperature excursion, while role-based and two-person approval guards bonded escrow releases and invoice line-items.',
+    kind: 'web-app',
+    traits: ['auth', 'payments', 'realtime'],
+    risks: { pii: true, payments: true, regulated: true, multiTenant: true }
+  });
+
+  const words = vocab.candidates.map((c) => c.word);
+  for (const mod of ['cross-border', 'append-only', 'multi-tenant', 'role-based', 'two-person']) {
+    assert.ok(!words.includes(mod), `compound modifier "${mod}" leaked into domain candidates: ${words.join(', ')}`);
+  }
+  assert.ok(words.includes('cold-chain') || words.includes('line-item'), `expected genuine hyphenated domain noun in ${words.join(', ')}`);
+  assert.ok(words.includes('customs'), `expected determiner chain "an append-only customs" to anchor "customs"; got ${words.join(', ')}`);
 });
 

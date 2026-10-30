@@ -8,8 +8,8 @@
  */
 
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFile, execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -204,6 +204,88 @@ test('vld adopt supports --name and --idea flags on the CLI and rejects invalid 
     assert.equal(bad.code, 2);
     assert.match(bad.stderr, /invalid profile/i);
     assert.ok(!/^\s+at\s/m.test(bad.stderr), 'invalid --name must not print a stack trace');
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('vld adopt accepts a Git repository URL, and spec-check/verify enforce [CLARIFY] and --require-assertions guards', async () => {
+  const workspace = mkdtempSync(path.join(os.tmpdir(), 'vld-resilience-'));
+  try {
+    // 1. Remote Git URL adoption via file://
+    const remoteSrc = path.join(workspace, 'remote-src');
+    mkdirSync(remoteSrc, { recursive: true });
+    writeFileSync(path.join(remoteSrc, 'package.json'), JSON.stringify({ name: '@acme/freight-hub', dependencies: { next: '15.0.0', react: '19.0.0' } }));
+    writeFileSync(path.join(remoteSrc, 'index.ts'), 'export const ok = true;\n');
+    execFileSync('git', ['init', '-q'], { cwd: remoteSrc });
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: remoteSrc });
+    execFileSync('git', ['config', 'user.name', 'Test'], { cwd: remoteSrc });
+    execFileSync('git', ['add', '.'], { cwd: remoteSrc });
+    execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: remoteSrc });
+
+    const outProfile = path.join(workspace, 'profile.json');
+    const adoptUrl = await cli([
+      'adopt',
+      `file://${remoteSrc}`,
+      '--idea',
+      'A freight customs clearance hub where licensed brokers clear consignments and audit temperature excursions.',
+      '-o',
+      outProfile
+    ]);
+    assert.equal(adoptUrl.code, 0, adoptUrl.stderr);
+    const adopted = JSON.parse(readFileSync(outProfile, 'utf8'));
+    assert.equal(adopted.name, 'freight-hub');
+
+    // 2. Compile packet, plant a [CLARIFY] marker, and test authoring warning vs --strict failure
+    const specsDir = path.join(workspace, 'specs');
+    const compiled = await cli(['compile', outProfile, '-o', specsDir]);
+    assert.equal(compiled.code, 0, compiled.stderr);
+
+    const specJsonPath = path.join(specsDir, 'spec.json');
+    const specJson = JSON.parse(readFileSync(specJsonPath, 'utf8'));
+    const savedCriterion = specJson.requirements[0].acceptance[0].text;
+    specJson.requirements[0].acceptance[0].text = `${savedCriterion} [CLARIFY: confirm port cut-off SLA]`;
+    writeFileSync(specJsonPath, `${JSON.stringify(specJson, null, 2)}\n`);
+
+    const looseVerify = await cli(['verify', specsDir, '--json']);
+    assert.equal(looseVerify.code, 0, '[CLARIFY] is a warning during authoring');
+    assert.match(looseVerify.stdout, /clarification marker/);
+
+    const strictVerify = await cli(['verify', specsDir, '--strict', '--json']);
+    assert.equal(strictVerify.code, 1, '[CLARIFY] must fail release verification under --strict');
+    assert.match(strictVerify.stdout, /clarification marker/);
+
+    // Restore clean spec.json and test hollow test detection (--require-assertions)
+    specJson.requirements[0].acceptance[0].text = savedCriterion;
+    writeFileSync(specJsonPath, `${JSON.stringify(specJson, null, 2)}\n`);
+
+    const appRepo = path.join(workspace, 'app');
+    mkdirSync(appRepo, { recursive: true });
+    const anchors = specJson.requirements
+      .filter((r) => r.verify === 'automated')
+      .map((r) => `// @req ${r.id}`)
+      .join('\n');
+    writeFileSync(path.join(appRepo, 'journey_test.go'), `package app\n${anchors}\nfunc TestHollow(t *testing.T) {}\n`);
+
+    const runSpecCheck = async (extraArgs) => {
+      try {
+        const { stdout, stderr } = await run(process.execPath, [path.join(specsDir, 'spec-check.mjs'), '--repo', appRepo, ...extraArgs]);
+        return { code: 0, stdout, stderr };
+      } catch (err) {
+        return { code: err.code ?? 1, stdout: err.stdout ?? '', stderr: err.stderr ?? '' };
+      }
+    };
+
+    const hollowCheck = await runSpecCheck(['--strict', '--require-assertions']);
+    assert.equal(hollowCheck.code, 1, 'hollow Go test with no assertion must fail --require-assertions');
+    assert.match(hollowCheck.stdout, /no visible assertion/);
+
+    writeFileSync(
+      path.join(appRepo, 'journey_test.go'),
+      `package app\n${anchors}\nfunc TestReal(t *testing.T) { if 1 != 1 { t.Fatalf("broken") } }\n`
+    );
+    const realCheck = await runSpecCheck(['--strict', '--require-assertions']);
+    assert.equal(realCheck.code, 0, realCheck.stdout);
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }

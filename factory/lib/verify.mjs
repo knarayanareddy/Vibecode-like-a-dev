@@ -24,9 +24,10 @@ const IGNORED_DIRS = new Set([
 
 const SOURCE_FILE = /\.(ts|tsx|js|jsx|mjs|cjs|py|go|rb|java|kt|cs|php|rs|sh|feature|exs)$/;
 const TEST_FILE = /(^|\/)(tests?|__tests__|specs?)\//;
-const TEST_NAME = /\.(test|spec)\.[a-z]+$|(^|\/)test_[^/]+\.py$|_test\.(py|go|rb)$/;
+const TEST_NAME = /\.(test|spec)\.[a-z]+$|(^|\/)test_[^/]+\.py$|_test\.(py|go|rb|rs|exs)$|Tests?\.(java|kt|cs|php)$/;
 const ANCHOR_LINE = /@req\s+(REQ-\d{3})/;
 const SUPPRESSED = /@req-ignore/i;
+const CLARIFY_MARKER = /\[(?:CLARIFY|NEEDS CLARIFICATION)(?::[^\]]*)?\]/i;
 
 function globToRegExp(glob) {
   const escaped = glob.replace(/[.+^${}()|[\]\\]/g, '\\$&');
@@ -210,6 +211,11 @@ export function verifyPacket(packetDir, { repo = null, strict = false, policy = 
       errors.push(`${requirement.id}: no acceptance criteria`);
     } else {
       criteria += requirement.acceptance.length;
+    }
+    const fullText = `${requirement.statement ?? ''} ${(requirement.acceptance ?? []).map((a) => (typeof a === 'string' ? a : a?.text ?? '')).join(' ')}`;
+    if (CLARIFY_MARKER.test(fullText)) {
+      if (strict) errors.push(`--strict: ${requirement.id} contains unresolved clarification marker(s)`);
+      else warnings.push(`${requirement.id} contains unresolved clarification marker(s) — resolve before release`);
     }
     if (!['automated', 'manual', 'gate'].includes(requirement.verify)) {
       errors.push(`${requirement.id}: verify must be automated, manual or gate`);

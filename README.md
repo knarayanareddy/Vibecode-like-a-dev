@@ -70,13 +70,13 @@ Three consequences that make this different from a prompt template:
 | You have | Command | What you get |
 | --- | --- | --- |
 | An idea and nothing else | `vld init` → `plan` → `compile` | A greenfield packet |
-| A repository and no spec | `vld adopt <repo> [--name … --idea "…"]` | A profile inferred from code, with evidence per field and the questions code cannot answer |
+| A repository (local path or Git URL) and no spec | `vld adopt <repo-or-url> [--name … --idea "…"]` | A profile inferred from code, `docker-compose.yml`, `.env.example`, and SQL/ORM schemas, with evidence per field |
 | An existing packet and a change to make | `vld change <packet> <change.json>` | A delta spec: ADDED / MODIFIED / REMOVED, blast radius, probe, rollback, `spec.after.json` |
 | An agent that needs the library | `vld mcp` | 8 MCP tools so the agent queries selection instead of reading 34 files |
 
 ### `vld adopt` — meet the repo where it is
 
-Adoption reads manifests (including nested ones in `backend/` and `frontend/`, and extras like `psycopg[binary]`), source file distribution, schema files, CI, deployment config and test tooling. It reports **every inference with the observation behind it and a confidence mark**, then asks only what code cannot answer.
+Adoption accepts either a local directory or a remote Git URL (`https://github.com/org/repo`, `https://github.com/org/repo/tree/branch`, `github:org/repo#branch`, SSH) via shallow clone. It reads polyglot manifests up to four levels deep (`package.json` including `@scope/*` packages, `pyproject.toml`/`requirements*.txt`, `go.mod` including `/vN` module paths, `Cargo.toml`, `Gemfile`, `composer.json`, `pubspec.yaml`), `docker-compose*.yml` service images, committed `.env.example` variable names (never live `.env` values), raw SQL & ORM migration schemas (`ON DELETE CASCADE`, tenant/PII columns), CI, deployment config and test tooling. It reports **every inference with the observation behind it and a confidence mark**, then asks only what code cannot answer.
 
 ```
   inferred

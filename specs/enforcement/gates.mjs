@@ -221,9 +221,14 @@ function anchored() {
     if (!SOURCE.test(file)) continue;
     const text = read(file);
     if (!text.includes('@req')) continue;
-    const isTest = TEST_PATH.test(file) || /\.(test|spec)\.[a-z]+$/i.test(file) || /(^|\/)test_[^/]+\.py$/i.test(file);
+    const isTest =
+      TEST_PATH.test(file) ||
+      /\.(test|spec)\.[a-z]+$/i.test(file) ||
+      /(^|\/)test_[^/]+\.py$/i.test(file) ||
+      /_test\.(py|go|rb|rs|exs)$/i.test(file) ||
+      /Tests?\.(java|kt|cs|php)$/.test(file);
     for (const line of text.split('\n')) {
-      if (!line.includes('@req')) continue;
+      if (!line.includes('@req') || /@req-ignore/i.test(line)) continue;
       const match = line.match(/@req\s+(REQ-\d{3})/);
       if (!match) continue;
       if (!found.has(match[1])) found.set(match[1], []);
@@ -231,6 +236,28 @@ function anchored() {
     }
   }
   return found;
+}
+
+/**
+ * Strip fenced code blocks, inline code spans, and markdown blockquotes before
+ * inspecting attestation prose (`OpenSpec` code-fence masking pattern), so command
+ * examples like ``npm i pkg@<previous>`` never trigger unfilled-template errors.
+ */
+function stripCodeAndQuotes(markdown) {
+  return String(markdown ?? '')
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/`[^`\n]*`/g, '')
+    .replace(/^[ \t]*>.*$/gm, '');
+}
+
+function unfilledPlaceholder(markdown) {
+  const prose = stripCodeAndQuotes(markdown);
+  const angle = prose.match(/<[a-z][^>\n]{2,}>/i);
+  if (angle) return angle[0];
+  if (/\bYYYY-MM-DD\b/.test(prose)) return 'YYYY-MM-DD';
+  const todo = prose.match(/(?:^|[:|])[ \t]*(TODO|TBD)\b/m);
+  if (todo) return todo[1];
+  return null;
 }
 
 const SECRET = [
@@ -301,9 +328,12 @@ function check(rule) {
       if (!existsSync(file)) return { status: 'fail', detail: `no ${rule.file}; copy enforcement/templates/${rule.file} into place and fill it in` };
       const text = read(rule.file);
       const missing = (rule.requires ?? []).filter((token) => !new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(text));
-      return missing.length === 0
-        ? { status: 'pass', detail: rule.file }
-        : { status: 'fail', detail: `${rule.file} is missing ${missing.join(', ')}` };
+      if (missing.length > 0) return { status: 'fail', detail: `${rule.file} is missing ${missing.join(', ')}` };
+      const placeholder = unfilledPlaceholder(text);
+      if (placeholder) {
+        return { status: 'fail', detail: `${rule.file} still contains unfilled template placeholder (${placeholder})` };
+      }
+      return { status: 'pass', detail: rule.file };
     }
     case 'no-secrets': {
       const hits = [];

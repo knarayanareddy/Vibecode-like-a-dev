@@ -11,7 +11,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { adoptRepo, writeAdoptedProfile } from './lib/adopt.mjs';
+import { adoptRepo, isRemoteRepo, writeAdoptedProfile } from './lib/adopt.mjs';
 import { CHANGE_TEMPLATE, applyChange, archiveChange, emitChange, planChange, verifyChange } from './lib/change.mjs';
 import { emitPacket } from './lib/emit/index.mjs';
 import { buildIndex, loadIndex, writeIndex } from './lib/indexer.mjs';
@@ -38,8 +38,8 @@ const USAGE = `vibecode like a dev — from one paragraph to a spec an agent can
 
 Usage
   vld init <dir>                     write profile.json to fill in
-  vld adopt <repo> [-o <file>] [--name <slug>] [--idea <text>] [--force] [--json]
-                                     infer a profile from an existing repository
+  vld adopt <repo-or-url> [-o <file>] [--name <slug>] [--idea <text>] [--force] [--json]
+                                     infer a profile from a local path or Git repository URL
   vld plan <profile.json> [--json]   show selection and reasoning, write nothing
   vld compile <profile.json> -o <dir> [--force]
                                      render the specification packet
@@ -249,11 +249,18 @@ Fill in name, idea, kind and stage. Then:
 
 function runAdopt(repoPath) {
   const repo = repoPath ?? '.';
-  if (!existsSync(repo)) fail(`No such repository: ${repo}`);
+  const remote = isRemoteRepo(repo);
+  if (!remote && !existsSync(repo)) fail(`No such repository: ${repo}`);
 
   const explicitName = option('--name', null);
   const explicitIdea = option('--idea', null);
-  const report = adoptRepo(repo, { name: explicitName, idea: explicitIdea });
+  let report;
+  try {
+    report = adoptRepo(repo, { name: explicitName, idea: explicitIdea });
+  } catch (error) {
+    if (error.code === 'INVALID_REMOTE_URL' || error.code === 'REMOTE_CLONE_FAILED') fail(error.message);
+    throw error;
+  }
 
   if (hasFlag('--json')) {
     console.log(JSON.stringify(report, null, 2));
@@ -283,7 +290,8 @@ function runAdopt(repoPath) {
   console.log('  only you can answer');
   report.questions.forEach((question, index) => console.log(`  ${index + 1}. ${question}`));
 
-  const out = option('-o', option('--out', path.join(report.repo, 'profile.json')));
+  const defaultOut = report.remote ? path.resolve(process.cwd(), 'profile.json') : path.join(report.repo, 'profile.json');
+  const out = option('-o', option('--out', defaultOut));
   let written;
   try {
     written = writeAdoptedProfile(report, out, { force: hasFlag('--force') });

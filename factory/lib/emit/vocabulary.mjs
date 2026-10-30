@@ -87,7 +87,8 @@ const ACTOR_STEMS = new Set([
   'manager', 'director', 'supervisor', 'inspector', 'regulator', 'contractor', 'subcontractor',
   'broker', 'dealer', 'underwriter', 'adjuster', 'investor', 'advisor', 'counselor', 'mediator',
   'arbitrator', 'issuer', 'borrower', 'lender', 'payer', 'payee', 'beneficiary', 'carrier',
-  'shipper', 'employer', 'employee', 'recruiter', 'candidate', 'trainee', 'attendee', 'organizer',
+  'shipper', 'importer', 'exporter', 'consignee', 'consignor', 'declarant', 'employer', 'employee',
+  'recruiter', 'candidate', 'trainee', 'attendee', 'organizer',
   'organiser', 'volunteer', 'donor', 'custodian', 'guardian', 'caregiver', 'pharmacist',
   'practitioner', 'technician', 'scheduler', 'assessor', 'officer', 'clerk', 'cashier', 'landlord',
   'lessee', 'lessor', 'renter', 'guest', 'passenger', 'staff', 'receptionist', 'driver', 'rider',
@@ -137,18 +138,25 @@ const ABSTRACT = new Set([
 
 /**
  * Determiners: a word right after one of these is a noun with high probability.
- * One optional adjective is allowed between them, so "a specific therapist"
- * yields "therapist" rather than "specific" — unless the first word is itself a
- * known noun (`"a participant exercises"` must anchor `"participant"`, not `"exercises"`).
+ * Up to three pre-nominal modifiers (including hyphenated compound modifiers like
+ * "multi-tenant", "cross-border", "append-only") are skipped so "an append-only
+ * customs audit log" anchors "customs" rather than "append-only", while known nouns
+ * like "participant" in "a participant exercises" stop immediately on the noun.
  */
 const DETERMINER = String.raw`(?:the|a|an|each|every|any|no|some|their|its|our|your|his|her|this|these|those)`;
 const ADJ_MODIFIER = /(?:al|ive|ous|able|ible|ary|est|ish|less|ful|ent|ant|ic)$/;
-const DET_PAIR = new RegExp(
-  String.raw`\b${DETERMINER}\s+([a-z][a-z0-9-]{3,})(?:\s+([a-z][a-z0-9-]{3,}))?`,
+const COMPOUND_MODIFIER =
+  /^(?:multi|cross|inter|intra|trans|per|sub|non|anti|semi|quasi|pseudo|out-of|end-to|up-to|day-to|one-to|many-to|peer-to|face-to|at-least|exactly|in-memory|on-premise|on-premises|on-demand|real-time|near-real-time|day-late|full-time|part-time|long-term|short-term|high-volume|low-latency|high-availability|zero-downtime|zero-trust|single-tenant|single-page|first-party|second-party|third-party|two-person|two-factor|two-step|four-eyes|server-side|client-side|edge-side|row-level|object-level|field-level|tenant-level|fine-grained|coarse-grained)-[a-z0-9-]+$|-[a-z0-9-]*(?:only|based|backed|driven|aware|safe|free|ready|first|friendly|specific|wide|scoped|bound|capped|facing|oriented|centric|native|agnostic|tolerant|compliant|resistant|proof|locked|guarded)$/;
+const DET_CHAIN = new RegExp(
+  String.raw`\b${DETERMINER}((?:\s+[a-z][a-z0-9-]{3,}){1,4})`,
   'gi'
 );
 
+const INVARIANT_S_NOUN =
+  /\b(series|species|customs|goods|savings|earnings|holdings|proceedings|means|(?:logist|analyt|econom|diagnost|telemat|biometr|genom|avion|forens|pediatr|geriatr|psychiatr|robot|semant|mathemat|phys|eth|polit)ics)$/;
+
 const SINGULAR_RULES = [
+  [INVARIANT_S_NOUN, null],
   [/([^aeiou])ies$/, '$1y'],
   [/(sses|xes|zzes|[cs]hes)$/, (m) => m.slice(0, -2)],
   [/\b(status|bus|gas|alias|canvas|campus|focus|virus|lens|bonus|corpus|census|nexus)es$/, '$1'],
@@ -167,6 +175,7 @@ export function singularOf(word) {
 }
 
 export function pluralOf(word) {
+  if (INVARIANT_S_NOUN.test(word)) return word;
   if (/(s|x|z|ch|sh)$/.test(word)) return `${word}es`;
   if (/[^aeiou]y$/.test(word)) return `${word.slice(0, -1)}ies`;
   return `${word}s`;
@@ -208,6 +217,12 @@ const isActorWord = (word) => {
   return ACTOR_STEMS.has(s) || /(?:ist|ian)s?$/.test(word);
 };
 
+function isModifierToken(word) {
+  if (COMPOUND_MODIFIER.test(word)) return true;
+  if (isKnownNoun(word)) return false;
+  return ADJECTIVE_WORDS.has(word) || ADJ_MODIFIER.test(word);
+}
+
 function scoreCandidates(text) {
   const words = String(text ?? '').toLowerCase();
   const tokens = words.split(/[^a-z0-9-]+/).filter((token) => token.length >= 4 && !/^\d+$/.test(token));
@@ -215,17 +230,23 @@ function scoreCandidates(text) {
   for (const token of tokens) counts.set(token, (counts.get(token) ?? 0) + 1);
 
   const anchored = new Set();
-  for (const match of words.matchAll(DET_PAIR)) {
-    const first = match[1].toLowerCase();
-    const second = match[2]?.toLowerCase() ?? null;
-    const firstIsModifier = (ADJECTIVE_WORDS.has(first) || ADJ_MODIFIER.test(first)) && !isKnownNoun(first);
-    const chosen = firstIsModifier && second ? second : first;
-    const endOffset = firstIsModifier && second ? match.index + match[0].length : match.index + match[0].length - (match[2] ? match[2].length + 1 : 0);
-    anchored.add(chosen);
-    // "the customer's order": the possessive marks the *next* word, not this one.
-    if (words.slice(endOffset, endOffset + 2) === "'s") {
-      anchored.delete(chosen);
-      if (second && chosen === first) anchored.add(second);
+  for (const match of words.matchAll(DET_CHAIN)) {
+    const chain = match[1].trim().split(/\s+/).map((w) => w.toLowerCase());
+    let idx = 0;
+    while (idx < chain.length - 1 && isModifierToken(chain[idx])) idx += 1;
+    const chosen = chain[idx];
+    // Locate exact offset after `chosen` inside `words` to detect possessives ("the customer's order").
+    let cursor = match.index + match[0].length - match[1].length;
+    for (let i = 0; i <= idx; i += 1) {
+      const nextPos = words.indexOf(chain[i], cursor);
+      if (nextPos === -1) break;
+      cursor = nextPos + chain[i].length;
+    }
+    if (words.slice(cursor, cursor + 2) === "'s") {
+      const afterPossessive = words.slice(cursor + 2).match(/^\s+([a-z][a-z0-9-]{3,})/);
+      if (afterPossessive && !isModifierToken(afterPossessive[1])) anchored.add(afterPossessive[1]);
+    } else if (!COMPOUND_MODIFIER.test(chosen)) {
+      anchored.add(chosen);
     }
   }
 
@@ -236,6 +257,7 @@ function scoreCandidates(text) {
   const groups = new Map();
   for (const [token, count] of counts) {
     if (NEVER_A_NOUN.has(token) || ABSTRACT.has(token) || ADJECTIVE_WORDS.has(token)) continue;
+    if (COMPOUND_MODIFIER.test(token)) continue;
     if (/^\d+$/.test(token)) continue;
     if (/ed$/.test(token)) continue;
     const isAnchor = anchored.has(token);
