@@ -17,6 +17,7 @@
 
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { ARTIFACTS, validateArtifact } from './artifacts.mjs';
 import { earsError } from './ears.mjs';
 import { emitPacket } from './emit/index.mjs';
 import { buildIndex, loadIndex } from './indexer.mjs';
@@ -406,6 +407,7 @@ function tasksMarkdown(plan) {
   lines.push('');
   lines.push(box('Read `proposal.md`. Reject it here if the blast radius is wrong: rejecting a spec is an hour, rejecting an implementation is a week.'));
   lines.push(box('Fill and review `design.md`: decisions, rejected alternatives, risks and rollback must be explicit before implementation.'));
+  lines.push(box('Register reviewed product, architecture, QA and review artifacts in `evidence.json`, then record the accountable release decision in `evidence.md`.'));
   lines.push(box('Confirm `spec.after.json` is the manifest you want. It is a diff of intent, not a copy of the code.'));
   lines.push('');
 
@@ -447,6 +449,19 @@ function tasksMarkdown(plan) {
   return `${lines.join('\n')}\n`;
 }
 
+function evidenceMarkdown(plan) {
+  const changed = [
+    ...plan.added.map((requirement) => ({ id: requirement.id, key: requirement.key, action: 'Added' })),
+    ...plan.modified.map(({ target }) => ({ id: target.id, key: target.key, action: 'Modified' })),
+    ...plan.removed.map(({ target }) => ({ id: target.id, key: target.key, action: 'Removed' }))
+  ];
+  return `# Evidence for ${plan.change.id}\n\n**Status:** Pending\n\n## Artifact Register\n\nThe paths and requirement links are recorded in \`evidence.json\`. Those links point at reviewed human artifacts; they do not replace \`delta.json\` or \`spec.after.json\` as the requirement source of truth.\n\n## Change Traceability\n\n| Change | Requirement | Evidence to review |\n| --- | --- | --- |\n${changed.map((entry) => `| ${entry.action} | ${entry.id} — ${entry.key} | [Link a reviewed product, architecture, QA or review artifact.] |`).join('\n')}\n\n## Release Decision\n\n[Record the accountable approver, decision, residual risk and the release or rollback condition.]\n`;
+}
+
+function evidenceManifest() {
+  return { schemaVersion: 1, artifacts: [] };
+}
+
 function designMarkdown(plan) {
   const { change, impact, blastRadius, added, modified, removed } = plan;
   const lines = [
@@ -470,6 +485,8 @@ export function renderChange(plan) {
   const files = new Map();
   files.set('proposal.md', proposalMarkdown(plan));
   files.set('design.md', designMarkdown(plan));
+  files.set('evidence.md', evidenceMarkdown(plan));
+  files.set('evidence.json', `${JSON.stringify(evidenceManifest(), null, 2)}\n`);
   files.set('tasks.md', tasksMarkdown(plan));
   files.set('delta.json', `${JSON.stringify(
     {
@@ -567,6 +584,13 @@ export async function archiveChange({ packetDir, changeDir, profilePath = null, 
   const delta = readJson(deltaPath);
 
   const profileFile = resolveProfileFile({ profilePath, spec, packetDir });
+  const evidenceCheck = verifyChange(changeDir, { projectDir: path.dirname(profileFile) });
+  if (!evidenceCheck.ok) {
+    const error = new Error(`change evidence is not ready to archive:\n${evidenceCheck.errors.map((issue) => `- ${issue}`).join('\n')}`);
+    error.code = 'CHANGE_EVIDENCE_INVALID';
+    throw error;
+  }
+  const evidence = readJson(path.join(changeDir, 'evidence.json'));
 
   const profile = readJson(profileFile);
   const overlayId = `change-${delta.id}`;
@@ -654,7 +678,11 @@ export async function archiveChange({ packetDir, changeDir, profilePath = null, 
     added: addRequirements.map((requirement) => requirement.key),
     modified: modify.map((item) => item.key),
     removed: remove.map((item) => item.key),
-    requirementsAfter: Number.isInteger(delta.requirementsAfter) ? delta.requirementsAfter : null
+    requirementsAfter: Number.isInteger(delta.requirementsAfter) ? delta.requirementsAfter : null,
+    evidence: {
+      file: 'evidence.md',
+      artifacts: evidence.artifacts.map((artifact) => ({ kind: artifact.kind, file: artifact.file, requirements: artifact.requirements }))
+    }
   };
   // A recompile reports what it carried forward and what it dropped in the manifest.
   // That is a record of one transition, not a property of the packet, so it belongs
@@ -686,6 +714,7 @@ export async function archiveChange({ packetDir, changeDir, profilePath = null, 
     historyPath,
     archiveDir,
     profilePath: profileFile,
+    evidence: { artifacts: evidence.artifacts.length, file: path.join(archiveDir, 'evidence.md') },
     changed: { overlay: overlayChanged, profile: profileChanged, history: true },
     compiled
   };
@@ -769,10 +798,83 @@ function resolveProfileFile({ profilePath, spec, packetDir }) {
 
 // ------------------------------------------------------------------ verify
 
-export function verifyChange(changeDir) {
+const EVIDENCE_STATUS = /\*\*Status:\*\*\s*(Approved|Conditional)/i;
+function evidenceFile(project, file) {
+  if (typeof file !== 'string' || !file || path.isAbsolute(file) || /[\r\n\0]/.test(file)) return null;
+  const resolved = path.resolve(project, file);
+  if (!resolved.startsWith(`${project}${path.sep}`) || !resolved.endsWith('.md') || path.relative(project, resolved).split(path.sep)[0] === '.vld') return null;
+  return resolved;
+}
+function changedRequirementIds(delta) {
+  return [
+    ...(delta.added ?? []).map((requirement) => requirement.id),
+    ...(delta.modified ?? []).map((entry) => entry.target?.id),
+    ...(delta.removed ?? []).map((entry) => entry.target?.id)
+  ].filter(Boolean);
+}
+function verifyEvidence({ changeDir, projectDir, delta, after }) {
+  const errors = [], warnings = [], passes = [], artifacts = [];
+  const markdown = path.join(changeDir, 'evidence.md');
+  const manifestFile = path.join(changeDir, 'evidence.json');
+  if (!existsSync(markdown)) errors.push('no evidence.md: a change needs reviewed artifact and release-decision evidence');
+  else {
+    const content = readFileSync(markdown, 'utf8');
+    if (!content.startsWith(`# Evidence for ${delta.id}`)) errors.push('evidence.md title does not match delta id');
+    for (const heading of ['Artifact Register', 'Change Traceability', 'Release Decision']) if (!new RegExp(`^## ${heading}$`, 'm').test(content)) errors.push(`evidence.md is missing ## ${heading}`);
+    if (!EVIDENCE_STATUS.test(content)) errors.push('evidence.md status must be Approved or Conditional before verification');
+  }
+  if (!existsSync(manifestFile)) return { errors: [...errors, 'no evidence.json: a change needs explicit artifact links'], warnings, passes, artifacts };
+  let manifest;
+  try { manifest = readJson(manifestFile); } catch (error) { return { errors: [...errors, `evidence.json is not valid JSON: ${error.message}`], warnings, passes, artifacts }; }
+  if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) errors.push('evidence.json must be an object');
+  if (manifest?.schemaVersion !== 1) errors.push('evidence.json schemaVersion must be 1');
+  if (!Array.isArray(manifest?.artifacts) || !manifest.artifacts.length) errors.push('evidence.json needs at least one linked reviewed artifact');
+  const changed = changedRequirementIds(delta);
+  const afterRequirements = after?.requirements ?? [];
+  const removedRequirements = (delta.removed ?? []).map((entry) => entry.target).filter(Boolean);
+  const known = new Set([...afterRequirements, ...removedRequirements].map((requirement) => requirement.id));
+  const covered = new Set();
+  const seen = new Set();
+  for (const [index, entry] of (manifest?.artifacts ?? []).entries()) {
+    const label = `evidence.json artifacts[${index}]`;
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) { errors.push(`${label} must be an object`); continue; }
+    if (!ARTIFACTS[entry.kind]) { errors.push(`${label}.kind is not a known VLD artifact type`); continue; }
+    const file = evidenceFile(projectDir, entry.file);
+    if (!file) { errors.push(`${label}.file must be a Markdown path inside the project`); continue; }
+    const signature = `${entry.kind}:${file}`;
+    if (seen.has(signature)) { errors.push(`${label} repeats ${entry.kind} at ${entry.file}`); continue; }
+    seen.add(signature);
+    if (!Array.isArray(entry.requirements) || !entry.requirements.length || entry.requirements.some((id) => typeof id !== 'string' || !/^REQ-\d{3}$/.test(id))) {
+      errors.push(`${label}.requirements must be a non-empty REQ-### list`); continue;
+    }
+    if (new Set(entry.requirements).size !== entry.requirements.length) { errors.push(`${label}.requirements must not repeat`); continue; }
+    for (const id of entry.requirements) {
+      if (!known.has(id)) errors.push(`${label}: ${id} is not a requirement in this change's before/after manifest`);
+      if (!changed.includes(id)) errors.push(`${label}: ${id} is not changed by this delta`);
+      covered.add(id);
+    }
+    const decisionId = entry.kind === 'architecture-decision' ? path.basename(file, '.md') : null;
+    try {
+      const requirementsOverride = entry.kind === 'qa-plan' ? afterRequirements : [...afterRequirements, ...removedRequirements];
+      const report = validateArtifact({ kind: entry.kind, projectDir, file, id: decisionId, requirementsOverride, strict: true });
+      artifacts.push({ kind: entry.kind, file: entry.file, requirements: entry.requirements, strictOk: report.strictOk });
+      for (const issue of report.errors) errors.push(`${label}: ${issue}`);
+      if (!report.strictOk && !report.errors.length) errors.push(`${label}: linked artifact has strict-validation warnings`);
+      for (const issue of report.warnings) warnings.push(`${label}: ${issue}`);
+      for (const id of entry.requirements) if (!report.requirements.includes(id)) errors.push(`${label}: linked artifact does not cite ${id}`);
+    } catch (error) { errors.push(`${label}: ${error.message}`); }
+  }
+  const missing = changed.filter((id) => !covered.has(id));
+  if (missing.length) errors.push(`evidence.json does not link changed requirement(s): ${missing.join(', ')}`);
+  if (!errors.length) passes.push(`${artifacts.length} reviewed artifact link(s) cover ${changed.length} changed requirement(s)`);
+  return { errors, warnings, passes, artifacts };
+}
+
+export function verifyChange(changeDir, { projectDir = '.' } = {}) {
   const errors = [];
   const warnings = [];
   const passes = [];
+  const project = path.resolve(projectDir);
 
   const deltaPath = path.join(changeDir, 'delta.json');
   if (!existsSync(deltaPath)) return { ok: false, errors: ['no delta.json in this change directory'], warnings, passes };
@@ -832,6 +934,10 @@ export function verifyChange(changeDir) {
       for (const requirement of after.requirements ?? []) {
         if (!(requirement.acceptance ?? []).length) errors.push(`spec.after.json: ${requirement.id} has no acceptance criteria`);
       }
+      const evidence = verifyEvidence({ changeDir, projectDir: project, delta, after });
+      errors.push(...evidence.errors);
+      warnings.push(...evidence.warnings);
+      passes.push(...evidence.passes);
       if (errors.length === 0) passes.push(`spec.after.json is consistent (${(after.requirements ?? []).length} requirements)`);
     } catch (error) {
       errors.push(`spec.after.json is not valid JSON: ${error.message}`);

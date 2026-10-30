@@ -113,13 +113,15 @@ A delta that only says what to add is a wish list. This one has four obligations
 | Output | What it forces you to face |
 | --- | --- |
 | `proposal.md` | The argument, the before/after, and the **blast radius**: areas touched, practices that enforce them, gates in the way, tests that become stray anchors |
+| `design.md` | Human-reviewed implementation decisions, alternatives, risks and rollback boundaries |
 | `tasks.md` | The work order: anchor first, then manifest, then gates, then probe |
-| `delta.json` | Machine-readable delta with base, impact and obligations |
-| `spec.after.json` | The resulting manifest, reviewable as a diff of intent before any code moves |
+| `evidence.md` + `evidence.json` | Human release/review narrative plus a deterministic register linking reviewed artifacts to every changed `REQ-` id; the register does **not** replace the delta or resulting manifest |
+| `delta.json` | Machine-readable delta with base, impact and obligations — the authoritative change intent |
+| `spec.after.json` | The resulting manifest, reviewable as a diff of intent before any code moves — the authoritative post-change requirements |
 
 Impact is classified (`patch` / `minor` / `major`), and removing a requirement that a practice enforces at your tier is flagged rather than silently allowed. Appended criteria keep their existing `AC-` identifiers, because anchors already cite them.
 
-When the change has shipped, `vld change archive changes/add-csv-export specs` folds the delta back into the profile as a `team` overlay, preserves the `REQ-` id your tests now anchor against, moves the change directory to `changes/archive/`, and recompiles. Running it twice produces the same bytes.
+Before archive, fill `evidence.md`, register reviewed artifact paths and affected `REQ-` ids in `evidence.json`, then run `vld change verify changes/add-csv-export --project .`. The verifier requires strict, module-locked artifact validation and coverage for every changed requirement. `vld change archive changes/add-csv-export specs` refuses incomplete evidence; once it passes, it folds the delta back into the profile as a `team` overlay, stores a compact evidence-link summary in change history, preserves the `REQ-` id your tests now anchor against, moves the change directory to `changes/archive/`, and recompiles. Running it twice produces the same bytes.
 
 ### `vld mcp` — stop pasting 34 files
 
@@ -485,7 +487,7 @@ factory/
     gate-runner.mjs    the gate checker shipped into every packet
   schema/
     spec.schema.json   the manifest contract
-  test/                178 tests: data integrity, planning, reproducibility, adoption,
+  test/                179 tests: data integrity, planning, reproducibility, adoption,
                        delta specs, overlays, gates, EARS, MCP protocol, routing & outcome evals
 profile.json           this repository's own profile
 specs/                 this repository's own compiled packet, guarded in CI
@@ -503,7 +505,7 @@ docs/                  research notes, authoring guide, stress test, landscape s
 ```
 
 ```bash
-npm test        # 178 tests
+npm test        # 179 tests
 npm run eval    # library health + packet specificity + 74-prompt routing + 24-task outcome calibration
 npm run stress  # 10 representative + 24 hostile ideas, and 6 refusals; scored on soundness
 npm run check   # lint + index + tests + verify + self-guard + gates + eval + stress

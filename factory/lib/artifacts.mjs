@@ -66,13 +66,13 @@ export function initArtifact({ kind, projectDir='.', packetDir=null, profilePath
   }
   mkdirSync(path.dirname(file),{recursive:true}); writeFileSync(file,content,'utf8'); return {project,kind,file,requirements:requirements.length,source};
 }
-export function validateArtifact({ kind, projectDir='.', packetDir=null, id=null, file=null, strict=false }) {
+export function validateArtifact({ kind, projectDir='.', packetDir=null, requirementsOverride=null, id=null, file=null, strict=false }) {
   const project=ensureProjectDir(projectDir), type=typeOrThrow(kind); requireVerifiedModules(project,[type.module]);
   const target=fileFor(project,kind,id,file), errors=[], warnings=[]; if(!existsSync(target)) return {ok:false,strictOk:false,file:target,errors:[`missing artifact: ${target}`],warnings,requirements:[]};
   const content=readFileSync(target,'utf8'); if(!content.startsWith(`# ${type.title === 'Architecture Decision' ? 'ADR:' : type.title}`)) errors.push('title does not match artifact type');
   for(const section of type.sections){ const body=headingBody(content,section); if(!body) errors.push(`missing or empty ## ${section}`); else if(body.length<20) warnings.push(`## ${section} is too thin`); }
   if(PLACEHOLDER.test(content)) warnings.push('contains an unfilled template placeholder'); if(DRAFT.test(content)) warnings.push('artifact status is still Draft, Proposed or Pending');
-  const requirements=packetRequirements(path.resolve(packetDir ?? path.join(project,'specs'))), known=new Set(requirements.map(r=>r.id)), referenced=links(content);
+  const requirements=Array.isArray(requirementsOverride) ? requirementsOverride : packetRequirements(path.resolve(packetDir ?? path.join(project,'specs'))), known=new Set(requirements.map(r=>r.id)), referenced=links(content);
   for(const req of referenced) if(!known.has(req)&&requirements.length) errors.push(`${req} is not in the packet`);
   if(requirements.length&&referenced.length===0) warnings.push('does not link to a packet requirement');
   if(kind==='qa-plan') { if(!requirements.length) errors.push('QA plan requires a compiled packet'); else { const missing=requirements.filter(r=>r.verify==='automated'&&!referenced.includes(r.id)).map(r=>r.id); if(missing.length) errors.push(`QA coverage is missing automated requirement(s): ${missing.join(', ')}`); } }

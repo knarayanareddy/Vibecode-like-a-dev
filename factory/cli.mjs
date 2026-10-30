@@ -57,7 +57,8 @@ Usage
                                      check a packet, optionally against code
   vld change <packet-dir> <change.json> -o <dir> [--apply] [--force] [--json]
                                      render a delta spec for a brownfield change
-  vld change verify <change-dir>     validate a change proposal
+  vld change verify <change-dir> [--project <dir>]
+                                     validate a change proposal, reviewed evidence links and resulting manifest
   vld change archive <change-dir> <packet-dir> [--profile <p>]
                                      fold an applied change into the profile's overlay stack
   vld change init <dir>              write change.json to fill in
@@ -454,6 +455,7 @@ function runChange() {
         console.log(`  overlay    ${displayPath(result.overlayPath)} ${result.changed.overlay ? '(written)' : '(unchanged)'}`);
         console.log(`  profile    ${displayPath(result.profilePath)} ${result.changed.profile ? `now lists ${result.overlayId}` : `already listed ${result.overlayId}`}`);
         console.log(`  history    ${displayPath(result.historyPath)}`);
+        console.log(`  evidence   ${result.evidence.artifacts} reviewed artifact link(s) archived from ${displayPath(result.evidence.file)}`);
         if (result.compiled) {
           console.log(`  recompiled ${result.compiled.requirements} requirements · ${result.compiled.gates} gates in ${displayPath(result.compiled.outDir)}`);
         }
@@ -468,7 +470,7 @@ function runChange() {
 
   if (first === 'verify') {
     if (!second) fail('Usage: vld change verify <change-dir>');
-    const report = verifyChange(second);
+    const report = verifyChange(second, { projectDir: option('--project', '.') });
     console.log(`\nchange verify · ${second}\n`);
     for (const pass of report.passes) console.log(`  ✓ ${pass}`);
     for (const warning of report.warnings) console.log(`  ! ${warning}`);
