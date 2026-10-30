@@ -429,4 +429,31 @@ dev = ["pytest>=8.0.0", "hypothesis>=6.100.0"]
   assert.ok(report.facts.tests.some((entry) => /pytest/.test(entry)), 'single-line dev optional-dependencies must detect pytest');
 });
 
+test('polyglot test tooling (Go *_test.go, PHP phpunit, Flutter flutter_test, Ruby rspec) and hyphen-prefixed compose images (cp-kafka) are detected', (t) => {
+  const goCli = fixture({
+    'go.mod': 'module github.com/acme/driftctl\n\ngo 1.23\n\nrequire github.com/spf13/cobra v1.8.1\n',
+    'cmd/driftctl/main.go': 'package main\nfunc main() {}\n',
+    'cmd/driftctl/main_test.go': 'package main\nimport "testing"\nfunc TestMain(t *testing.T) {}\n'
+  });
+  t.after(goCli.cleanup);
+
+  const goReport = adoptRepo(goCli.root);
+  assert.equal(goReport.profile.kind, 'cli');
+  assert.equal(goReport.profile.stage, 'mvp', 'cmd/driftctl/main_test.go must count as a test file');
+
+  const polyApp = fixture({
+    'mobile/pubspec.yaml': 'name: fieldmed\ndependencies:\n  flutter:\n    sdk: flutter\ndev_dependencies:\n  flutter_test:\n    sdk: flutter\n',
+    'mobile/lib/main.dart': 'void main() {}\n',
+    'api/composer.json': { require: { 'laravel/framework': '^11.0' }, 'require-dev': { 'phpunit/phpunit': '^11.0' } },
+    'compose.prod.yaml': 'services:\n  broker:\n    image: confluentinc/cp-kafka:7.6.1\n'
+  });
+  t.after(polyApp.cleanup);
+
+  const polyReport = adoptRepo(polyApp.root);
+  assert.ok(polyReport.profile.traits.includes('background-jobs'), 'confluentinc/cp-kafka must infer background-jobs');
+  assert.ok(polyReport.facts.deploy.includes('compose.prod.yaml'), 'compose.prod.yaml must count as deployment configuration');
+  assert.ok(polyReport.facts.tests.some((entry) => /flutter_test|phpunit/.test(entry)), 'flutter_test/phpunit dev tooling must be detected');
+});
+
+
 
