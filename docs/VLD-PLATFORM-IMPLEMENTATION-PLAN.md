@@ -1,9 +1,9 @@
 # VLD Platform implementation plan
 
-**Status:** Active implementation plan. Phases 1–3, the safe M4 adapter-host foundation and the closed M5 candidate/review foundation are implemented in VLD 0.15.0: mission authority, manual worktree safety, optional local Runtime state, deterministic fake runs, a constrained read-only direct-argv local-process adapter, exact candidate receipt identity, detached packet integration and independent local review/queue receipts. A write-capable sandbox adapter, ACP transport, project command verifier, merge manager, Studio, GitHub integration and signed catalog are still unimplemented.
+**Status:** Active implementation plan. Phases 1–3, the safe M4 adapter-host foundation, the closed M5 candidate/review foundation and an M6 local Studio foundation are implemented in VLD 0.16.0: mission authority, manual worktree safety, optional local Runtime state, deterministic fake runs, a constrained read-only direct-argv local-process adapter, exact candidate receipt identity, detached packet integration, independent local review/queue receipts, and a CSP-protected local Runtime dashboard/VS Code command entry. A write-capable sandbox adapter, ACP transport, project command verifier, merge manager, full approval/store surfaces, GitHub integration and signed catalog are still unimplemented.
 
 **Companion research:** [PLATFORM-EXPANSION-RESEARCH.md](PLATFORM-EXPANSION-RESEARCH.md)
-**Current baseline:** VLD 0.15.0, deterministic Core with packets, gates, evidence, typed workflows, locked modules/stores, agent handoffs, MCP, bounded exports, versioned mission/workspace foundations, a recovery-aware local Runtime ledger/API, an opt-in M4 adapter host and an M5 no-merge local candidate/review host with no Core execution dependency.
+**Current baseline:** VLD 0.16.0, deterministic Core with packets, gates, evidence, typed workflows, locked modules/stores, agent handoffs, MCP, bounded exports, versioned mission/workspace foundations, a recovery-aware local Runtime ledger/API, an opt-in M4 adapter host, an M5 no-merge local candidate/review host and an M6 local Runtime client with no Core execution dependency.
 
 
 ## Implementation progress
@@ -14,7 +14,8 @@
 - [x] **M3 local Runtime host:** `runtime init|status|allocate|heartbeat|transition|recover|serve` owns versioned fake-run state, policy digest, leases, expected versions, receipts and a bearer-protected loopback API. It has policy/role/lease/recovery/API/public-CLI tests and no execution authority. [ADR-0005](adr/0005-local-runtime-host-and-fake-run-state.md) defines the trust boundary.
 - [x] **M4 adapter-host foundation:** `runtime agent run|status` has a deterministic fake adapter and a strictly policy-declared direct-argv local process adapter. It verifies an M2 workspace plus M3 lease, owns transitions/receipts, excludes parent credentials and retains only redacted output. [ADR-0006](adr/0006-scoped-agent-adapter-host.md) records why unsandboxed local processes are read-only.
 - [x] **M5 candidate/review foundation:** `runtime delivery submit|verify|approve|queue|status` freezes exact branch/base/target/packet/policy identities, uses a Runtime-locked detached integration worktree for only an in-process packet check, and writes independent review/queue receipts. It has no project-command, merge, push, PR, forge or credential authority. [ADR-0007](adr/0007-frozen-candidates-and-no-merge-m5-foundation.md) records the boundary.
-- [ ] **Sandbox / ACP / merge onward:** a write-capable sandbox adapter, ACP transport, project verifier, merge lane manager, Studio, GitHub integration and catalog remain intentionally unimplemented until their preceding phase gates below are completed.
+- [x] **M6 local Studio foundation:** `studio serve` and Runtime `/studio` provide a static, accessible mission/receipt dashboard through the existing authenticated loopback API; a VS Code command entry opens the dashboard or a read-only inspector. The UI has no Git/agent/shell/merge/forge authority and retains no token. [ADR-0008](adr/0008-local-studio-is-a-runtime-client.md) records the boundary.
+- [ ] **Sandbox / ACP / merge onward:** a write-capable sandbox adapter, ACP transport, project verifier, merge lane manager, full approval/store Studio surfaces, GitHub integration and catalog remain intentionally unimplemented until their preceding phase gates below are completed.
 
 ## 1. Objective and success definition
 
@@ -493,41 +494,41 @@ Deliver the interactive one-stop surface over Runtime's local API. Studio displa
 
 ### 9.2 UX scope checklist
 
-- [ ] Add a VS Code activity-bar view or command entry point for VLD Studio.
-- [ ] Add a read-only packet/requirements view showing packet digest, selected policies, status and direct file links.
-- [ ] Add a mission board showing package state, dependencies, resource-claim warnings, current worktree, agent/run identity and lease health.
-- [ ] Add a run inspector with structured events, bounded/redacted logs, command/check status and clear blocked/error causes.
-- [ ] Add approval UI that displays precisely requested privilege/candidate/target digest and requires an explicit operator decision/reason when policy requires it.
-- [ ] Add evidence/review view joining `REQ-` IDs, candidate SHA, gate results, artifact coverage and reviewer receipt.
-- [ ] Add merge queue view showing target movement, queue order, verification status and forge link where available.
-- [ ] Add store/catalog view that reuses existing diff/acknowledgement semantics; it must never hide source digest or force update.
-- [ ] Provide a browser dashboard using the same Runtime API/authorization model, not a parallel backend.
-- [ ] Support accessibility basics: keyboard traversal, focus management, readable status text and non-color-only state.
-- [ ] Display degraded/read-only state clearly when Runtime is absent; preserve existing CLI workflows.
+- [x] Add a VS Code command entry point for VLD Studio: open the exact local dashboard URL or a read-only Runtime inspector (M6 foundation).
+- [x] Add a read-only packet/requirements view showing packet digest, Core policy digest, current/stale state and package requirement IDs (M6 foundation; browser file links remain deliberately unavailable).
+- [x] Add a mission board showing package state, dependencies, resource claims, agent/run identity, lease health and blocked cause (M6 foundation; raw worktree paths remain intentionally hidden).
+- [x] Add a run inspector for bounded/redacted adapter summaries and candidate/verification/review/queue receipt identities (M6 foundation; project command checks are not available).
+- [ ] Add approval UI that displays precisely requested privilege/candidate/target digest and requires an explicit operator decision/reason when policy requires it (deferred until a typed Runtime approval endpoint and policy inputs exist).
+- [x] Add an evidence/review view joining package `REQ-` IDs with candidate/verification/review/queue receipt SHA/digest identities (M6 foundation; artifact coverage remains deferred).
+- [x] Add a local queue/verification projection from Runtime delivery receipts (M6 foundation; target movement, ordering and forge links require later merge/provider work).
+- [ ] Add store/catalog view that reuses existing diff/acknowledgement semantics; it must never hide source digest or force update (deferred).
+- [x] Provide a browser dashboard from the same loopback Runtime process and authenticated `/v1/runtime` API, not a parallel backend.
+- [x] Support accessibility basics: native keyboard controls, visible focus styling, readable state/blocked text and non-color-only status (M6 foundation).
+- [x] Display disconnected/degraded state clearly while preserving all existing CLI workflows (M6 foundation).
 
 ### 9.3 Studio security checklist
 
-- [ ] Studio obtains Runtime connection information/token through a local trusted channel; tokens are never embedded in committed workspace configuration or WebView HTML.
-- [ ] WebView uses a strict content-security policy, nonce-based scripts and narrow message validation.
-- [ ] Studio never executes Git/agent commands directly; it asks Runtime to evaluate a typed request.
-- [ ] Studio never renders agent/model output as trusted HTML; sanitize/escape all content.
-- [ ] Browser dashboard is loopback-only in local mode, validates Origin and has no permissive CORS wildcard.
-- [ ] Privileged buttons always display the exact action and policy effect; disable actions that Runtime says are unauthorized.
+- [x] Studio gets the Runtime URL/token through a local manual channel; the one-time token is never embedded in project configuration, browser/WebView HTML, URL, storage or logs (M6 foundation).
+- [x] Browser dashboard and VS Code WebView use a strict CSP with nonce scripts; the WebView accepts only a closed `refresh` postMessage schema (M6 foundation).
+- [x] Studio never executes Git/agent commands directly; its two enabled controls request only existing typed Runtime `allocate`/`recover` operations (M6 foundation).
+- [x] Browser and WebView render Runtime/agent/receipt strings as text nodes, never trusted HTML (M6 foundation).
+- [x] Browser dashboard is served by the existing loopback-only Runtime process, retains Origin checks and has no CORS wildcard (M6 foundation).
+- [x] Enabled buttons name the typed action and are disabled from Runtime-provided advisory capabilities; Runtime independently authorizes every request (M6 foundation).
 
 ### 9.4 Extensive test checklist
 
 **UI unit/contract**
 
-- [ ] Test rendering of every package state, blocked reason, missing Runtime, stale packet and revoked token response.
-- [ ] Test client request encoding against Runtime JSON fixtures and all stable error codes.
-- [ ] Test a UI cannot create a transition that Runtime rejects; UI should refresh from authoritative state.
-- [ ] Test requirement/candidate/receipt trace links point to the exact IDs/SHAs, including long values and missing/deleted paths.
+- [x] Test dashboard projection for mission/package/receipt fields, blocked causes and disconnected/error handling through unit/Runtime API fixtures (M6 foundation); exhaustive package-state visual fixtures remain to add.
+- [x] Test browser action encoding through the existing typed Runtime API and Runtime rejection of an unauthorized transition (M6 foundation); all stable error fixtures remain to add.
+- [x] Test the dashboard has no transition primitive and Runtime rejects an operator transition that policy forbids (M6 foundation).
+- [x] Test requirement/candidate/receipt projections preserve their exact identifiers via Runtime status rendering (M6 foundation); long/missing-path fixtures remain to add.
 
 **WebView/browser security**
 
-- [ ] Test escaping of hostile agent output including HTML, script tags, markdown links, Unicode controls and fake approval text.
-- [ ] Test Content Security Policy, rejected unknown `postMessage` messages and token non-disclosure in logs/UI errors.
-- [ ] Test loopback Origin/CORS behavior from an unauthorized browser origin.
+- [x] Test static browser renderer excludes HTML sinks and uses text nodes; hostile-output corpus fixtures remain to add (M6 foundation).
+- [x] Test CSP, rejected unknown VS Code postMessage messages and no token/project-path disclosure in the served page (M6 foundation).
+- [x] Test loopback Runtime rejects an unauthorized browser Origin for both API and Studio routes (M6 foundation).
 
 **End-to-end**
 
