@@ -206,6 +206,15 @@ jobs:
           test -n "$runtime_lease"
           "$vld" runtime status missions/packed-mission/mission.json --project "$project"
 
+          # M4's deterministic fake adapter requires the same explicit M2
+          # worktree and M3 lease. Keep the lease in shell memory, not CI output.
+          "$vld" workspace create missions/packed-mission/mission.json packet-work --project "$project" > /dev/null
+          cat > "$project/agent-policy.json" <<'EOF'
+          {"schemaVersion":1,"id":"packed-fake-policy","adapter":"fake","mode":"write-workspace","capabilities":{"readWorkspace":true,"writeWorkspace":true,"runDeclaredCommands":false,"network":false,"streamEvents":true,"cancel":true,"reconnect":true,"sandbox":true,"credentialAccess":false,"gitPush":false,"gitMerge":false},"limits":{"durationMs":1000,"outputBytes":1024,"retryBudget":0},"environment":{},"command":{"script":"succeed","executable":null,"args":[]}}
+          EOF
+          "$vld" runtime agent run missions/packed-mission/mission.json packet-work --policy agent-policy.json --lease-token "$runtime_lease" --project "$project" > /dev/null
+          "$vld" runtime agent status missions/packed-mission/mission.json --project "$project"
+
           printf '%s\n' '<!-- refreshed -->' >> "$work/store/product-brief.md"
           git -C "$work/store" add .
           git -C "$work/store" commit -qm refresh

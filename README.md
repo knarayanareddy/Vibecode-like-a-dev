@@ -210,7 +210,8 @@ vld workflow run discovery --execute
 | **Shared stores** | Pin advisory Markdown and typed artifact templates from Git | `diff` fetches a validated candidate without mutating the project; an update requires the exact reviewed 40-character commit acknowledgement, records it in the lock, and cannot affect compiler or workflow state. |
 | **Interoperability exports** | Bounded Spec Kit and Kiro layouts from a compiled packet | Generated one-way views carry source digest/provenance and state plainly that packet/change manifests remain authoritative. |
 | **Manual workspaces** | One Git worktree/branch for each frozen mission package | Repository-wide exclusive lock, sibling managed root, current-mission gate and recovery-aware cleanup; this is not an agent executor or merge-conflict guarantee. |
-| **Local Runtime** | Durable fake-run lifecycle, leases and receipts for a frozen mission | Versioned ledger/snapshot, expected versions, idempotency, loopback-only API and strict no-process/no-network/no-credential policy; no agent is launched. |
+| **Local Runtime state** | Durable lifecycle, leases and receipts for a frozen mission | Versioned ledger/snapshot, expected versions, idempotency and loopback-only API; it has no implicit process/model/network/credential authority. |
+| **Scoped adapter host** | Deterministic fake runs and one explicit read-only local argv | Separate closed policy, healthy M2 workspace + M3 lease gate, clean environment, output redaction and host-owned receipt; no shell, push, merge, candidate or sandbox-write claim. |
 
 The result is one repository and one `vld` CLI, while the packet remains portable and small. Use the agent-facing modules where they help; use the compiler and generated gates as the authority. See [ADR-0002](docs/adr/0002-optional-platform-extensions.md) for the extension boundary and security model. For the researched, future VLD Platform path—Studio, mission runtime, agent scheduler, merge queue and signed catalog—see [the platform expansion study](docs/PLATFORM-EXPANSION-RESEARCH.md) and [implementation plan](docs/VLD-PLATFORM-IMPLEMENTATION-PLAN.md).
 
@@ -269,7 +270,7 @@ The allocation ledger is `.vld/workspaces.json`; each repository's Git common di
 
 ### Local Runtime — durable fake-run state before agents exist
 
-The optional Runtime owns a versioned event ledger, derived snapshot, expected package versions, bounded leases and receipts. It starts from the same current frozen mission, but it does **not** allocate a worktree, invoke an agent/model, execute a command, access a credential, contact a service, push or merge. Runtime state stays local and ignored under `.vld/runtime/`; the packet and mission declaration remain reviewable authority.
+The optional Runtime owns a versioned event ledger, derived snapshot, expected package versions, bounded leases and receipts. Its M3 state commands do **not** allocate a worktree, invoke an agent/model, execute a command, access a credential, contact a service, push or merge. Runtime state stays local and ignored under `.vld/runtime/`; the packet and mission declaration remain reviewable authority. The separately explicit M4 adapter command below is the only process surface.
 
 ```bash
 # Initialize host-owned state. Packages without dependencies begin ready.
@@ -288,6 +289,23 @@ vld runtime recover missions/report-export/mission.json --project .
 ```
 
 The fixed M3 policy denies network, process execution, Git push/merge and credential access. The host validates the lifecycle (`ready → allocated → running → changes_ready → verifying → in_review → approved → queued → merged`), roles, independent review, expected version and lease token before a receipt is appended. The loopback JSON API requires a bearer token, caps request bodies and rejects non-loopback browser Origins. Actor identities are deterministic local/fake identities in M3—not an agent adapter or external human authentication system. See [ADR-0005](docs/adr/0005-local-runtime-host-and-fake-run-state.md) for boundaries and recovery semantics.
+
+### Scoped adapter host — explicit fake or read-only local process
+
+M4 adds a separate, opt-in `runtime agent` surface. It requires **both** an M3 allocation/lease and an existing healthy M2 worktree. A reviewed, closed JSON policy selects either a deterministic process-free `fake` adapter or one exact `local-process` executable/argv. The Runtime, not the adapter, moves the package to `running`, writes a digest-linked/redacted receipt, then advances a successful run to `changes_ready` or blocks an unsuccessful run.
+
+```bash
+# First allocate the worktree and M3 package as above, then author/review a policy
+# inside the project. This fake policy launches no host process.
+cat > agent-policy.json <<'EOF'
+{"schemaVersion":1,"id":"fake-review","adapter":"fake","mode":"write-workspace","capabilities":{"readWorkspace":true,"writeWorkspace":true,"runDeclaredCommands":false,"network":false,"streamEvents":true,"cancel":true,"reconnect":true,"sandbox":true,"credentialAccess":false,"gitPush":false,"gitMerge":false},"limits":{"durationMs":1000,"outputBytes":1024,"retryBudget":0},"environment":{},"command":{"script":"succeed","executable":null,"args":[]}}
+EOF
+vld runtime agent run missions/report-export/mission.json export-api \
+  --policy agent-policy.json --lease-token "$LEASE_TOKEN" --project .
+vld runtime agent status missions/report-export/mission.json --project .
+```
+
+`local-process` has no shell, PATH lookup or inherited environment; it gets only a fresh non-secret locale allowlist and VLD-derived IDs. A process CWD is **not** a sandbox, so this release rejects write-capable local-process policies rather than claiming a coding agent is confined. Fake runs are the deterministic CI path; a future sandbox adapter must prove filesystem/process/network isolation before VLD can grant process writes. Neither adapter can submit a candidate, verify project checks, approve, push, merge, open a PR or change policy. See [ADR-0006](docs/adr/0006-scoped-agent-adapter-host.md).
 
 ## What you get
 
@@ -630,7 +648,8 @@ Shipped in v0.6–v0.9: locked capability modules and bundles, agent handoffs, t
 Shipped in v0.10: a packed-install CI journey, reviewable Git-store refresh previews with exact-commit acknowledgement, and bounded `spec-kit` / `kiro` exports from a verified packet.
 Shipped in v0.11: versioned `vld mission init|validate|status`, which freezes a verified packet, Core-policy digest and immutable Git target into complete requirement-linked work packages without starting an agent or changing Git state.
 Shipped in v0.12: `vld workspace create|status|recover|remove`, a manually operated, repository-serialized Git worktree allocator derived only from a current frozen mission. It uses a sibling managed root, atomic recovery-aware locking and exact acknowledged discard; it does not add model/process execution, push, merge or GitHub integration.
-Shipped in v0.13: optional `vld runtime` host state for a frozen mission: versioned JSONL receipts plus an atomically checked snapshot, leases, role/version/idempotency validation, expiry recovery and a bearer-protected loopback API. It deliberately has no agent/process adapter, command execution, network egress, credential lookup, push, merge, PR or GitHub/ACP integration.
+Shipped in v0.13: optional `vld runtime` host state for a frozen mission: versioned JSONL receipts plus an atomically checked snapshot, leases, role/version/idempotency validation, expiry recovery and a bearer-protected loopback API.
+Shipped in v0.14: `vld runtime agent run|status`, with deterministic fake runs and a policy-declared, direct-argv read-only local-process adapter. The host requires an M2 workspace and M3 lease, never inherits parent credentials, redacts output/path data and retains host-owned receipts. It deliberately does not claim CWD confinement as a write sandbox, and has no candidate, verification, review, push, merge, PR or GitHub/ACP integration.
 
 1. **Published live-agent comparison runs** — use the optional protocol above across Claude Code, Codex and open-weight coding agents, preserving raw JSON logs and configuration notes; do not treat an export as a competing source of requirements.
 2. **`vld change --quick`** — for one-line changes that do not deserve a delta: an explicit, labelled path with no probe, for teams that accept the trade.
