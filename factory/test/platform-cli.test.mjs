@@ -146,6 +146,16 @@ test('public mission journey freezes a packet/target and reports stale target st
   assert.equal(workspaceRemoved.code, 0, workspaceRemoved.stderr);
   assert.equal(existsSync(allocation.worktree), false);
 
+  const runtimeInitialized = await cli(['runtime', 'init', 'missions/report-export/mission.json', '--project', project, '--json']);
+  assert.equal(runtimeInitialized.code, 0, runtimeInitialized.stderr);
+  assert.equal(JSON.parse(runtimeInitialized.stdout).status.packages[0].state, 'ready');
+  const runtimeAllocated = await cli(['runtime', 'allocate', 'missions/report-export/mission.json', 'export-api', '--assignee', 'agent-alpha', '--project', project, '--json']);
+  assert.equal(runtimeAllocated.code, 0, runtimeAllocated.stderr);
+  assert.match(JSON.parse(runtimeAllocated.stdout).leaseToken, /^lease-/);
+  const runtimeState = await cli(['runtime', 'status', 'missions/report-export/mission.json', '--project', project, '--json']);
+  assert.equal(runtimeState.code, 0, runtimeState.stderr);
+  assert.equal(JSON.parse(runtimeState.stdout).packages[0].state, 'allocated');
+
   writeFileSync(path.join(project, 'README.md'), '# next target\n');
   execFileSync('git', ['add', 'README.md'], { cwd: project });
   execFileSync('git', ['commit', '-qm', 'target moved'], { cwd: project });

@@ -24,6 +24,8 @@ import { enableModules, listModules, moduleStatus } from './lib/modules.mjs';
 import { createMission, missionStatus, readMission, validateMission } from './lib/missions.mjs';
 import { addStore, copyStoreAsset, initStore, previewStoreRefresh, readStoreState, refreshStore, storeStatus } from './lib/stores.mjs';
 import { createWorkspace, recoverWorkspaces, removeWorkspace, workspaceStatus } from './lib/workspaces.mjs';
+import { allocateRuntimePackage, heartbeatRuntimeLease, initializeRuntime, recoverRuntime, runtimeStatus, transitionRuntimePackage } from './lib/runtime.mjs';
+import { createRuntimeServer, listenRuntimeServer } from './lib/runtime-server.mjs';
 import { buildPlan, loadPolicy } from './lib/planner.mjs';
 import { loadProfile, KINDS, STAGES, SCALES, TRAITS, RISK_FLAGS } from './lib/profile.mjs';
 import { completeWorkflowStep, getWorkflow, listWorkflows, runWorkflow, workflowStatus } from './lib/workflows.mjs';
@@ -43,7 +45,8 @@ const option = (name, fallback) => {
 };
 const VALUE_FLAGS = new Set([
   '-o', '--out', '--repo', '--name', '--idea', '--profile', '--packet',
-  '--project', '--modules', '--evidence', '--file', '--ref', '--title', '--from-store', '--types', '--acknowledge', '--target'
+  '--project', '--modules', '--evidence', '--file', '--ref', '--title', '--from-store', '--types', '--acknowledge', '--target',
+  '--assignee', '--lease-ms', '--run', '--lease-token', '--to', '--actor', '--expected-version', '--port', '--token'
 ]);
 const positional = rest.filter((item, index) => !item.startsWith('-') && !(index > 0 && VALUE_FLAGS.has(rest[index - 1])));
 
@@ -86,6 +89,12 @@ Usage
   vld workspace status|recover <mission.json> [--project <dir>] [--json]
   vld workspace remove <mission.json> <package> [--discard --acknowledge <workspace-id>] [--project <dir>]
                                      allocate, inspect, reconcile or safely remove one Git worktree; no agent is run
+  vld runtime init|status|recover <mission.json> [--project <dir>] [--json]
+  vld runtime allocate <mission.json> <package> --assignee <implementer-id> [--lease-ms <ms>] [--project <dir>] [--json]
+  vld runtime heartbeat <mission.json> <package> --run <run-id> --lease-token <token> --actor implementer:<id> [--lease-ms <ms>]
+  vld runtime transition <mission.json> <package> --to <state> --actor <role:id> --expected-version <n> [--lease-token <token>]
+  vld runtime serve <mission.json> [--port <0-65535>] [--token <local-token>] [--project <dir>]
+                                     optional loopback-only host state, leases and fake-run receipts; never starts an agent
   vld mcp                            run the MCP server over stdio
   vld index [--check]                rebuild primitives/index.json
 
@@ -1073,6 +1082,121 @@ function runWorkspace() {
   }
 }
 
+function runtimeActor(value, fallback = null) {
+  if (!value && fallback) return fallback;
+  if (typeof value !== 'string') fail('runtime actor must use role:id');
+  const match = /^([a-z-]+):([a-z0-9][a-z0-9-]{1,60})$/.exec(value);
+  if (!match) fail('runtime actor must use role:id with lowercase kebab-case id');
+  return { role: match[1], id: match[2] };
+}
+
+function integerOption(name, fallback = null) {
+  const value = option(name, fallback === null ? null : String(fallback));
+  if (value === null || value === undefined) return null;
+  if (!/^\d+$/.test(value)) fail(`${name} must be a non-negative integer`);
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) fail(`${name} is outside the supported integer range`);
+  return parsed;
+}
+
+function printRuntimeReport(action, report) {
+  console.log(`\nruntime ${action} · ${report.runtime?.missionId ?? report.mission?.id ?? ''}\n`);
+  for (const workPackage of report.packages ?? []) {
+    console.log(`  ${workPackage.id.padEnd(20)} ${workPackage.state.padEnd(15)} v${workPackage.version}${workPackage.lease ? ` · lease until ${workPackage.lease.expiresAt}` : ''}`);
+  }
+  for (const warning of report.warnings ?? []) console.log(`  ! ${warning}`);
+  if (report.recovered) {
+    for (const id of report.recovered.expiredLeases ?? []) console.log(`  ! expired lease blocked ${id}`);
+    if (report.recovered.pending?.action) console.log(`  ✓ ${report.recovered.pending.action}`);
+    if (report.recovered.lock) console.log(`  ✓ removed stale lock for pid ${report.recovered.lock.pid ?? 'unknown'}`);
+  }
+  console.log(`\n${report.ok === false ? 'FAIL' : 'PASS'}\n`);
+}
+
+function runRuntime() {
+  const [action, missionFile, packageId] = positional;
+  const project = option('--project', '.');
+  const json = hasFlag('--json');
+  try {
+    if (action === 'init') {
+      if (!missionFile) fail('Usage: vld runtime init <mission.json> [--project <dir>]');
+      const result = initializeRuntime({ missionFile, projectDir: project });
+      if (json) console.log(JSON.stringify({ ok: true, ...result }, null, 2));
+      else printRuntimeReport(result.changed ? 'init' : 'init (already initialized)', result.status);
+      return;
+    }
+    if (action === 'status') {
+      if (!missionFile) fail('Usage: vld runtime status <mission.json> [--project <dir>]');
+      const result = runtimeStatus({ missionFile, projectDir: project });
+      if (json) console.log(JSON.stringify(result, null, 2));
+      else printRuntimeReport('status', result);
+      process.exit(result.ok ? 0 : 1);
+    }
+    if (action === 'allocate') {
+      if (!missionFile || !packageId) fail('Usage: vld runtime allocate <mission.json> <package> --assignee <implementer-id> [--lease-ms <ms>]');
+      const assignee = option('--assignee', null);
+      if (!assignee) fail('runtime allocate requires --assignee <implementer-id>');
+      const leaseMs = integerOption('--lease-ms', 5 * 60 * 1_000);
+      const result = allocateRuntimePackage({ missionFile, projectDir: project, packageId, assignee: { role: 'implementer', id: assignee }, leaseMs });
+      if (json) console.log(JSON.stringify({ ok: true, ...result }, null, 2));
+      else {
+        printRuntimeReport('allocate', result.status);
+        console.log(`  run       ${result.allocation.run.id}`);
+        console.log(`  lease     ${result.allocation.lease.id}`);
+        console.log(`  token     ${result.leaseToken}\n`);
+        console.log('Store this one-time lease token securely; it is not persisted in the Runtime ledger.\n');
+      }
+      return;
+    }
+    if (action === 'heartbeat') {
+      if (!missionFile || !packageId) fail('Usage: vld runtime heartbeat <mission.json> <package> --run <run-id> --lease-token <token> --actor implementer:<id>');
+      const runId = option('--run', null); const leaseToken = option('--lease-token', null);
+      if (!runId || !leaseToken) fail('runtime heartbeat requires --run and --lease-token');
+      const actor = runtimeActor(option('--actor', null));
+      const result = heartbeatRuntimeLease({ missionFile, projectDir: project, packageId, runId, leaseToken, actor, leaseMs: integerOption('--lease-ms', 5 * 60 * 1_000) });
+      if (json) console.log(JSON.stringify({ ok: true, ...result }, null, 2));
+      else printRuntimeReport('heartbeat', result.status);
+      return;
+    }
+    if (action === 'transition') {
+      if (!missionFile || !packageId) fail('Usage: vld runtime transition <mission.json> <package> --to <state> --actor <role:id> --expected-version <n> [--lease-token <token>]');
+      const to = option('--to', null);
+      if (!to) fail('runtime transition requires --to <state>');
+      const actor = runtimeActor(option('--actor', null));
+      const expectedVersion = integerOption('--expected-version', null);
+      if (expectedVersion === null) fail('runtime transition requires --expected-version <n>');
+      const result = transitionRuntimePackage({ missionFile, projectDir: project, packageId, to, actor, expectedVersion, leaseToken: option('--lease-token', null) });
+      if (json) console.log(JSON.stringify({ ok: true, ...result }, null, 2));
+      else printRuntimeReport('transition', result.status);
+      return;
+    }
+    if (action === 'recover') {
+      if (!missionFile) fail('Usage: vld runtime recover <mission.json> [--project <dir>]');
+      const result = recoverRuntime({ missionFile, projectDir: project });
+      if (json) console.log(JSON.stringify(result, null, 2));
+      else printRuntimeReport('recover', result);
+      process.exit(result.ok ? 0 : 1);
+    }
+    if (action === 'serve') {
+      if (!missionFile) fail('Usage: vld runtime serve <mission.json> [--port <0-65535>] [--token <local-token>] [--project <dir>]');
+      const token = option('--token', null);
+      const identities = token ? { [token]: { role: 'operator', id: 'local-operator' } } : undefined;
+      const { server, tokens } = createRuntimeServer({ missionFile, projectDir: project, identities });
+      listenRuntimeServer(server, { host: '127.0.0.1', port: integerOption('--port', 0) })
+        .then((address) => {
+          const operatorToken = tokens.find((entry) => entry.actor.role === 'operator');
+          console.error(`VLD Runtime API · http://${address.host}:${address.port}/v1/runtime · loopback only`);
+          console.error(`Local operator token (shown once): ${operatorToken.token}`);
+        })
+        .catch((error) => fail(error.message));
+      return;
+    }
+    fail('Usage: vld runtime init|status|allocate|heartbeat|transition|recover|serve <mission.json> [package]');
+  } catch (error) {
+    fail(error.message);
+  }
+}
+
 function runMcp() {
   import('./lib/mcp.mjs').then(({ serve, TOOLS }) => {
     console.error(`vibecode-like-a-dev MCP server · ${TOOLS.length} tools · stdio`);
@@ -1134,6 +1258,9 @@ switch (command) {
     break;
   case 'workspace':
     runWorkspace();
+    break;
+  case 'runtime':
+    runRuntime();
     break;
   case 'mcp':
     runMcp();

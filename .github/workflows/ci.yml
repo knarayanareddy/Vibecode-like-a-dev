@@ -198,6 +198,14 @@ jobs:
           "$vld" workspace status missions/packed-mission/mission.json --project "$project"
           "$vld" workspace remove missions/packed-mission/mission.json packet-work --project "$project"
 
+          # M3 owns fake-run receipts/leases only. This proves the packed CLI can
+          # initialize and inspect Runtime state without launching an agent/process.
+          "$vld" runtime init missions/packed-mission/mission.json --project "$project"
+          runtime_lease=$("$vld" runtime allocate missions/packed-mission/mission.json packet-work --assignee packed-implementer --project "$project" --json \
+            | node -e 'let input="";process.stdin.on("data",part=>input+=part).on("end",()=>process.stdout.write(JSON.parse(input).leaseToken))')
+          test -n "$runtime_lease"
+          "$vld" runtime status missions/packed-mission/mission.json --project "$project"
+
           printf '%s\n' '<!-- refreshed -->' >> "$work/store/product-brief.md"
           git -C "$work/store" add .
           git -C "$work/store" commit -qm refresh

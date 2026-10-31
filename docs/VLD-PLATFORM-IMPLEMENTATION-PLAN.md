@@ -1,17 +1,18 @@
 # VLD Platform implementation plan
 
-**Status:** Active implementation plan. The Phase 1 mission foundation and Phase 2 manual worktree safety foundation are implemented in VLD 0.12.0. No Mission Runtime, scheduler, process/model adapter, merge manager, Studio, GitHub integration or signed catalog is implemented.
+**Status:** Active implementation plan. Phases 1–3 are implemented in VLD 0.13.0: mission authority, manual worktree safety, and an optional local fake-run Runtime host. No agent/process/model adapter, candidate verifier, merge manager, Studio, GitHub/ACP integration or signed catalog is implemented.
 
 **Companion research:** [PLATFORM-EXPANSION-RESEARCH.md](PLATFORM-EXPANSION-RESEARCH.md)
-**Current baseline:** VLD 0.12.0, deterministic Core with packets, gates, evidence, typed workflows, locked modules/stores, agent handoffs, MCP, bounded exports, versioned mission declarations and recovery-aware manual Git workspace allocation.
+**Current baseline:** VLD 0.13.0, deterministic Core with packets, gates, evidence, typed workflows, locked modules/stores, agent handoffs, MCP, bounded exports, versioned mission/workspace foundations and a recovery-aware local Runtime ledger/API with no execution authority.
 
 
 ## Implementation progress
 
-- [x] **M0 boundary:** [ADR-0003](adr/0003-mission-foundation-and-runtime-boundary.md) records the Core/mission boundary: mission commands are fixed-argv/read-only with respect to Git and never run an agent, model or Runtime.
+- [x] **M0 boundary:** [ADR-0003](adr/0003-mission-foundation-and-runtime-boundary.md) and [ADR-0005](adr/0005-local-runtime-host-and-fake-run-state.md) separate deterministic Core/mission authority from optional local Runtime state: no Core command runs an agent/model/Runtime, and M3 Runtime has no execution authority.
 - [x] **M1 initial mission foundation:** Core validates schema-versioned, complete requirement-linked work-package declarations; it freezes a verified packet digest, Core-policy digest and immutable Git target; `init`, `validate` and read-only `status` have real-Git and public-CLI tests.
 - [x] **M2 manual worktree safety foundation:** `workspace create|status|recover|remove` allocates only a current verified mission package at its frozen commit, uses an atomic common-Git lock and sibling managed root, validates a repository-bound ledger, reports drift and preserves work during recovery. It has real-Git, symlink/state/lock/concurrency, public-CLI and packed-install coverage. [ADR-0004](adr/0004-safe-manual-worktree-allocation.md) fixes its narrow authority boundary.
-- [ ] **M3 onward:** Runtime leases/state, process/model adapters, merge lanes, Studio, GitHub/ACP integration and catalog remain intentionally unimplemented until their preceding phase gates below are completed.
+- [x] **M3 local Runtime host:** `runtime init|status|allocate|heartbeat|transition|recover|serve` owns versioned fake-run state, policy digest, leases, expected versions, receipts and a bearer-protected loopback API. It has policy/role/lease/recovery/API/public-CLI tests and no execution authority. [ADR-0005](adr/0005-local-runtime-host-and-fake-run-state.md) defines the trust boundary.
+- [ ] **M4 onward:** process/model adapters, candidate verification/review/merge lanes, Studio, GitHub/ACP integration and catalog remain intentionally unimplemented until their preceding phase gates below are completed.
 
 ## 1. Objective and success definition
 
@@ -28,7 +29,7 @@ verified packet
 
 ### Product success criteria
 
-- [ ] An operator can create a mission from a **verified** packet and inspect each package's linked `REQ-` IDs.
+- [x] An operator can create a mission from a **verified** packet and inspect each package's linked `REQ-` IDs.
 - [x] The manual workspace foundation can allocate independent Git worktrees to concurrent work packages without assigning the same workspace/branch twice; a future Runtime must separately own leases and scheduling.
 - [ ] An approved agent adapter can work only inside its allocated workspace and declared capability policy.
 - [ ] An agent can submit a candidate commit but cannot transition its own package to approved or merged.
@@ -295,56 +296,53 @@ vld workspace remove <mission> <package> [--discard --acknowledge <workspace-id>
 
 ### 6.1 Goal
 
-Introduce an optional local Runtime that owns transitions, leases, receipts and a loopback-only API. Use a fake deterministic adapter first; do not start real agents yet.
+Introduce an optional local Runtime that owns deterministic fake-run transitions, leases and receipts before any process/model adapter exists. The Runtime is a separate optional surface: deterministic Core remains usable with it absent.
 
-### 6.2 Runtime responsibilities
+### 6.2 Implemented M3 contract
 
-- [ ] Load and validate a mission against the current verified packet/policy before scheduling.
-- [ ] Calculate package readiness from dependency states and policy.
-- [ ] Enforce the state machine: `planned → ready → allocated → running → changes_ready → verifying → in_review → approved → queued → merged`, plus controlled `blocked`/rework transitions.
-- [ ] Mint a unique run ID and lease on allocation; track heartbeats, expiration and owner identity.
-- [ ] Append canonical events and immutable receipts; derive views/status from the event ledger rather than trusting an editable UI state field.
-- [ ] Enforce idempotency keys on mutating API calls so retries do not duplicate allocations/transitions.
-- [ ] Expose a local JSON API/event stream for Studio only after authentication/authorization checks.
-- [ ] Bind only to loopback (or a local socket where supported); generate a per-launch secret token; do not provide a LAN listener by default.
-- [ ] Stop gracefully: reject new work, wait/cancel according to policy, flush ledger and release only owned leases.
+- [x] `vld runtime init|status|allocate|heartbeat|transition|recover` works only from a primary Git checkout and a current, verified frozen mission for initialization/allocation/normal transitions.
+- [x] A closed local-only policy freezes a policy digest and denies network, process execution, credential access, Git push and Git merge. No policy field can carry a shell command, token or plugin.
+- [x] The Runtime is the sole writer of `.vld/runtime/<mission-id>/events.jsonl` and its derived `state.json` snapshot. Mission/packet authority remains outside this ignored operational state.
+- [x] Ledger events are schema-versioned, contiguous and replayed into state; a snapshot must exactly match its ledger. A pending digest record makes an interrupted event/snapshot transaction recoverable only when it is known unapplied or known complete.
+- [x] Packages start `ready` only when dependencies permit them. The host validates the fixed lifecycle `planned → ready → allocated → running → changes_ready → verifying → in_review → approved → queued → merged`, controlled `blocked → ready`, expected versions and terminal immutability.
+- [x] Allocation creates a run ID and one-time lease token. Only the token digest is persisted; only the assigned implementer can heartbeat/advance active work, and an expired lease is blocked during recovery.
+- [x] Fixed role rules prevent an implementer ID from approving its own package. `operator`, `runtime`, `implementer`, `reviewer`, `release-approver` and fake `forge` roles are host-validated event labels; M3 does not claim external identity authentication.
+- [x] Mutations support bounded idempotency keys and replay a durable receipt rather than applying a retry twice.
+- [x] `vld runtime serve` provides a small JSON endpoint at `/v1/runtime`, loopback IP only, with per-launch in-memory bearer identity tokens, strict request envelopes/body cap, method-specific closed parameters, redacted errors and non-loopback Origin rejection.
+- [x] `recover` alone can reap a dead-PID regular lock, reconcile a known pending transaction and block expired leases. It never deletes a worktree, branch, candidate or evidence.
 
-### 6.3 API contract checklist
+### 6.3 Explicit M3 limits
 
-- [ ] Specify versioned JSON request/response envelopes with `requestId`, `ok`, stable `errorCode` and redacted diagnostic fields.
-- [ ] Specify read endpoints for mission, package, run, receipt, lock and health state.
-- [ ] Specify mutation endpoints for allocate, heartbeat, submit-candidate, transition, approve, block, recover and shutdown.
-- [ ] Require expected state/version/lease token for every mutation to prevent lost updates.
-- [ ] Return no arbitrary host path, environment or raw secret in error bodies.
-- [ ] Publish JSON fixtures as contract tests; avoid generated API behavior that changes undocumented fields.
+- [x] No agent/model/process launch, shell command, sandbox, network egress, credential lookup, worktree mutation, push, merge, PR, candidate submission, verification execution, review artifact ingestion, GitHub, ACP or Studio is included.
+- [x] No LAN/remote/team API, external user identity provider, persistent API credential store or cross-machine lease coordination is included.
+- [ ] M4 supplies an opt-in process/fake-agent adapter only after this host contract; M5 binds actual candidate/verification/review/merge authority; M6 supplies Studio.
 
-### 6.4 Extensive test checklist
+### 6.4 Extensive implemented test checklist
 
-**Transition matrix**
+**Policy, transition and lease matrix**
 
-- [ ] Test every legal state transition and all illegal source/target pairs.
-- [ ] Test every transition under each relevant actor role, including self-review/self-merge denial.
-- [ ] Test dependency readiness, cancellation, blocking, rework and terminal-state immutability.
-- [ ] Test expected-version and idempotency-key replay behavior.
-- [ ] Test a package cannot be allocated with an invalid/stale packet or policy digest.
+- [x] Validate closed policy/actor schemas, deny every capability-expanding field and verify stable policy digesting.
+- [x] Exercise ready/planned dependency state, allocation, heartbeat, expected-version conflict, deterministic idempotency replay, implementer progression, independent review denial/approval, queue/merge fixture transition and dependent readiness.
+- [x] Assert wrong token, wrong holder, stale mission target, role escalation, self-review and terminal re-transition fail before a receipt is appended.
+- [x] Assert lease token material never appears in the JSONL ledger or public status.
 
 **Durability and recovery**
 
-- [ ] Restart Runtime at every transition point and assert rehydrated state/receipts match pre-restart state.
-- [ ] Simulate truncated/corrupt event tail; verify fail-closed diagnosis and non-destructive repair/recovery command.
-- [ ] Test duplicate, out-of-order and malformed adapter events; preserve monotonic sequence/receipt rules.
-- [ ] Test clock skew/expired heartbeat and ensure a package never receives two live leases.
-- [ ] Test graceful stop, forced kill and orphaned process recovery.
+- [x] Initialize/reopen a real temporary Git mission and compare the replayed snapshot to its ledger.
+- [x] Simulate stale PID lock, interrupted pending transaction, expired lease and snapshot corruption; recovery handles only known pending/stale cases and corruption fails closed.
+- [x] Assert Runtime initialization does not allocate a worktree or launch a process.
 
-**Local API security**
+**Loopback API security**
 
-- [ ] Reject non-loopback bind configuration unless an explicit future remote mode is enabled.
-- [ ] Reject missing, wrong, expired and reused tokens.
-- [ ] Test Origin checks and CORS denial using browser-like requests.
-- [ ] Fuzz JSON bodies, oversized payloads and unknown methods; verify bounded error behavior/no crash.
-- [ ] Test that API read responses redact environment, secret references and unsafe raw agent output.
+- [x] Reject non-loopback bind, missing/invalid bearer token, hostile browser Origin, unknown parameter and operator impersonation of a reviewer.
+- [x] Test a valid loopback CORS request, body envelope, allocation, shutdown and redaction of project paths from status output.
 
-**Phase 3 exit:** deterministic fake runs can be allocated, advanced, recovered and inspected through a secured local API with all transitions host-validated.
+**Distribution and regression**
+
+- [x] Exercise Runtime initialization/allocation/status through the public CLI and packed-install CI journey.
+- [x] Run full deterministic Core checks with Runtime unused, proving Core does not need a listener, network, credential or model.
+
+**Phase 3 exit:** complete for deterministic fake-run host state. The next gate is M4's separately authorized process/fake-agent adapter; do not add execution authority to the Runtime ledger itself.
 
 ---
 
