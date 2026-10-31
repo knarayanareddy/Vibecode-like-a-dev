@@ -214,6 +214,7 @@ vld workflow run discovery --execute
 | **Scoped adapter host** | Deterministic fake runs and one explicit read-only local argv | Separate closed policy, healthy M2 workspace + M3 lease gate, clean environment, output redaction and host-owned receipt; no shell, push, merge, candidate or sandbox-write claim. |
 | **Frozen delivery candidate** | Exact candidate tuple, detached packet integration, independent review and local queue | Runtime validates allocated branch/base ancestry and a live lease; a closed policy permits only in-process packet verification. It records bounded receipts and performs no project command, merge, push, PR, provider or credential action. |
 | **Local Studio** | Browser dashboard and VS Code command entry over the loopback Runtime API | Per-response nonce CSP, manual in-memory bearer token and text-only rendering; Studio has no Git, agent, shell, workspace-file, merge or forge authority. |
+| **Signed content catalog** | Curated, Git-fetched but Ed25519-verified inert content packages | An explicit local trust root verifies threshold-signed canonical index/package metadata, expiry, identity, compatibility and payload digests before cache/lock/copy; v1 never executes or enables content. |
 
 The result is one repository and one `vld` CLI, while the packet remains portable and small. Use the agent-facing modules where they help; use the compiler and generated gates as the authority. See [ADR-0002](docs/adr/0002-optional-platform-extensions.md) for the extension boundary and security model. For the researched, future VLD Platform path—Studio, mission runtime, agent scheduler, merge queue and signed catalog—see [the platform expansion study](docs/PLATFORM-EXPANSION-RESEARCH.md) and [implementation plan](docs/VLD-PLATFORM-IMPLEMENTATION-PLAN.md).
 
@@ -345,6 +346,26 @@ vld studio serve missions/report-export/mission.json --project .
 ```
 
 The dashboard page contains no token, project path or receipt data until an authenticated request succeeds. It has a response-specific nonce CSP, no external assets/storage, no permissive CORS and renders every Runtime field as text rather than trusted HTML. The VS Code commands accept only an exact loopback Studio URL; its WebView keeps a pasted token in extension memory and accepts only a `refresh` message. Studio does **not** serve workspace files, run a Git/agent/shell command, submit delivery candidates, approve, merge, push, create PRs or access a forge. The existing CLI remains the full local workflow. See [ADR-0008](docs/adr/0008-local-studio-is-a-runtime-client.md).
+
+### Signed content catalog — trusted metadata, inert payloads
+
+M7 adds a separate signed catalog for curated content. Trust begins with a locally reviewed Ed25519 root file—not a Git remote. The root verifies threshold-signed, canonical JSON index and package metadata before VLD accepts a Git-fetched cache. Every package must declare `content-only`, a publisher identity, license, Core compatibility, release timestamp and bounded payload digests. V1 accepts only Markdown guidance/templates and JSON module/bundle/workflow/test-fixture/export-schema data; it cannot ship an executable adapter, shell command, plugin or enablement action.
+
+```bash
+# Review this public-key-only root file first. The initial trust decision is local.
+vld catalog trust reviewed-root.json --project .
+# Git is transport/cache only: signed index/package/payload checks decide trust.
+vld catalog add team-catalog https://example.invalid/vld-content.git --project .
+vld catalog status --project .
+# Preview does not mutate the project; update requires this exact reviewed commit.
+vld catalog diff team-catalog --project .
+vld catalog update team-catalog --acknowledge "$CATALOG_COMMIT" --project .
+# Copy is explicit and records immutable publisher/digest provenance under .vld.
+vld catalog copy team-catalog review-content review-guidance \
+  --out docs/catalog/review-guidance.md --project .
+```
+
+`catalog status` verifies the previously pinned root/index/cache offline. Root rotation needs the exact new root digest acknowledgement plus signatures meeting the currently trusted root threshold. Copying never enables a module, applies a bundle, runs a workflow, changes the compiler packet or executes content; use the existing explicit Core flows for those actions. Studio shows catalog trust/publisher/digest state when a catalog is configured. See [ADR-0009](docs/adr/0009-signed-content-only-catalog.md).
 
 ## What you get
 
@@ -691,6 +712,7 @@ Shipped in v0.13: optional `vld runtime` host state for a frozen mission: versio
 Shipped in v0.14: `vld runtime agent run|status`, with deterministic fake runs and a policy-declared, direct-argv read-only local-process adapter. The host requires an M2 workspace and M3 lease, never inherits parent credentials, redacts output/path data and retains host-owned receipts. It deliberately does not claim CWD confinement as a write sandbox, and has no candidate, verification, review, push, merge, PR or GitHub/ACP integration.
 Shipped in v0.15: `vld runtime delivery submit|verify|approve|queue|status`, an exact-SHA local candidate/review foundation. It validates allocated-branch/base ancestry, uses one temporary detached integration worktree and a closed in-process packet check, records digest-bound independent review/queue receipts, and intentionally has no project-command, merge, push, PR, forge or credential capability.
 Shipped in v0.16: `vld studio serve` and the Runtime `/studio` dashboard, plus a VS Code command-entry extension. The static local client displays Runtime packet/mission/lease/receipt state through the existing authenticated loopback API, has a nonce CSP and text-only rendering, and can request only typed Runtime allocation/recovery actions—never Git, an agent, a shell, merge or forge work.
+Shipped in v0.17: `vld catalog trust|add|diff|update|status|copy`, a separately locked Ed25519 threshold-signed catalog of bounded inert content. An explicit local root validates canonical index/package metadata, expiry, compatibility, publisher and every payload digest before cache/lock/copy; Git transport cannot confer trust, and catalog content cannot execute or enable itself.
 
 1. **Published live-agent comparison runs** — use the optional protocol above across Claude Code, Codex and open-weight coding agents, preserving raw JSON logs and configuration notes; do not treat an export as a competing source of requirements.
 2. **`vld change --quick`** — for one-line changes that do not deserve a delta: an explicit, labelled path with no probe, for teams that accept the trade.
