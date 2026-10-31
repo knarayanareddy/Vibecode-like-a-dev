@@ -1,0 +1,11 @@
+{
+  "name": "@vld/github-v1-adapter",
+  "version": "0.18.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "Optional VLD GitHub REST adapter. Credentials are caller-supplied in memory and never read by VLD Core.",
+  "engines": {
+    "node": ">=20"
+  }
+}

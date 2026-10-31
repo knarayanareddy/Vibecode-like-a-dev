@@ -48,6 +48,25 @@ expiry, publisher identity or digest fails:
    `catalog-copies.json` for affected output paths, then record the incident and
    recovery decision in the project's normal review trail.
 
+## Optional ACP/GitHub provider incident
+
+The M8 packages are opt-in integrations, not part of the default Runtime path.
+If an ACP peer fails, times out, disconnects or requests an unsupported capability,
+treat its host receipt as a failed/cancelled run and inspect `vld runtime agent
+status`; do not infer a successful package transition from a peer message. Stop the
+peer process, keep its credential-free policy and Runtime receipt for review, then
+reallocate through the normal explicit workflow if appropriate. The ACP client does
+not retain its prompt or transcript and does not have a recovery authority.
+
+If a GitHub request returns an identity mismatch, rate limit, network error or
+ambiguous merge result, do **not** replay a merge request. Preserve the immutable
+GitHub plan digest and query the forge manually for the PR number, head SHA and
+target SHA. Recreate a reviewed plan only if those identities still equal its frozen
+candidate/approval/queue tuple; otherwise return to the ordinary candidate/
+verification/review path. Revoke or rotate the caller's GitHub credential through
+GitHub—not VLD—because VLD never stores it. GitHub branch protection and
+organization authorization remain external enforcement points.
+
 ## What this document does not cover
 
 Nothing runs as a service, so there is no availability incident to run down. If that

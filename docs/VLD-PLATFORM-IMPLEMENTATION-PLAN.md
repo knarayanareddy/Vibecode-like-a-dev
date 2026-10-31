@@ -1,9 +1,9 @@
 # VLD Platform implementation plan
 
-**Status:** Active implementation plan. Phases 1–3, the safe M4 adapter-host foundation, the closed M5 candidate/review foundation, an M6 local Studio foundation and an M7 signed content-catalog foundation are implemented in VLD 0.17.0: mission authority, manual worktree safety, optional local Runtime state, deterministic fake runs, a constrained read-only direct-argv local-process adapter, exact candidate receipt identity, detached packet integration, independent local review/queue receipts, a CSP-protected local Runtime dashboard/VS Code command entry, and a threshold-signed inert catalog. A write-capable sandbox adapter, ACP transport, project command verifier, merge manager, full approval/store surfaces, GitHub integration and executable adapter catalog are still unimplemented.
+**Status:** Active implementation plan. Phases 1–3, the safe M4 adapter-host foundation, the closed M5 candidate/review foundation, an M6 local Studio foundation, an M7 signed content-catalog foundation and an M8 optional ACP/GitHub contract foundation are implemented in VLD 0.18.0: mission authority, manual worktree safety, optional local Runtime state, deterministic fake runs, a constrained read-only direct-argv local-process adapter, exact candidate receipt identity, detached packet integration, independent local review/queue receipts, a CSP-protected local Runtime dashboard/VS Code command entry, a threshold-signed inert catalog, and fixture-tested ACP v1/GitHub provider boundaries. A write-capable sandbox adapter, a production ACP peer integration, project command verifier, merge manager, typed Runtime forge receipt/endpoint, full approval/store surfaces and executable adapter catalog are still unimplemented.
 
 **Companion research:** [PLATFORM-EXPANSION-RESEARCH.md](PLATFORM-EXPANSION-RESEARCH.md)
-**Current baseline:** VLD 0.17.0, deterministic Core with packets, gates, evidence, typed workflows, locked modules/stores, agent handoffs, MCP, bounded exports, versioned mission/workspace foundations, a recovery-aware local Runtime ledger/API, an opt-in M4 adapter host, an M5 no-merge local candidate/review host, an M6 local Runtime client and an M7 content-only catalog with no Core execution dependency.
+**Current baseline:** VLD 0.18.0, deterministic Core with packets, gates, evidence, typed workflows, locked modules/stores, agent handoffs, MCP, bounded exports, versioned mission/workspace foundations, a recovery-aware local Runtime ledger/API, an opt-in M4 adapter host, an M5 no-merge local candidate/review host, an M6 local Runtime client, an M7 content-only catalog and M8 opt-in protocol/forge packages with no default Core execution or credential dependency.
 
 
 ## Implementation progress
@@ -16,7 +16,8 @@
 - [x] **M5 candidate/review foundation:** `runtime delivery submit|verify|approve|queue|status` freezes exact branch/base/target/packet/policy identities, uses a Runtime-locked detached integration worktree for only an in-process packet check, and writes independent review/queue receipts. It has no project-command, merge, push, PR, forge or credential authority. [ADR-0007](adr/0007-frozen-candidates-and-no-merge-m5-foundation.md) records the boundary.
 - [x] **M6 local Studio foundation:** `studio serve` and Runtime `/studio` provide a static, accessible mission/receipt dashboard through the existing authenticated loopback API; a VS Code command entry opens the dashboard or a read-only inspector. The UI has no Git/agent/shell/merge/forge authority and retains no token. [ADR-0008](adr/0008-local-studio-is-a-runtime-client.md) records the boundary.
 - [x] **M7 signed content-catalog foundation:** `catalog trust|add|diff|update|status|copy` pins an explicit local Ed25519 trust root and verifies threshold-signed canonical index/package metadata and bounded inert payloads before cache/lock/copy. It has no executable/plugin/enablement authority. [ADR-0009](adr/0009-signed-content-only-catalog.md) records the boundary.
-- [ ] **Sandbox / ACP / merge onward:** a write-capable sandbox adapter, ACP transport, project verifier, merge lane manager, full approval/store Studio surfaces, GitHub integration and executable adapter catalog remain intentionally unimplemented until their preceding phase gates below are completed.
+- [x] **M8 ACP/GitHub contract foundation:** optional nested packages pin the stable ACP v1 SDK boundary and a caller-injected GitHub REST contract. Both use fixture-only tests, exact immutable identities and explicit installation/in-memory credentials; neither adds Core credential, automatic push, webhook or Runtime forge authority. [ADR-0010](adr/0010-optional-acp-and-github-provider-boundaries.md) records the boundary.
+- [ ] **Sandbox / full provider / merge onward:** a write-capable sandbox adapter, production ACP peer exercise, project verifier, merge lane manager, typed Runtime forge receipt/endpoint, full approval/store Studio surfaces and executable adapter catalog remain intentionally unimplemented until their preceding phase gates below are completed.
 
 ## 1. Objective and success definition
 
@@ -383,12 +384,12 @@ reconnect(runId) -> current status or explicit unsupported result
 
 ### 7.4 ACP v1 adapter checklist
 
-- [ ] Add ACP only in a separate optional package/dependency boundary. **Deferred:** M4's no-new-dependency host intentionally does not import ACP.
-- [ ] Use the stable ACP v1 API/entry point; reject/disable experimental v2 features by default.
-- [ ] Perform capability negotiation and reject a requested run when peer capabilities do not satisfy policy.
-- [ ] Map ACP sessions/events into VLD's normalized run/event/receipt model without allowing peer events to transition mission state directly.
-- [ ] Use protocol fixtures and a fake ACP peer for normal CI; do not require a proprietary agent account.
-- [ ] Document fallback to local-process/handoff adapters for non-ACP agents.
+- [x] Add ACP only in a separate optional package/dependency boundary: `factory/integrations/acp-v1` pins the SDK and Core dynamically loads it only for an explicit `acp-v1` policy (M8 foundation).
+- [x] Use only the stable ACP v1 SDK root API/entry point; contract tests assert unstable/v2 imports are absent (M8 foundation).
+- [x] Perform v1 version/auth/reconnect capability negotiation and reject peer facts that exceed the read-only, anonymous policy (M8 foundation).
+- [x] Map bounded ACP session-update metadata into normalized host progress events; peer events cannot transition Runtime state or persist prompt/transcript content (M8 foundation).
+- [x] Use protocol contract fixtures in normal CI plus an opt-in package test against a stable fake stdio peer; no proprietary account is required.
+- [x] Document fallback to local-process/handoff adapters for non-ACP agents (M8 foundation).
 
 ### 7.5 Extensive test checklist
 
@@ -413,10 +414,10 @@ reconnect(runId) -> current status or explicit unsupported result
 
 **ACP**
 
-- [ ] Test v1 initialization/capability negotiation success and missing-capability rejection.
-- [ ] Test malformed, unknown, duplicate and out-of-order protocol messages.
-- [ ] Test session reconnect/cancel behavior and conversion of peer errors to stable VLD errors.
-- [ ] Assert v2/unstable imports/features are not selected by default.
+- [x] Test v1 initialization/capability negotiation success plus v2/auth/reconnect-capability rejection (M8 foundation test).
+- [x] Test malformed/unknown update and stop messages at the closed VLD normalizer; duplicate/out-of-order fake-stdio peer cases remain to add.
+- [ ] Test session reconnect/cancel behavior against a full fake peer and conversion of peer transport errors to stable VLD errors (bridge has bounded failure/cancel mapping; end-to-end fixture remains to add).
+- [x] Assert stable root import/pinned SDK and absence of v2/unstable imports/features in Core/bridge source (M8 foundation test).
 
 **Optional manual live tests**
 
@@ -452,8 +453,8 @@ Turn a candidate commit into a frozen, independently reviewed and revalidated me
 - [x] Queue one approved immutable candidate tuple through release-approver role validation (M5 foundation; multi-candidate ordering is deferred).
 - [ ] Re-read target SHA immediately before merge. If changed, discard prior integration result, return to verifying and create a new candidate tuple (deferred: M5 has no merge).
 - [ ] Local Git adapter may create a merge commit only when explicit policy permits. Default branch push must be opt-in (deferred: M5 has no merge/push).
-- [ ] GitHub adapter creates/updates a PR, reads permitted status/review facts and requests merge only when both VLD policy and GitHub authorization/branch protection permit it (deferred).
-- [x] Keep provider credentials out of M5 entirely: no provider or ambient `gh` credential capability exists in this release.
+- [x] Optional GitHub v1 contract creates/updates a PR, reads exact head/check/review facts and can request an exact-SHA merge only after an immutable candidate/approval/queue plan gate; it remains outside Runtime delivery mutations and GitHub authorization/branch protection remains authoritative (M8 foundation).
+- [x] Keep provider credentials out of Core/M5: the optional GitHub client accepts only caller-supplied in-memory tokens and never reads ambient `gh` or environment credentials (M8 foundation).
 - [ ] Make queue cancellation/retry/manual takeover idempotent and receipted (M5 receipt writes use Runtime's atomic pending-transaction recovery, but no cancellation/takeover surface exists yet).
 
 ### 8.4 Extensive test checklist
@@ -477,11 +478,11 @@ Turn a candidate commit into a frozen, independently reviewed and revalidated me
 
 **GitHub provider contract**
 
-- [ ] Test provider requests/responses against recorded/mock fixtures for PR create/update, head SHA, checks, reviews, mergeability and merge result.
-- [ ] Reject responses missing expected repository/branch/SHA identity.
-- [ ] Test rate-limit, auth failure, network timeout, ambiguous merge result and webhook replay handling.
+- [x] Test fixture-injected provider requests/responses for PR create/update, exact head SHA, checks, reviews and exact merge response (M8 foundation).
+- [x] Reject responses missing expected branch/SHA/PR identity and reject a tampered immutable forge-plan digest (M8 foundation test).
+- [x] Normalize no-token/rate-limit/network/malformed/ambiguous-merge failures without ambient auth or remote calls in CI (M8 foundation test); webhook replay fixture remains to add.
 - [ ] Use an optional manually triggered ephemeral GitHub repository test with least-privilege test credentials; never run it in ordinary CI.
-- [ ] Verify GitHub branch protection remains an external enforcement point even if VLD incorrectly requests a merge.
+- [x] Preserve GitHub branch protection as an external enforcement point: the optional client only requests the exact-SHA merge after plan gates and never pushes/claims authorization (M8 foundation/ADR).
 
 **Phase 5 exit:** merges are exact-SHA, revalidated, independently approved and recoverable; all local paths are deterministic and provider paths are contract tested.
 

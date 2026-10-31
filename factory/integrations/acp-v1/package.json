@@ -1,0 +1,17 @@
+{
+  "name": "@vld/acp-v1-adapter",
+  "version": "0.18.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "Optional VLD stable ACP v1 adapter boundary; not installed or imported by VLD Core by default.",
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "2.2.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
