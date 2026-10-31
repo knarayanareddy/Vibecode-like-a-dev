@@ -1,0 +1,717 @@
+/**
+ * Optional Phase 3 local Runtime host.
+ *
+ * This host owns only durable fake-run state, leases and receipts. It does not
+ * launch a process/agent/model, execute a project command, access a credential,
+ * contact a network service, push, merge or change Git refs/worktrees. Those
+ * capabilities require later phases and separate adapters.
+ */
+
+import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, renameSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import {
+  digest,
+  ensureProjectDir,
+  extensionError,
+  ID_PATTERN,
+  readJson,
+  stableJson
+} from './extension-utils.mjs';
+import { missionStatus, readMission } from './missions.mjs';
+import {
+  assertCanAllocate,
+  assertCanHeartbeat,
+  assertLeaseDuration,
+  assertRuntimeActor,
+  assertRuntimeTransition,
+  defaultRuntimePolicy,
+  isTerminalRuntimeState,
+  runtimePolicyDigest,
+  validateRuntimePolicy
+} from './runtime-policy.mjs';
+
+const RUNTIME_STATE_VERSION = 1;
+const EVENT_VERSION = 1;
+const LOCK_VERSION = 1;
+const MAX_RECEIPTS = 200;
+const COMMIT = /^[a-f0-9]{40}$/;
+const IDEMPOTENCY_KEY = /^[A-Za-z0-9][A-Za-z0-9._-]{7,120}$/;
+const EVENT_TYPES = new Set(['initialized', 'allocated', 'heartbeat', 'transition', 'ready', 'lease-expired']);
+
+function errorDetail(error) {
+  return String(error?.stderr || error?.message || error || '').trim();
+}
+
+function git(project, args, code = 'RUNTIME_GIT_FAILED') {
+  try {
+    return execFileSync('git', ['-C', project, ...args], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe']
+    }).trim();
+  } catch (error) {
+    throw extensionError(`git ${args[0]} failed${errorDetail(error) ? `: ${errorDetail(error)}` : ''}`, code);
+  }
+}
+
+function isWithin(root, candidate) {
+  const relative = path.relative(root, candidate);
+  return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
+}
+
+function safeDirectory(directory, label) {
+  if (!existsSync(directory)) return;
+  const stats = lstatSync(directory);
+  if (stats.isSymbolicLink() || !stats.isDirectory()) throw extensionError(`${label} is not a real directory`, 'INVALID_RUNTIME_PATH');
+}
+
+/** Create a directory tree without following an existing symlink component. */
+function mkdirWithoutSymlinks(target, label) {
+  const resolved = path.resolve(target);
+  const parsed = path.parse(resolved);
+  let cursor = parsed.root;
+  for (const segment of resolved.slice(parsed.root.length).split(path.sep).filter(Boolean)) {
+    cursor = path.join(cursor, segment);
+    if (existsSync(cursor)) safeDirectory(cursor, label);
+    else mkdirSync(cursor);
+  }
+}
+
+function safeRegularFile(file, label) {
+  if (!existsSync(file)) return false;
+  const stats = lstatSync(file);
+  if (stats.isSymbolicLink() || !stats.isFile()) throw extensionError(`${label} is not a regular file`, 'INVALID_RUNTIME_PATH');
+  return true;
+}
+
+function writeTextAtomic(file, text) {
+  mkdirWithoutSymlinks(path.dirname(file), 'runtime directory');
+  const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(temporary, text, { encoding: 'utf8', mode: 0o600 });
+    renameSync(temporary, file);
+  } finally {
+    rmSync(temporary, { force: true });
+  }
+}
+
+function writeJsonAtomic(file, value) {
+  writeTextAtomic(file, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function repository(projectDir) {
+  const project = ensureProjectDir(projectDir);
+  let root;
+  let commonRaw;
+  try {
+    root = git(project, ['rev-parse', '--show-toplevel'], 'NOT_A_GIT_REPOSITORY');
+    commonRaw = git(project, ['rev-parse', '--git-common-dir'], 'NOT_A_GIT_REPOSITORY');
+  } catch (error) {
+    if (error.code === 'NOT_A_GIT_REPOSITORY') throw extensionError('runtime commands require a Git working repository', 'NOT_A_GIT_REPOSITORY');
+    throw error;
+  }
+  const commonDir = path.resolve(project, commonRaw);
+  if (!existsSync(commonDir) || !lstatSync(commonDir).isDirectory()) throw extensionError('Git common directory is unavailable', 'NOT_A_GIT_REPOSITORY');
+  const primaryRaw = git(project, ['worktree', 'list', '--porcelain']);
+  const first = primaryRaw.split('\n').find((line) => line.startsWith('worktree '));
+  const primary = first ? path.resolve(first.slice('worktree '.length)) : null;
+  if (!primary || path.resolve(project) !== path.resolve(root) || path.resolve(root) !== primary) {
+    throw extensionError('runtime commands must run from the primary Git checkout root, not a subdirectory or linked worktree', 'RUNTIME_PRIMARY_CHECKOUT_REQUIRED');
+  }
+  return { project: path.resolve(project), root: path.resolve(root), commonDir };
+}
+
+function runtimeBase(repo) {
+  const vld = path.join(repo.root, '.vld');
+  if (existsSync(vld)) safeDirectory(vld, 'runtime state directory');
+  const base = path.join(vld, 'runtime');
+  if (existsSync(base)) safeDirectory(base, 'runtime state directory');
+  return base;
+}
+
+function runtimeDirectory(repo, mission) {
+  if (!ID_PATTERN.test(String(mission?.id ?? ''))) throw extensionError('runtime mission id is invalid', 'INVALID_RUNTIME_MISSION');
+  const directory = path.join(runtimeBase(repo), mission.id);
+  if (!isWithin(runtimeBase(repo), directory) || directory === runtimeBase(repo)) throw extensionError('runtime state path escapes its managed root', 'INVALID_RUNTIME_PATH');
+  return directory;
+}
+
+function runtimePaths(repo, mission) {
+  const directory = runtimeDirectory(repo, mission);
+  return {
+    directory,
+    events: path.join(directory, 'events.jsonl'),
+    snapshot: path.join(directory, 'state.json'),
+    pending: path.join(directory, 'pending.json'),
+    lock: path.join(directory, 'runtime.lock')
+  };
+}
+
+/** Exposed for deterministic fixtures only; never print these host paths in Runtime API output. */
+export function runtimeDebugPaths({ missionFile, projectDir = '.' } = {}) {
+  const repo = repository(projectDir);
+  const loaded = readMission(missionFile, { projectDir: repo.root });
+  return runtimePaths(repo, loaded.mission);
+}
+
+function nowIso(now = undefined) {
+  const date = now === undefined ? new Date() : new Date(now);
+  if (Number.isNaN(date.getTime())) throw extensionError('runtime clock value is invalid', 'INVALID_RUNTIME_TIME');
+  return date.toISOString();
+}
+
+function plusMilliseconds(iso, milliseconds) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) throw extensionError('runtime event time is invalid', 'INVALID_RUNTIME_LEDGER');
+  return new Date(date.getTime() + milliseconds).toISOString();
+}
+
+function runtimeContext({ missionFile, projectDir = '.', requireCurrent = true } = {}) {
+  const repo = repository(projectDir);
+  const loaded = readMission(missionFile, { projectDir: repo.root });
+  const report = missionStatus({ file: missionFile, projectDir: repo.root });
+  if (requireCurrent && !report.ok) {
+    const problems = [...report.errors, ...report.stale.map((entry) => entry.kind === 'target' ? 'mission target has moved' : `mission is stale: ${entry.kind}`)];
+    throw extensionError(`mission is not current:\n${problems.map((entry) => `- ${entry}`).join('\n')}`, 'STALE_MISSION');
+  }
+  return { repo, mission: loaded.mission, missionFile: path.relative(repo.root, loaded.file).split(path.sep).join('/'), missionReport: report, paths: runtimePaths(repo, loaded.mission) };
+}
+
+function lockOwner(paths) {
+  if (!safeRegularFile(paths.lock, 'runtime lock')) return null;
+  try { return readJson(paths.lock); } catch { return null; }
+}
+
+function activePid(pid) {
+  if (!Number.isInteger(pid) || pid < 1) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === 'EPERM';
+  }
+}
+
+function acquireRuntimeLock(paths) {
+  mkdirWithoutSymlinks(paths.directory, 'runtime directory');
+  const owner = { schemaVersion: LOCK_VERSION, pid: process.pid, token: randomUUID() };
+  try {
+    writeFileSync(paths.lock, `${JSON.stringify(owner)}\n`, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+  } catch (error) {
+    if (error?.code === 'EEXIST') {
+      const stats = lstatSync(paths.lock);
+      if (stats.isSymbolicLink() || !stats.isFile()) throw extensionError('runtime lock has an unsafe filesystem type', 'INVALID_RUNTIME_LOCK');
+      const owner = lockOwner(paths);
+      if (activePid(owner?.pid)) throw extensionError(`runtime is locked by active pid ${owner.pid}`, 'RUNTIME_LOCKED');
+      throw extensionError('runtime has a stale lock; run vld runtime recover', 'STALE_RUNTIME_LOCK');
+    }
+    throw error;
+  }
+  return owner;
+}
+
+function releaseRuntimeLock(paths, owner) {
+  let actual = null;
+  let stats = null;
+  try {
+    stats = lstatSync(paths.lock);
+    if (stats.isFile()) actual = readJson(paths.lock);
+  } catch {}
+  if (stats?.isFile() && actual?.token === owner.token) rmSync(paths.lock, { force: true });
+}
+
+function withRuntimeLock(paths, callback) {
+  const owner = acquireRuntimeLock(paths);
+  try {
+    return callback();
+  } finally {
+    releaseRuntimeLock(paths, owner);
+  }
+}
+
+function clearStaleRuntimeLock(paths) {
+  if (!existsSync(paths.lock)) return null;
+  const stats = lstatSync(paths.lock);
+  if (stats.isSymbolicLink() || !stats.isFile()) throw extensionError('runtime lock has an unsafe filesystem type', 'INVALID_RUNTIME_LOCK');
+  const owner = lockOwner(paths);
+  if (activePid(owner?.pid)) throw extensionError(`runtime is locked by active pid ${owner.pid}`, 'RUNTIME_LOCKED');
+  rmSync(paths.lock, { force: true });
+  return { pid: owner?.pid ?? null };
+}
+
+function assertEventActor(actor) {
+  return assertRuntimeActor(actor);
+}
+
+function validateEvent(event) {
+  if (!event || typeof event !== 'object' || Array.isArray(event)) throw extensionError('runtime ledger event must be an object', 'INVALID_RUNTIME_LEDGER');
+  if (event.schemaVersion !== EVENT_VERSION) throw extensionError(`runtime ledger event schemaVersion must be ${EVENT_VERSION}`, 'INVALID_RUNTIME_LEDGER');
+  if (!Number.isSafeInteger(event.sequence) || event.sequence < 1) throw extensionError('runtime ledger event has invalid sequence', 'INVALID_RUNTIME_LEDGER');
+  if (typeof event.at !== 'string' || Number.isNaN(new Date(event.at).getTime())) throw extensionError('runtime ledger event has invalid timestamp', 'INVALID_RUNTIME_LEDGER');
+  if (!EVENT_TYPES.has(event.type)) throw extensionError('runtime ledger event has unknown type', 'INVALID_RUNTIME_LEDGER');
+  assertEventActor(event.actor);
+  if (event.type === 'initialized') {
+    if (!event.mission || !event.policy || !Array.isArray(event.packages)) throw extensionError('runtime initialized event is incomplete', 'INVALID_RUNTIME_LEDGER');
+    if (!ID_PATTERN.test(String(event.mission.id ?? '')) || !/^[a-f0-9]{64}$/.test(String(event.mission.digest ?? '')) || !COMMIT.test(String(event.mission.targetCommit ?? ''))) throw extensionError('runtime initialized event has invalid mission authority', 'INVALID_RUNTIME_LEDGER');
+    if (!ID_PATTERN.test(String(event.policy.id ?? '')) || !/^[a-f0-9]{64}$/.test(String(event.policy.digest ?? ''))) throw extensionError('runtime initialized event has invalid policy authority', 'INVALID_RUNTIME_LEDGER');
+    return;
+  }
+  if (!ID_PATTERN.test(String(event.packageId ?? ''))) throw extensionError('runtime event has invalid package id', 'INVALID_RUNTIME_LEDGER');
+  if (event.type === 'allocated') {
+    if (!event.run || !ID_PATTERN.test(String(event.run.holderId ?? '')) || typeof event.run.id !== 'string' || !event.lease || typeof event.lease.tokenDigest !== 'string') throw extensionError('runtime allocation event is incomplete', 'INVALID_RUNTIME_LEDGER');
+  }
+  if (event.type === 'heartbeat' && (typeof event.runId !== 'string' || typeof event.expiresAt !== 'string')) throw extensionError('runtime heartbeat event is incomplete', 'INVALID_RUNTIME_LEDGER');
+  if (['transition', 'ready', 'lease-expired'].includes(event.type) && (typeof event.from !== 'string' || typeof event.to !== 'string')) throw extensionError('runtime transition event is incomplete', 'INVALID_RUNTIME_LEDGER');
+  if (event.idempotencyKey !== undefined && (!IDEMPOTENCY_KEY.test(event.idempotencyKey) || !/^[a-f0-9]{64}$/.test(String(event.requestDigest ?? '')))) throw extensionError('runtime event has invalid idempotency metadata', 'INVALID_RUNTIME_LEDGER');
+}
+
+function initialPackages(packages) {
+  const known = new Set(packages.map((entry) => entry.id));
+  return packages.map((entry) => ({
+    id: entry.id,
+    dependsOn: [...(entry.dependsOn ?? [])],
+    state: (entry.dependsOn ?? []).length === 0 ? 'ready' : 'planned',
+    version: 0,
+    run: null,
+    lease: null,
+    blocked: null,
+    requirements: [...(entry.requirements ?? [])],
+    resourceClaims: [...(entry.resourceClaims?.paths ?? [])]
+  })).map((entry) => {
+    if (!ID_PATTERN.test(entry.id) || entry.dependsOn.some((dependency) => !known.has(dependency))) throw extensionError('runtime initialized event has invalid package graph', 'INVALID_RUNTIME_LEDGER');
+    return entry;
+  });
+}
+
+function cloneState(state) {
+  return JSON.parse(JSON.stringify(state));
+}
+
+function applyEvent(state, event) {
+  if (event.type === 'initialized') {
+    if (state !== null) throw extensionError('runtime ledger contains more than one initialized event', 'INVALID_RUNTIME_LEDGER');
+    return {
+      schemaVersion: RUNTIME_STATE_VERSION,
+      mission: event.mission,
+      policy: event.policy,
+      packages: initialPackages(event.packages),
+      receipts: [],
+      sequence: event.sequence,
+      eventDigest: null
+    };
+  }
+  if (!state) throw extensionError('runtime ledger is missing its initialized event', 'INVALID_RUNTIME_LEDGER');
+  const next = cloneState(state);
+  const workPackage = next.packages.find((entry) => entry.id === event.packageId);
+  if (!workPackage) throw extensionError(`runtime event references unknown package ${event.packageId}`, 'INVALID_RUNTIME_LEDGER');
+  if (event.type === 'allocated') {
+    assertCanAllocate(event.actor);
+    if (workPackage.state !== 'ready' || workPackage.run || workPackage.lease) throw extensionError('runtime allocation event is not valid for package state', 'INVALID_RUNTIME_LEDGER');
+    workPackage.state = 'allocated';
+    workPackage.version += 1;
+    workPackage.run = { id: event.run.id, holderId: event.run.holderId };
+    workPackage.lease = { id: event.lease.id, tokenDigest: event.lease.tokenDigest, expiresAt: event.lease.expiresAt };
+  } else if (event.type === 'heartbeat') {
+    if (!workPackage.lease || workPackage.run?.id !== event.runId) throw extensionError('runtime heartbeat has no matching active lease', 'INVALID_RUNTIME_LEDGER');
+    assertCanHeartbeat(event.actor, workPackage.run.holderId);
+    if (Number.isNaN(new Date(event.expiresAt).getTime())) throw extensionError('runtime heartbeat has invalid expiry', 'INVALID_RUNTIME_LEDGER');
+    workPackage.lease.expiresAt = event.expiresAt;
+    workPackage.version += 1;
+  } else {
+    if (workPackage.state !== event.from) throw extensionError(`runtime transition expected ${event.from} but package is ${workPackage.state}`, 'INVALID_RUNTIME_LEDGER');
+    if (event.type === 'transition' && event.expectedVersion !== workPackage.version) throw extensionError('runtime transition event has an unexpected package version', 'INVALID_RUNTIME_LEDGER');
+    assertRuntimeTransition({ from: event.from, to: event.to, actor: event.actor, holderId: workPackage.run?.holderId ?? null });
+    workPackage.state = event.to;
+    workPackage.version += 1;
+    if (event.to === 'blocked') {
+      workPackage.blocked = event.reason ?? (event.type === 'lease-expired' ? 'lease expired' : 'blocked');
+      workPackage.lease = null;
+    } else if (event.from === 'blocked') {
+      workPackage.blocked = null;
+    }
+    if (event.to === 'merged') workPackage.lease = null;
+  }
+  next.receipts = [...next.receipts, {
+    sequence: event.sequence,
+    type: event.type,
+    packageId: event.packageId,
+    actor: event.actor,
+    at: event.at,
+    ...(event.from ? { from: event.from, to: event.to } : {})
+  }].slice(-MAX_RECEIPTS);
+  next.sequence = event.sequence;
+  return next;
+}
+
+function deriveState(events) {
+  let state = null;
+  let expectedSequence = 1;
+  for (const event of events) {
+    validateEvent(event);
+    if (event.sequence !== expectedSequence) throw extensionError(`runtime ledger sequence ${event.sequence} is not contiguous`, 'INVALID_RUNTIME_LEDGER');
+    state = applyEvent(state, event);
+    expectedSequence += 1;
+  }
+  if (!state) throw extensionError('runtime ledger has no initialized event', 'INVALID_RUNTIME_LEDGER');
+  state.eventDigest = digest(events);
+  return state;
+}
+
+function readEvents(paths) {
+  if (!safeRegularFile(paths.events, 'runtime event ledger')) throw extensionError('runtime has not been initialized', 'RUNTIME_NOT_FOUND');
+  const source = readFileSync(paths.events, 'utf8');
+  if (!source.endsWith('\n')) throw extensionError('runtime event ledger is truncated', 'INVALID_RUNTIME_LEDGER');
+  const lines = source.split('\n').filter(Boolean);
+  try {
+    return lines.map((line) => JSON.parse(line));
+  } catch (error) {
+    throw extensionError(`runtime event ledger has invalid JSON: ${error.message}`, 'INVALID_RUNTIME_LEDGER');
+  }
+}
+
+function writeEvents(paths, events) {
+  writeTextAtomic(paths.events, `${events.map((event) => JSON.stringify(event)).join('\n')}\n`);
+}
+
+function readLedger(paths, { requireSnapshot = true } = {}) {
+  const events = readEvents(paths);
+  const state = deriveState(events);
+  if (requireSnapshot) {
+    if (!safeRegularFile(paths.snapshot, 'runtime state snapshot')) throw extensionError('runtime state snapshot is missing', 'INVALID_RUNTIME_LEDGER');
+    let snapshot;
+    try { snapshot = readJson(paths.snapshot); } catch (error) { throw extensionError(`runtime state snapshot is invalid JSON: ${error.message}`, 'INVALID_RUNTIME_LEDGER'); }
+    if (stableJson(snapshot) !== stableJson(state)) throw extensionError('runtime state snapshot does not match its event ledger; run vld runtime recover', 'RUNTIME_LEDGER_DIVERGED');
+  }
+  return { events, state };
+}
+
+function writeSnapshot(paths, state) {
+  writeJsonAtomic(paths.snapshot, state);
+}
+
+function writePending(paths, pending) {
+  writeJsonAtomic(paths.pending, pending);
+}
+
+function assertNoPendingTransaction(paths) {
+  let stats;
+  try {
+    stats = lstatSync(paths.pending);
+  } catch (error) {
+    if (error?.code === 'ENOENT') return;
+    throw error;
+  }
+  if (!stats.isFile() || stats.isSymbolicLink()) throw extensionError('runtime pending transaction has an unsafe filesystem type', 'INVALID_RUNTIME_LEDGER');
+  throw extensionError('runtime has a pending transaction; run vld runtime recover before another mutation', 'RUNTIME_RECOVERY_REQUIRED');
+}
+
+function appendEvents(paths, before, additions) {
+  // Do not overwrite an interrupted transaction: only recovery may classify its
+  // digest as known-unapplied or known-complete.
+  assertNoPendingTransaction(paths);
+  const after = [...before, ...additions];
+  const pending = {
+    schemaVersion: RUNTIME_STATE_VERSION,
+    beforeEventDigest: digest(before),
+    nextEventDigest: digest(after)
+  };
+  writePending(paths, pending);
+  writeEvents(paths, after);
+  const state = deriveState(after);
+  writeSnapshot(paths, state);
+  rmSync(paths.pending, { force: true });
+  return { events: after, state };
+}
+
+function reconcilePending(paths) {
+  if (!safeRegularFile(paths.pending, 'runtime pending transaction')) return { changed: false };
+  let pending;
+  try { pending = readJson(paths.pending); } catch (error) { throw extensionError(`runtime pending transaction is invalid JSON: ${error.message}`, 'INVALID_RUNTIME_LEDGER'); }
+  if (!pending || pending.schemaVersion !== RUNTIME_STATE_VERSION || !/^[a-f0-9]{64}$/.test(String(pending.beforeEventDigest ?? '')) || !/^[a-f0-9]{64}$/.test(String(pending.nextEventDigest ?? ''))) {
+    throw extensionError('runtime pending transaction is invalid', 'INVALID_RUNTIME_LEDGER');
+  }
+  const events = readEvents(paths);
+  const actual = digest(events);
+  if (actual === pending.beforeEventDigest) {
+    rmSync(paths.pending, { force: true });
+    return { changed: true, action: 'discarded-unapplied-pending-transaction' };
+  }
+  if (actual === pending.nextEventDigest) {
+    writeSnapshot(paths, deriveState(events));
+    rmSync(paths.pending, { force: true });
+    return { changed: true, action: 'completed-pending-transaction' };
+  }
+  throw extensionError('runtime pending transaction does not match the event ledger', 'RUNTIME_LEDGER_DIVERGED');
+}
+
+function currentMissionMatches(state, context) {
+  return state.mission.digest === digest(context.mission)
+    && state.mission.targetCommit === context.mission.target.commit
+    && state.mission.packetDigest === context.mission.packet.digest
+    && state.mission.policyDigest === context.mission.corePolicyDigest;
+}
+
+function publicPackage(workPackage) {
+  return {
+    id: workPackage.id,
+    state: workPackage.state,
+    version: workPackage.version,
+    dependsOn: [...workPackage.dependsOn],
+    requirements: [...workPackage.requirements],
+    resourceClaims: [...workPackage.resourceClaims],
+    run: workPackage.run ? { ...workPackage.run } : null,
+    lease: workPackage.lease ? { id: workPackage.lease.id, expiresAt: workPackage.lease.expiresAt } : null,
+    blocked: workPackage.blocked
+  };
+}
+
+function reportRuntime(context, state, { warnings = [], recovered = null } = {}) {
+  const expired = state.packages.filter((entry) => entry.lease && new Date(entry.lease.expiresAt).getTime() <= Date.now()).map((entry) => entry.id);
+  if (!currentMissionMatches(state, context)) warnings.push('runtime state belongs to a different revision of this mission; allocation and transitions are blocked');
+  if (!context.missionReport.ok) warnings.push('mission is not current; allocation and transitions are blocked');
+  if (expired.length) warnings.push(`${expired.length} lease(s) are expired; run vld runtime recover`);
+  return {
+    ok: warnings.length === 0,
+    runtime: {
+      missionId: state.mission.id,
+      missionDigest: state.mission.digest,
+      policy: { id: state.policy.id, digest: state.policy.digest },
+      sequence: state.sequence
+    },
+    mission: { id: context.mission.id, current: context.missionReport.ok, stale: context.missionReport.stale },
+    packages: state.packages.map(publicPackage),
+    warnings,
+    ...(recovered ? { recovered } : {})
+  };
+}
+
+function assertCurrentRuntime(context, state, policy) {
+  if (!context.missionReport.ok || !currentMissionMatches(state, context)) throw extensionError('runtime mission authority is stale or changed; create a new reviewed mission/runtime instead', 'STALE_RUNTIME_MISSION');
+  const checked = validateRuntimePolicy(policy);
+  if (!checked.ok || runtimePolicyDigest(policy) !== state.policy.digest) throw extensionError('runtime policy differs from its frozen policy digest', 'STALE_RUNTIME_POLICY');
+}
+
+function normalizeIdempotency(key, request) {
+  if (key === undefined || key === null) return null;
+  if (!IDEMPOTENCY_KEY.test(String(key))) throw extensionError('idempotency key must be a bounded identifier', 'INVALID_RUNTIME_IDEMPOTENCY');
+  return { key: String(key), requestDigest: digest(request) };
+}
+
+function idempotentResult(events, metadata, state, context) {
+  if (!metadata) return null;
+  const existing = events.find((event) => event.idempotencyKey === metadata.key);
+  if (!existing) return null;
+  if (existing.requestDigest !== metadata.requestDigest) throw extensionError('idempotency key was reused for a different request', 'RUNTIME_IDEMPOTENCY_CONFLICT');
+  return { changed: false, replayedSequence: existing.sequence, status: reportRuntime(context, state) };
+}
+
+function activeLease(workPackage, token, at) {
+  if (!workPackage.lease || !workPackage.run) throw extensionError('package has no active lease', 'RUNTIME_LEASE_NOT_FOUND');
+  if (new Date(workPackage.lease.expiresAt).getTime() <= new Date(at).getTime()) throw extensionError('package lease has expired; run runtime recover', 'RUNTIME_LEASE_EXPIRED');
+  if (typeof token !== 'string' || digest(token) !== workPackage.lease.tokenDigest) throw extensionError('lease token is invalid', 'RUNTIME_LEASE_FORBIDDEN');
+}
+
+function transitionReadiness(state, sequence, at) {
+  const events = [];
+  let working = cloneState(state);
+  for (const workPackage of working.packages) {
+    if (workPackage.state !== 'planned') continue;
+    const ready = workPackage.dependsOn.every((dependency) => working.packages.find((entry) => entry.id === dependency)?.state === 'merged');
+    if (!ready) continue;
+    const event = { schemaVersion: EVENT_VERSION, sequence: sequence + events.length, at, type: 'ready', actor: { role: 'runtime', id: 'runtime-host' }, packageId: workPackage.id, from: 'planned', to: 'ready' };
+    working = applyEvent(working, event);
+    events.push(event);
+  }
+  return events;
+}
+
+/** Initialize a Runtime ledger from one current, verified mission. */
+export function initializeRuntime({ missionFile, projectDir = '.', policy = defaultRuntimePolicy(), now } = {}) {
+  const context = runtimeContext({ missionFile, projectDir, requireCurrent: true });
+  const checked = validateRuntimePolicy(policy);
+  if (!checked.ok) throw extensionError(`runtime policy is invalid:\n${checked.errors.map((entry) => `- ${entry}`).join('\n')}`, 'INVALID_RUNTIME_POLICY');
+  mkdirWithoutSymlinks(context.paths.directory, 'runtime directory');
+  return withRuntimeLock(context.paths, () => {
+    if (existsSync(context.paths.events)) {
+      const { state } = readLedger(context.paths);
+      if (!currentMissionMatches(state, context)) throw extensionError('a different mission revision already owns this runtime directory', 'RUNTIME_MISSION_MISMATCH');
+      if (state.policy.digest !== runtimePolicyDigest(policy)) throw extensionError('runtime policy differs from existing runtime state', 'RUNTIME_POLICY_MISMATCH');
+      return { changed: false, status: reportRuntime(context, state) };
+    }
+    const at = nowIso(now);
+    const event = {
+      schemaVersion: EVENT_VERSION,
+      sequence: 1,
+      at,
+      type: 'initialized',
+      actor: { role: 'runtime', id: 'runtime-host' },
+      mission: {
+        id: context.mission.id,
+        digest: digest(context.mission),
+        file: context.missionFile,
+        targetCommit: context.mission.target.commit,
+        packetDigest: context.mission.packet.digest,
+        policyDigest: context.mission.corePolicyDigest
+      },
+      policy: { id: policy.id, digest: runtimePolicyDigest(policy) },
+      packages: context.mission.workPackages
+    };
+    const events = [event];
+    const state = deriveState(events);
+    writeEvents(context.paths, events);
+    writeSnapshot(context.paths, state);
+    return { changed: true, status: reportRuntime(context, state) };
+  });
+}
+
+/** Inspect the ledger without changing Runtime state. */
+export function runtimeStatus({ missionFile, projectDir = '.', now } = {}) {
+  const context = runtimeContext({ missionFile, projectDir, requireCurrent: false });
+  const { state } = readLedger(context.paths);
+  const warnings = [];
+  const timestamp = nowIso(now);
+  const expired = state.packages.filter((entry) => entry.lease && new Date(entry.lease.expiresAt).getTime() <= new Date(timestamp).getTime()).map((entry) => entry.id);
+  if (expired.length) warnings.push(`${expired.length} lease(s) are expired; run vld runtime recover`);
+  return reportRuntime(context, state, { warnings });
+}
+
+/** Allocate one ready package and return its one-time lease token. */
+export function allocateRuntimePackage({ missionFile, packageId, projectDir = '.', actor = { role: 'operator', id: 'local-operator' }, assignee, leaseMs = 5 * 60 * 1_000, idempotencyKey = null, now, policy = defaultRuntimePolicy() } = {}) {
+  const context = runtimeContext({ missionFile, projectDir, requireCurrent: true });
+  const requestedActor = assertCanAllocate(actor);
+  const holder = assertRuntimeActor(assignee);
+  if (holder.role !== 'implementer') throw extensionError('runtime assignee must have implementer role', 'INVALID_RUNTIME_ASSIGNEE');
+  const duration = assertLeaseDuration(leaseMs, policy);
+  const at = nowIso(now);
+  return withRuntimeLock(context.paths, () => {
+    const { events, state } = readLedger(context.paths);
+    assertCurrentRuntime(context, state, policy);
+    const request = { operation: 'allocate', packageId, actor: requestedActor, assignee: holder, leaseMs: duration };
+    const idempotency = normalizeIdempotency(idempotencyKey, request);
+    const replay = idempotentResult(events, idempotency, state, context);
+    if (replay) return replay;
+    const workPackage = state.packages.find((entry) => entry.id === packageId);
+    if (!workPackage) throw extensionError(`runtime mission has no work package "${packageId}"`, 'UNKNOWN_WORK_PACKAGE');
+    if (workPackage.state !== 'ready') throw extensionError(`work package "${packageId}" is ${workPackage.state}, not ready`, 'RUNTIME_PACKAGE_NOT_READY');
+    const leaseToken = `lease-${randomUUID()}`;
+    const event = {
+      schemaVersion: EVENT_VERSION,
+      sequence: state.sequence + 1,
+      at,
+      type: 'allocated',
+      actor: requestedActor,
+      packageId,
+      run: { id: `run-${randomUUID()}`, holderId: holder.id },
+      lease: { id: `lease-${randomUUID()}`, tokenDigest: digest(leaseToken), expiresAt: plusMilliseconds(at, duration) },
+      ...(idempotency ? { idempotencyKey: idempotency.key, requestDigest: idempotency.requestDigest } : {})
+    };
+    const committed = appendEvents(context.paths, events, [event]);
+    const allocated = committed.state.packages.find((entry) => entry.id === packageId);
+    return { changed: true, leaseToken, status: reportRuntime(context, committed.state), allocation: publicPackage(allocated) };
+  });
+}
+
+/** Extend an assigned implementer's lease without exposing its token in the ledger. */
+export function heartbeatRuntimeLease({ missionFile, packageId, runId, leaseToken, projectDir = '.', actor, leaseMs = 5 * 60 * 1_000, idempotencyKey = null, now, policy = defaultRuntimePolicy() } = {}) {
+  const context = runtimeContext({ missionFile, projectDir, requireCurrent: true });
+  const at = nowIso(now);
+  const duration = assertLeaseDuration(leaseMs, policy);
+  return withRuntimeLock(context.paths, () => {
+    const { events, state } = readLedger(context.paths);
+    assertCurrentRuntime(context, state, policy);
+    const workPackage = state.packages.find((entry) => entry.id === packageId);
+    if (!workPackage) throw extensionError(`runtime mission has no work package "${packageId}"`, 'UNKNOWN_WORK_PACKAGE');
+    const requestedActor = assertCanHeartbeat(actor, workPackage.run?.holderId);
+    const request = { operation: 'heartbeat', packageId, runId, actor: requestedActor, leaseTokenDigest: digest(String(leaseToken ?? '')), leaseMs: duration };
+    const idempotency = normalizeIdempotency(idempotencyKey, request);
+    const replay = idempotentResult(events, idempotency, state, context);
+    if (replay) return replay;
+    activeLease(workPackage, leaseToken, at);
+    if (workPackage.run.id !== runId) throw extensionError('run id does not own this package lease', 'RUNTIME_LEASE_FORBIDDEN');
+    const event = {
+      schemaVersion: EVENT_VERSION,
+      sequence: state.sequence + 1,
+      at,
+      type: 'heartbeat',
+      actor: requestedActor,
+      packageId,
+      runId,
+      expiresAt: plusMilliseconds(at, duration),
+      ...(idempotency ? { idempotencyKey: idempotency.key, requestDigest: idempotency.requestDigest } : {})
+    };
+    const committed = appendEvents(context.paths, events, [event]);
+    return { changed: true, status: reportRuntime(context, committed.state), package: publicPackage(committed.state.packages.find((entry) => entry.id === packageId)) };
+  });
+}
+
+/** Apply one host-validated package state transition. */
+export function transitionRuntimePackage({ missionFile, packageId, to, actor, expectedVersion, leaseToken = null, reason = null, projectDir = '.', idempotencyKey = null, now, policy = defaultRuntimePolicy() } = {}) {
+  const context = runtimeContext({ missionFile, projectDir, requireCurrent: true });
+  const at = nowIso(now);
+  return withRuntimeLock(context.paths, () => {
+    const { events, state } = readLedger(context.paths);
+    assertCurrentRuntime(context, state, policy);
+    const workPackage = state.packages.find((entry) => entry.id === packageId);
+    if (!workPackage) throw extensionError(`runtime mission has no work package "${packageId}"`, 'UNKNOWN_WORK_PACKAGE');
+    // Check replay before current-state validation: a timed-out request naturally
+    // sees the already-advanced state but must still return its first receipt.
+    const declaredActor = assertRuntimeActor(actor);
+    const request = { operation: 'transition', packageId, to, actor: declaredActor, expectedVersion, leaseTokenDigest: leaseToken ? digest(leaseToken) : null, reason };
+    const idempotency = normalizeIdempotency(idempotencyKey, request);
+    const replay = idempotentResult(events, idempotency, state, context);
+    if (replay) return replay;
+    if (isTerminalRuntimeState(workPackage.state)) throw extensionError('terminal package state cannot transition again', 'RUNTIME_TERMINAL_STATE');
+    if (!Number.isSafeInteger(expectedVersion) || expectedVersion !== workPackage.version) throw extensionError(`expected package version ${workPackage.version}`, 'RUNTIME_VERSION_CONFLICT');
+    const requestedActor = assertRuntimeTransition({ from: workPackage.state, to, actor: declaredActor, holderId: workPackage.run?.holderId ?? null });
+    if (['allocated', 'running'].includes(workPackage.state) && ['running', 'changes_ready'].includes(to)) activeLease(workPackage, leaseToken, at);
+    if (reason !== null && (typeof reason !== 'string' || !reason.trim() || /[\r\n\0]/.test(reason) || reason.length > 500)) throw extensionError('transition reason must be a bounded one-line string', 'INVALID_RUNTIME_TRANSITION');
+    const event = {
+      schemaVersion: EVENT_VERSION,
+      sequence: state.sequence + 1,
+      at,
+      type: 'transition',
+      actor: requestedActor,
+      packageId,
+      from: workPackage.state,
+      to,
+      expectedVersion,
+      ...(reason ? { reason } : {}),
+      ...(idempotency ? { idempotencyKey: idempotency.key, requestDigest: idempotency.requestDigest } : {})
+    };
+    const transitioned = applyEvent(state, event);
+    const readiness = to === 'merged' ? transitionReadiness(transitioned, event.sequence + 1, at) : [];
+    const committed = appendEvents(context.paths, events, [event, ...readiness]);
+    return { changed: true, status: reportRuntime(context, committed.state), package: publicPackage(committed.state.packages.find((entry) => entry.id === packageId)) };
+  });
+}
+
+/** Reconcile an interrupted transaction/stale lock and block expired leases. */
+export function recoverRuntime({ missionFile, projectDir = '.', now, policy = defaultRuntimePolicy() } = {}) {
+  const context = runtimeContext({ missionFile, projectDir, requireCurrent: false });
+  const recoveredLock = clearStaleRuntimeLock(context.paths);
+  const at = nowIso(now);
+  return withRuntimeLock(context.paths, () => {
+    const pending = reconcilePending(context.paths);
+    const { events, state } = readLedger(context.paths);
+    const expired = state.packages.filter((entry) => entry.lease && new Date(entry.lease.expiresAt).getTime() <= new Date(at).getTime() && !isTerminalRuntimeState(entry.state));
+    let committed = { events, state };
+    if (expired.length) {
+      const additions = expired.map((entry, index) => ({
+        schemaVersion: EVENT_VERSION,
+        sequence: state.sequence + index + 1,
+        at,
+        type: 'lease-expired',
+        actor: { role: 'runtime', id: 'runtime-host' },
+        packageId: entry.id,
+        from: entry.state,
+        to: 'blocked',
+        reason: 'lease expired without a valid heartbeat'
+      }));
+      committed = appendEvents(context.paths, events, additions);
+    }
+    const checked = validateRuntimePolicy(policy);
+    const warnings = checked.ok && committed.state.policy.digest !== runtimePolicyDigest(policy) ? ['runtime policy digest differs from requested local policy'] : [];
+    return reportRuntime(context, committed.state, { warnings, recovered: { lock: recoveredLock, pending, expiredLeases: expired.map((entry) => entry.id) } });
+  });
+}

@@ -209,7 +209,8 @@ vld workflow run discovery --execute
 | **Workflows** | Discovery, feature delivery and release readiness | Typed/resumable DAG; human and agent steps require explicit evidence; command steps can only run an allowlisted VLD argv, and artifact validation is an in-process typed gate—not a shell escape hatch. |
 | **Shared stores** | Pin advisory Markdown and typed artifact templates from Git | `diff` fetches a validated candidate without mutating the project; an update requires the exact reviewed 40-character commit acknowledgement, records it in the lock, and cannot affect compiler or workflow state. |
 | **Interoperability exports** | Bounded Spec Kit and Kiro layouts from a compiled packet | Generated one-way views carry source digest/provenance and state plainly that packet/change manifests remain authoritative. |
-| **Manual workspaces** | One Git worktree/branch for each frozen mission package | Repository-wide exclusive lock, sibling managed root, current-mission gate and recovery-aware cleanup; this is not a Runtime, agent executor or merge-conflict guarantee. |
+| **Manual workspaces** | One Git worktree/branch for each frozen mission package | Repository-wide exclusive lock, sibling managed root, current-mission gate and recovery-aware cleanup; this is not an agent executor or merge-conflict guarantee. |
+| **Local Runtime** | Durable fake-run lifecycle, leases and receipts for a frozen mission | Versioned ledger/snapshot, expected versions, idempotency, loopback-only API and strict no-process/no-network/no-credential policy; no agent is launched. |
 
 The result is one repository and one `vld` CLI, while the packet remains portable and small. Use the agent-facing modules where they help; use the compiler and generated gates as the authority. See [ADR-0002](docs/adr/0002-optional-platform-extensions.md) for the extension boundary and security model. For the researched, future VLD Platform path—Studio, mission runtime, agent scheduler, merge queue and signed catalog—see [the platform expansion study](docs/PLATFORM-EXPANSION-RESEARCH.md) and [implementation plan](docs/VLD-PLATFORM-IMPLEMENTATION-PLAN.md).
 
@@ -265,6 +266,28 @@ vld workspace recover missions/report-export/mission.json --project .
 ```
 
 The allocation ledger is `.vld/workspaces.json`; each repository's Git common directory has a short-lived exclusive lock during VLD-owned worktree/branch mutations. `status` only reports drift. `recover` favours preserving work: a remaining branch is retained, not silently deleted. Worktrees isolate working files and indexes, but they share Git refs and can still produce later merge conflicts; resource-claim overlap is only an advisory warning. These commands use fixed local Git argv only—they do **not** run project commands, agents/models, credentials, networks, pushes, PRs or merges. See [ADR-0004](docs/adr/0004-safe-manual-worktree-allocation.md) for the exact safety and recovery contract.
+
+### Local Runtime — durable fake-run state before agents exist
+
+The optional Runtime owns a versioned event ledger, derived snapshot, expected package versions, bounded leases and receipts. It starts from the same current frozen mission, but it does **not** allocate a worktree, invoke an agent/model, execute a command, access a credential, contact a service, push or merge. Runtime state stays local and ignored under `.vld/runtime/`; the packet and mission declaration remain reviewable authority.
+
+```bash
+# Initialize host-owned state. Packages without dependencies begin ready.
+vld runtime init missions/report-export/mission.json --project .
+
+# An operator allocates a ready package to an implementer identity. Save the one-time
+# lease token: only its digest is recorded in the local ledger.
+vld runtime allocate missions/report-export/mission.json export-api \
+  --assignee agent-alpha --lease-ms 300000 --project .
+vld runtime status missions/report-export/mission.json --project .
+
+# A local control/API host binds only to 127.0.0.1 and prints an in-memory operator token once.
+vld runtime serve missions/report-export/mission.json --project .
+# Recovery replays only a known pending transaction, reaps a dead local lock and blocks expired leases.
+vld runtime recover missions/report-export/mission.json --project .
+```
+
+The fixed M3 policy denies network, process execution, Git push/merge and credential access. The host validates the lifecycle (`ready → allocated → running → changes_ready → verifying → in_review → approved → queued → merged`), roles, independent review, expected version and lease token before a receipt is appended. The loopback JSON API requires a bearer token, caps request bodies and rejects non-loopback browser Origins. Actor identities are deterministic local/fake identities in M3—not an agent adapter or external human authentication system. See [ADR-0005](docs/adr/0005-local-runtime-host-and-fake-run-state.md) for boundaries and recovery semantics.
 
 ## What you get
 
@@ -606,7 +629,8 @@ Shipped in v0.5: calibrated `search_primitives({ activate: true })` MCP routing 
 Shipped in v0.6–v0.9: locked capability modules and bundles, agent handoffs, typed delivery workflows, verified Git-store templates, strict artifact evidence gates, and evidence-linked change archives.
 Shipped in v0.10: a packed-install CI journey, reviewable Git-store refresh previews with exact-commit acknowledgement, and bounded `spec-kit` / `kiro` exports from a verified packet.
 Shipped in v0.11: versioned `vld mission init|validate|status`, which freezes a verified packet, Core-policy digest and immutable Git target into complete requirement-linked work packages without starting an agent or changing Git state.
-Shipped in v0.12: `vld workspace create|status|recover|remove`, a manually operated, repository-serialized Git worktree allocator derived only from a current frozen mission. It uses a sibling managed root, atomic recovery-aware locking and exact acknowledged discard; it does not add a Runtime, model/process execution, push, merge or GitHub integration.
+Shipped in v0.12: `vld workspace create|status|recover|remove`, a manually operated, repository-serialized Git worktree allocator derived only from a current frozen mission. It uses a sibling managed root, atomic recovery-aware locking and exact acknowledged discard; it does not add model/process execution, push, merge or GitHub integration.
+Shipped in v0.13: optional `vld runtime` host state for a frozen mission: versioned JSONL receipts plus an atomically checked snapshot, leases, role/version/idempotency validation, expiry recovery and a bearer-protected loopback API. It deliberately has no agent/process adapter, command execution, network egress, credential lookup, push, merge, PR or GitHub/ACP integration.
 
 1. **Published live-agent comparison runs** — use the optional protocol above across Claude Code, Codex and open-weight coding agents, preserving raw JSON logs and configuration notes; do not treat an export as a competing source of requirements.
 2. **`vld change --quick`** — for one-line changes that do not deserve a delta: an explicit, labelled path with no probe, for teams that accept the trade.

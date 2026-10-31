@@ -25,6 +25,9 @@ coverage/
 .vscode/*
 !.vscode/extensions.json
 
+# local Runtime state: event ledgers, ephemeral locks and per-launch local API data
+.vld/runtime/
+
 # local scratch
 tmp/
 .tmp/
