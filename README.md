@@ -215,6 +215,7 @@ vld workflow run discovery --execute
 | **Frozen delivery candidate** | Exact candidate tuple, detached packet integration, independent review and local queue | Runtime validates allocated branch/base ancestry and a live lease; a closed policy permits only in-process packet verification. It records bounded receipts and performs no project command, merge, push, PR, provider or credential action. |
 | **Local Studio** | Browser dashboard and VS Code command entry over the loopback Runtime API | Per-response nonce CSP, manual in-memory bearer token and text-only rendering; Studio has no Git, agent, shell, workspace-file, merge or forge authority. |
 | **Signed content catalog** | Curated, Git-fetched but Ed25519-verified inert content packages | An explicit local trust root verifies threshold-signed canonical index/package metadata, expiry, identity, compatibility and payload digests before cache/lock/copy; v1 never executes or enables content. |
+| **Optional ACP/GitHub adapters** | Stable ACP v1 peer bridge and exact-SHA GitHub PR contract | Separate opt-in packages; no Core dependency, credential discovery, auto-enable, push, webhook or branch-protection replacement. |
 
 The result is one repository and one `vld` CLI, while the packet remains portable and small. Use the agent-facing modules where they help; use the compiler and generated gates as the authority. See [ADR-0002](docs/adr/0002-optional-platform-extensions.md) for the extension boundary and security model. For the researched, future VLD Platform path—Studio, mission runtime, agent scheduler, merge queue and signed catalog—see [the platform expansion study](docs/PLATFORM-EXPANSION-RESEARCH.md) and [implementation plan](docs/VLD-PLATFORM-IMPLEMENTATION-PLAN.md).
 
@@ -366,6 +367,21 @@ vld catalog copy team-catalog review-content review-guidance \
 ```
 
 `catalog status` verifies the previously pinned root/index/cache offline. Root rotation needs the exact new root digest acknowledgement plus signatures meeting the currently trusted root threshold. Copying never enables a module, applies a bundle, runs a workflow, changes the compiler packet or executes content; use the existing explicit Core flows for those actions. Studio shows catalog trust/publisher/digest state when a catalog is configured. See [ADR-0009](docs/adr/0009-signed-content-only-catalog.md).
+
+### Optional ACP v1 and GitHub adapters — protocol peers, not new authority
+
+M8 adds two explicit integration boundaries under `factory/integrations`. They are not installed, imported or invoked by Core unless an operator deliberately selects them. The ACP package pins the stable `@agentclientprotocol/sdk` root entry point and rejects experimental/v2 use. Its host advertises no client filesystem, terminal, MCP, authentication, elicitation or credential capability; it converts only bounded ACP session metadata to a host receipt. An ACP peer remains read-only in the same limited sense as `local-process`: setting a CWD is **not** filesystem or network containment.
+
+```bash
+# Optional ACP dependency; this is never required for normal vld use or CI.
+npm install --prefix factory/integrations/acp-v1
+# A reviewed agent policy must explicitly set adapter: "acp-v1" and remain
+# read-only, direct-argv, no-network/no-credential/no-push/no-merge.
+vld runtime agent run missions/report-export/mission.json export-api \
+  --policy policies/acp-read-only.json --lease-token "$LEASE" --project .
+```
+
+The GitHub package is a caller-injected REST client rather than a CLI credential store: it requires an in-memory token and an immutable plan built from an exact VLD candidate, independent approval and queued tuple. It can create/update a PR, inspect the same head SHA/base/check/review facts, and only request an exact-SHA merge when the reviewed plan enables it. It never reads ambient `gh`/environment credentials, pushes branches, runs a webhook server or substitutes for GitHub branch protection. Live use remains a manual disposable-account/repository exercise; normal CI uses recorded fixture responses only. See [ADR-0010](docs/adr/0010-optional-acp-and-github-provider-boundaries.md).
 
 ## What you get
 
@@ -713,6 +729,7 @@ Shipped in v0.14: `vld runtime agent run|status`, with deterministic fake runs a
 Shipped in v0.15: `vld runtime delivery submit|verify|approve|queue|status`, an exact-SHA local candidate/review foundation. It validates allocated-branch/base ancestry, uses one temporary detached integration worktree and a closed in-process packet check, records digest-bound independent review/queue receipts, and intentionally has no project-command, merge, push, PR, forge or credential capability.
 Shipped in v0.16: `vld studio serve` and the Runtime `/studio` dashboard, plus a VS Code command-entry extension. The static local client displays Runtime packet/mission/lease/receipt state through the existing authenticated loopback API, has a nonce CSP and text-only rendering, and can request only typed Runtime allocation/recovery actions—never Git, an agent, a shell, merge or forge work.
 Shipped in v0.17: `vld catalog trust|add|diff|update|status|copy`, a separately locked Ed25519 threshold-signed catalog of bounded inert content. An explicit local root validates canonical index/package metadata, expiry, compatibility, publisher and every payload digest before cache/lock/copy; Git transport cannot confer trust, and catalog content cannot execute or enable itself.
+Shipped in v0.18: optional stable ACP v1 and GitHub REST adapter packages. ACP has a separately installed SDK boundary and bounded host event normalization; GitHub consumes an immutable candidate/approval/queue plan with caller-supplied in-memory credentials, exact head/base SHA checks and GitHub-enforced merge gates. Neither adds Core credentials, automatic process/network use, push, webhook or autonomous merge authority.
 
 1. **Published live-agent comparison runs** — use the optional protocol above across Claude Code, Codex and open-weight coding agents, preserving raw JSON logs and configuration notes; do not treat an export as a competing source of requirements.
 2. **`vld change --quick`** — for one-line changes that do not deserve a delta: an explicit, labelled path with no probe, for teams that accept the trade.

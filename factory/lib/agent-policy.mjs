@@ -12,7 +12,7 @@ import path from 'node:path';
 import { digest, ensureProjectDir, extensionError, ID_PATTERN } from './extension-utils.mjs';
 
 export const AGENT_POLICY_SCHEMA_VERSION = 1;
-export const AGENT_ADAPTER_IDS = Object.freeze(['fake', 'local-process']);
+export const AGENT_ADAPTER_IDS = Object.freeze(['fake', 'local-process', 'acp-v1']);
 export const AGENT_CAPABILITIES = Object.freeze([
   'readWorkspace',
   'writeWorkspace',
@@ -143,15 +143,16 @@ export function validateAgentPolicy(policy) {
       if (executable !== null) errors.push('fake adapter command.executable must be null');
       if (policy.capabilities?.runDeclaredCommands !== false) errors.push('fake adapter must not have process command authority');
     }
-    if (policy.adapter === 'local-process') {
-      if (script !== null) errors.push('local-process command.script must be null');
-      if (!safeAbsoluteExecutable(executable)) errors.push('local-process command.executable must be a safe absolute path');
-      // A bare local process has no portable filesystem containment. Do not
-      // pretend CWD is a sandbox; a future explicit sandbox adapter owns writes.
+    if (policy.adapter === 'local-process' || policy.adapter === 'acp-v1') {
+      if (script !== null) errors.push(`${policy.adapter} command.script must be null`);
+      if (!safeAbsoluteExecutable(executable)) errors.push(`${policy.adapter} command.executable must be a safe absolute path`);
+      // A bare peer process has no portable filesystem or network containment.
+      // CWD is not a sandbox; ACP v1 retains the same read-only host boundary as
+      // local-process until a separately reviewed sandbox adapter exists.
       if (policy.mode !== 'read-only' || policy.capabilities?.writeWorkspace !== false || policy.capabilities?.sandbox !== false) {
-        errors.push('local-process is read-only until a separately reviewed sandbox adapter is available');
+        errors.push(`${policy.adapter} is read-only until a separately reviewed sandbox adapter is available`);
       }
-      if (policy.capabilities?.runDeclaredCommands !== true) errors.push('local-process requires runDeclaredCommands: true for its one declared argv');
+      if (policy.capabilities?.runDeclaredCommands !== true) errors.push(`${policy.adapter} requires runDeclaredCommands: true for its one declared argv`);
     }
   }
 

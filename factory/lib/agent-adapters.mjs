@@ -222,7 +222,9 @@ export function adapterCapabilities(id) {
   if (!AGENT_ADAPTER_IDS.includes(id)) throw extensionError('unknown M4 agent adapter', 'UNKNOWN_AGENT_ADAPTER');
   return id === 'fake'
     ? { readWorkspace: true, writeWorkspace: true, runDeclaredCommands: false, network: false, streamEvents: true, cancel: true, reconnect: true, sandbox: true }
-    : { readWorkspace: true, writeWorkspace: false, runDeclaredCommands: true, network: false, streamEvents: true, cancel: true, reconnect: false, sandbox: false };
+    : id === 'acp-v1'
+      ? { readWorkspace: true, writeWorkspace: false, runDeclaredCommands: true, network: false, streamEvents: true, cancel: true, reconnect: true, sandbox: false }
+      : { readWorkspace: true, writeWorkspace: false, runDeclaredCommands: true, network: false, streamEvents: true, cancel: true, reconnect: false, sandbox: false };
 }
 
 /** Execute exactly one adapter attempt under a validated M4 policy. */
@@ -230,5 +232,17 @@ export async function executeAgentAdapter({ spec, policy, signal = null, onEvent
   assertAgentPolicy(policy);
   if (!spec || typeof spec !== 'object' || Array.isArray(spec)) throw extensionError('agent run spec must be an object', 'INVALID_AGENT_RUN');
   if (policy.adapter === 'fake') return runFake({ policy, signal, onEvent });
+  if (policy.adapter === 'acp-v1') {
+    // The stable ACP v1 SDK is a deliberately optional nested package. Core
+    // never imports it at startup and no experimental/v2 endpoint is selected.
+    let adapter;
+    try { adapter = await import('../integrations/acp-v1/index.mjs'); } catch (error) {
+      if (error?.code === 'ERR_MODULE_NOT_FOUND' && /@agentclientprotocol\/sdk/.test(String(error.message))) {
+        throw extensionError('ACP v1 adapter is not installed; run npm install --prefix factory/integrations/acp-v1 before selecting it', 'ACP_V1_ADAPTER_UNAVAILABLE');
+      }
+      throw error;
+    }
+    return adapter.runAcpV1Adapter({ spec, policy, signal, onEvent });
+  }
   return runLocalProcess({ spec, policy, signal, onEvent });
 }
