@@ -38,7 +38,7 @@ const LOCK_VERSION = 1;
 const MAX_RECEIPTS = 200;
 const COMMIT = /^[a-f0-9]{40}$/;
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9][A-Za-z0-9._-]{7,120}$/;
-const EVENT_TYPES = new Set(['initialized', 'allocated', 'heartbeat', 'transition', 'ready', 'lease-expired', 'agent-run']);
+const EVENT_TYPES = new Set(['initialized', 'allocated', 'heartbeat', 'transition', 'ready', 'lease-expired', 'agent-run', 'candidate', 'verification', 'approval', 'queue']);
 
 function errorDetail(error) {
   return String(error?.stderr || error?.message || error || '').trim();
@@ -281,6 +281,71 @@ function publicAgentRun(receipt) {
   };
 }
 
+function validCommit(value) {
+  return COMMIT.test(String(value ?? ''));
+}
+
+function validTime(value) {
+  return typeof value === 'string' && !Number.isNaN(new Date(value).getTime());
+}
+
+function safeSummary(value) {
+  return typeof value === 'string' && value.length <= 4_000 && !/[\r\n\0]/.test(value);
+}
+
+/** M5 receipts bind only immutable SHA/digest metadata and redacted summaries. */
+function validateCandidateReceipt(candidate) {
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) throw extensionError('runtime candidate must be an object', 'INVALID_RUNTIME_LEDGER');
+  const allowed = new Set(['id', 'missionId', 'packageId', 'candidateSha', 'baseSha', 'targetRef', 'targetSha', 'packetDigest', 'policyDigest', 'adapterRunId', 'generatedAt']);
+  for (const key of Object.keys(candidate)) if (!allowed.has(key)) throw extensionError(`runtime candidate.${key} is not allowed`, 'INVALID_RUNTIME_LEDGER');
+  if (!ID_PATTERN.test(String(candidate.id ?? '')) || !ID_PATTERN.test(String(candidate.missionId ?? '')) || !ID_PATTERN.test(String(candidate.packageId ?? '')) || !validCommit(candidate.candidateSha) || !validCommit(candidate.baseSha) || !validCommit(candidate.targetSha)) throw extensionError('runtime candidate has invalid id or commit identity', 'INVALID_RUNTIME_LEDGER');
+  if (typeof candidate.targetRef !== 'string' || !candidate.targetRef || candidate.targetRef.length > 200 || /[\r\n\0]/.test(candidate.targetRef) || candidate.targetRef.startsWith('-') || candidate.targetRef.includes('..')) throw extensionError('runtime candidate has invalid target ref', 'INVALID_RUNTIME_LEDGER');
+  if (!validDigest(candidate.packetDigest) || !validDigest(candidate.policyDigest) || !validTime(candidate.generatedAt)) throw extensionError('runtime candidate has invalid authority metadata', 'INVALID_RUNTIME_LEDGER');
+  if (candidate.adapterRunId !== null && !ID_PATTERN.test(String(candidate.adapterRunId ?? ''))) throw extensionError('runtime candidate has invalid adapter run id', 'INVALID_RUNTIME_LEDGER');
+  return candidate;
+}
+
+function validateCheckReceipt(check) {
+  if (!check || typeof check !== 'object' || Array.isArray(check)) throw extensionError('runtime verification check must be an object', 'INVALID_RUNTIME_LEDGER');
+  const allowed = new Set(['id', 'kind', 'passed', 'output']);
+  for (const key of Object.keys(check)) if (!allowed.has(key)) throw extensionError(`runtime verification check.${key} is not allowed`, 'INVALID_RUNTIME_LEDGER');
+  if (!ID_PATTERN.test(String(check.id ?? '')) || check.kind !== 'vld-packet' || typeof check.passed !== 'boolean') throw extensionError('runtime verification check is invalid', 'INVALID_RUNTIME_LEDGER');
+  if (!check.output || typeof check.output !== 'object' || Array.isArray(check.output) || Object.keys(check.output).some((key) => !new Set(['digest', 'bytes', 'summary']).has(key))) throw extensionError('runtime verification output is invalid', 'INVALID_RUNTIME_LEDGER');
+  if (!validDigest(check.output.digest) || !Number.isSafeInteger(check.output.bytes) || check.output.bytes < 0 || !safeSummary(check.output.summary)) throw extensionError('runtime verification output is invalid', 'INVALID_RUNTIME_LEDGER');
+  return check;
+}
+
+function validateVerificationReceipt(verification) {
+  if (!verification || typeof verification !== 'object' || Array.isArray(verification)) throw extensionError('runtime verification must be an object', 'INVALID_RUNTIME_LEDGER');
+  const allowed = new Set(['id', 'candidateId', 'candidateSha', 'targetSha', 'policyDigest', 'integrationTree', 'outcome', 'generatedAt', 'checks']);
+  for (const key of Object.keys(verification)) if (!allowed.has(key)) throw extensionError(`runtime verification.${key} is not allowed`, 'INVALID_RUNTIME_LEDGER');
+  if (!ID_PATTERN.test(String(verification.id ?? '')) || !ID_PATTERN.test(String(verification.candidateId ?? '')) || !validCommit(verification.candidateSha) || !validCommit(verification.targetSha) || !validCommit(verification.integrationTree) || !validDigest(verification.policyDigest) || !validTime(verification.generatedAt)) throw extensionError('runtime verification has invalid identity metadata', 'INVALID_RUNTIME_LEDGER');
+  if (!['passed', 'failed', 'conflict', 'invalidated'].includes(verification.outcome)) throw extensionError('runtime verification has an invalid outcome', 'INVALID_RUNTIME_LEDGER');
+  if (!Array.isArray(verification.checks) || verification.checks.length !== 1) throw extensionError('runtime verification requires exactly one builtin check receipt', 'INVALID_RUNTIME_LEDGER');
+  for (const check of verification.checks) validateCheckReceipt(check);
+  return verification;
+}
+
+function validateApprovalReceipt(approval) {
+  if (!approval || typeof approval !== 'object' || Array.isArray(approval)) throw extensionError('runtime approval must be an object', 'INVALID_RUNTIME_LEDGER');
+  const allowed = new Set(['id', 'candidateId', 'candidateSha', 'targetSha', 'policyDigest', 'reviewerId', 'approvedAt', 'reason']);
+  for (const key of Object.keys(approval)) if (!allowed.has(key)) throw extensionError(`runtime approval.${key} is not allowed`, 'INVALID_RUNTIME_LEDGER');
+  if (!ID_PATTERN.test(String(approval.id ?? '')) || !ID_PATTERN.test(String(approval.candidateId ?? '')) || !validCommit(approval.candidateSha) || !validCommit(approval.targetSha) || !validDigest(approval.policyDigest) || !ID_PATTERN.test(String(approval.reviewerId ?? '')) || !validTime(approval.approvedAt) || !safeSummary(approval.reason) || !approval.reason.trim()) throw extensionError('runtime approval is invalid', 'INVALID_RUNTIME_LEDGER');
+  return approval;
+}
+
+function validateQueueReceipt(queue) {
+  if (!queue || typeof queue !== 'object' || Array.isArray(queue)) throw extensionError('runtime queue receipt must be an object', 'INVALID_RUNTIME_LEDGER');
+  const allowed = new Set(['id', 'candidateId', 'candidateSha', 'targetSha', 'policyDigest', 'queuedAt']);
+  for (const key of Object.keys(queue)) if (!allowed.has(key)) throw extensionError(`runtime queue.${key} is not allowed`, 'INVALID_RUNTIME_LEDGER');
+  if (!ID_PATTERN.test(String(queue.id ?? '')) || !ID_PATTERN.test(String(queue.candidateId ?? '')) || !validCommit(queue.candidateSha) || !validCommit(queue.targetSha) || !validDigest(queue.policyDigest) || !validTime(queue.queuedAt)) throw extensionError('runtime queue receipt is invalid', 'INVALID_RUNTIME_LEDGER');
+  return queue;
+}
+
+function publicDeliveryReceipt(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
 function validateEvent(event) {
   if (!event || typeof event !== 'object' || Array.isArray(event)) throw extensionError('runtime ledger event must be an object', 'INVALID_RUNTIME_LEDGER');
   if (event.schemaVersion !== EVENT_VERSION) throw extensionError(`runtime ledger event schemaVersion must be ${EVENT_VERSION}`, 'INVALID_RUNTIME_LEDGER');
@@ -298,6 +363,24 @@ function validateEvent(event) {
   if (event.type === 'agent-run') {
     if (event.actor.role !== 'runtime' || !ID_PATTERN.test(String(event.runId ?? ''))) throw extensionError('runtime agent event has an invalid actor or run id', 'INVALID_RUNTIME_LEDGER');
     validateAgentRunReceipt(event.agentRun);
+    return;
+  }
+  if (event.type === 'candidate') {
+    if (!ID_PATTERN.test(String(event.runId ?? ''))) throw extensionError('runtime candidate event has an invalid run id', 'INVALID_RUNTIME_LEDGER');
+    validateCandidateReceipt(event.candidate);
+    return;
+  }
+  if (event.type === 'verification') {
+    if (event.actor.role !== 'runtime') throw extensionError('runtime verification event requires host actor', 'INVALID_RUNTIME_LEDGER');
+    validateVerificationReceipt(event.verification);
+    return;
+  }
+  if (event.type === 'approval') {
+    validateApprovalReceipt(event.approval);
+    return;
+  }
+  if (event.type === 'queue') {
+    validateQueueReceipt(event.queue);
     return;
   }
   if (event.type === 'allocated') {
@@ -352,6 +435,31 @@ function applyEvent(state, event) {
       throw extensionError('runtime agent receipt does not match a running package', 'INVALID_RUNTIME_LEDGER');
     }
     if (next.receipts.some((receipt) => receipt.agentRun?.id === event.agentRun.id)) throw extensionError('runtime agent receipt repeats', 'INVALID_RUNTIME_LEDGER');
+  } else if (event.type === 'candidate') {
+    if (workPackage.state !== 'changes_ready' || workPackage.run?.id !== event.runId || event.actor.role !== 'implementer' || event.actor.id !== workPackage.run.holderId || event.candidate.missionId !== next.mission.id || event.candidate.packageId !== event.packageId) {
+      throw extensionError('runtime candidate does not match an implementer changes-ready package', 'INVALID_RUNTIME_LEDGER');
+    }
+    if (next.receipts.some((receipt) => receipt.candidate?.id === event.candidate.id)) throw extensionError('runtime candidate receipt repeats', 'INVALID_RUNTIME_LEDGER');
+  } else if (event.type === 'verification') {
+    const candidate = next.receipts.find((receipt) => receipt.candidate?.id === event.verification.candidateId)?.candidate;
+    if (workPackage.state !== 'verifying' || !candidate || candidate.candidateSha !== event.verification.candidateSha || candidate.targetSha !== event.verification.targetSha || candidate.policyDigest !== event.verification.policyDigest) {
+      throw extensionError('runtime verification does not match its frozen candidate', 'INVALID_RUNTIME_LEDGER');
+    }
+    if (next.receipts.some((receipt) => receipt.verification?.id === event.verification.id)) throw extensionError('runtime verification receipt repeats', 'INVALID_RUNTIME_LEDGER');
+  } else if (event.type === 'approval') {
+    const candidate = next.receipts.find((receipt) => receipt.candidate?.id === event.approval.candidateId)?.candidate;
+    const verification = next.receipts.find((receipt) => receipt.verification?.candidateId === event.approval.candidateId)?.verification;
+    if (workPackage.state !== 'in_review' || event.actor.role !== 'reviewer' || event.actor.id !== event.approval.reviewerId || event.actor.id === workPackage.run?.holderId || !candidate || !verification || verification.outcome !== 'passed' || candidate.candidateSha !== event.approval.candidateSha || candidate.targetSha !== event.approval.targetSha || candidate.policyDigest !== event.approval.policyDigest) {
+      throw extensionError('runtime approval does not satisfy independent verified review', 'INVALID_RUNTIME_LEDGER');
+    }
+    if (next.receipts.some((receipt) => receipt.approval?.id === event.approval.id)) throw extensionError('runtime approval receipt repeats', 'INVALID_RUNTIME_LEDGER');
+  } else if (event.type === 'queue') {
+    const candidate = next.receipts.find((receipt) => receipt.candidate?.id === event.queue.candidateId)?.candidate;
+    const approval = next.receipts.find((receipt) => receipt.approval?.candidateId === event.queue.candidateId)?.approval;
+    if (workPackage.state !== 'approved' || event.actor.role !== 'release-approver' || !candidate || !approval || candidate.candidateSha !== event.queue.candidateSha || candidate.targetSha !== event.queue.targetSha || candidate.policyDigest !== event.queue.policyDigest) {
+      throw extensionError('runtime queue receipt does not match an approved candidate', 'INVALID_RUNTIME_LEDGER');
+    }
+    if (next.receipts.some((receipt) => receipt.queue?.id === event.queue.id)) throw extensionError('runtime queue receipt repeats', 'INVALID_RUNTIME_LEDGER');
   } else if (event.type === 'allocated') {
     assertCanAllocate(event.actor);
     if (workPackage.state !== 'ready' || workPackage.run || workPackage.lease) throw extensionError('runtime allocation event is not valid for package state', 'INVALID_RUNTIME_LEDGER');
@@ -386,7 +494,11 @@ function applyEvent(state, event) {
     actor: event.actor,
     at: event.at,
     ...(event.from ? { from: event.from, to: event.to } : {}),
-    ...(event.type === 'agent-run' ? { runId: event.runId, agentRun: publicAgentRun(event.agentRun) } : {})
+    ...(event.type === 'agent-run' ? { runId: event.runId, agentRun: publicAgentRun(event.agentRun) } : {}),
+    ...(event.type === 'candidate' ? { runId: event.runId, candidate: publicDeliveryReceipt(event.candidate) } : {}),
+    ...(event.type === 'verification' ? { verification: publicDeliveryReceipt(event.verification) } : {}),
+    ...(event.type === 'approval' ? { approval: publicDeliveryReceipt(event.approval) } : {}),
+    ...(event.type === 'queue' ? { queue: publicDeliveryReceipt(event.queue) } : {})
   }].slice(-MAX_RECEIPTS);
   next.sequence = event.sequence;
   return next;
@@ -536,6 +648,15 @@ function reportRuntime(context, state, { warnings = [], recovered = null } = {})
       packageId: receipt.packageId,
       runId: receipt.runId,
       ...publicAgentRun(receipt.agentRun)
+    })),
+    delivery: state.receipts.filter((receipt) => ['candidate', 'verification', 'approval', 'queue'].includes(receipt.type)).map((receipt) => ({
+      sequence: receipt.sequence,
+      packageId: receipt.packageId,
+      ...(receipt.runId ? { runId: receipt.runId } : {}),
+      ...(receipt.candidate ? { candidate: publicDeliveryReceipt(receipt.candidate) } : {}),
+      ...(receipt.verification ? { verification: publicDeliveryReceipt(receipt.verification) } : {}),
+      ...(receipt.approval ? { approval: publicDeliveryReceipt(receipt.approval) } : {}),
+      ...(receipt.queue ? { queue: publicDeliveryReceipt(receipt.queue) } : {})
     })),
     warnings,
     ...(recovered ? { recovered } : {})
@@ -739,6 +860,186 @@ export function transitionRuntimePackage({ missionFile, packageId, to, actor, ex
     const readiness = to === 'merged' ? transitionReadiness(transitioned, event.sequence + 1, at) : [];
     const committed = appendEvents(context.paths, events, [event, ...readiness]);
     return { changed: true, status: reportRuntime(context, committed.state), package: publicPackage(committed.state.packages.find((entry) => entry.id === packageId)) };
+  });
+}
+
+/** Submit a frozen M5 candidate and atomically enter host-owned verification. */
+export function submitRuntimeCandidate({ missionFile, packageId, runId, candidate, leaseToken, actor, projectDir = '.', policy = defaultRuntimePolicy(), now } = {}) {
+  const context = runtimeContext({ missionFile, projectDir, requireCurrent: true });
+  const requestedActor = assertRuntimeActor(actor);
+  try { validateCandidateReceipt(candidate); } catch (error) { throw extensionError(error.message, 'INVALID_RUNTIME_CANDIDATE'); }
+  const at = nowIso(now);
+  return withRuntimeLock(context.paths, () => {
+    const { events, state } = readLedger(context.paths);
+    assertCurrentRuntime(context, state, policy);
+    const workPackage = state.packages.find((entry) => entry.id === packageId);
+    if (!workPackage) throw extensionError(`runtime mission has no work package "${packageId}"`, 'UNKNOWN_WORK_PACKAGE');
+    const prior = events.find((event) => event.type === 'candidate' && event.candidate?.id === candidate.id);
+    if (prior) {
+      if (prior.packageId !== packageId || prior.runId !== runId || digest(prior.candidate) !== digest(candidate)) throw extensionError('candidate receipt id was reused for different data', 'RUNTIME_IDEMPOTENCY_CONFLICT');
+      return { changed: false, replayedSequence: prior.sequence, status: reportRuntime(context, state), candidate: publicDeliveryReceipt(prior.candidate) };
+    }
+    if (workPackage.state !== 'changes_ready' || workPackage.run?.id !== runId) throw extensionError('candidate submission requires the active changes-ready package run', 'RUNTIME_CANDIDATE_STATE');
+    assertCanHeartbeat(requestedActor, workPackage.run.holderId);
+    activeLease(workPackage, leaseToken, at);
+    const candidateEvent = {
+      schemaVersion: EVENT_VERSION,
+      sequence: state.sequence + 1,
+      at,
+      type: 'candidate',
+      actor: requestedActor,
+      packageId,
+      runId,
+      candidate: publicDeliveryReceipt(candidate)
+    };
+    const candidateState = applyEvent(state, candidateEvent);
+    const transition = {
+      schemaVersion: EVENT_VERSION,
+      sequence: candidateEvent.sequence + 1,
+      at,
+      type: 'transition',
+      actor: { role: 'runtime', id: 'runtime-host' },
+      packageId,
+      from: 'changes_ready',
+      to: 'verifying',
+      expectedVersion: workPackage.version
+    };
+    applyEvent(candidateState, transition);
+    const committed = appendEvents(context.paths, events, [candidateEvent, transition]);
+    return { changed: true, status: reportRuntime(context, committed.state), candidate: publicDeliveryReceipt(candidate), package: publicPackage(committed.state.packages.find((entry) => entry.id === packageId)) };
+  });
+}
+
+/** Persist host verification and atomically enter review or block the candidate. */
+export function recordRuntimeVerification({ missionFile, packageId, verification, projectDir = '.', policy = defaultRuntimePolicy(), now } = {}) {
+  const context = runtimeContext({ missionFile, projectDir, requireCurrent: true });
+  try { validateVerificationReceipt(verification); } catch (error) { throw extensionError(error.message, 'INVALID_RUNTIME_VERIFICATION'); }
+  const at = nowIso(now);
+  return withRuntimeLock(context.paths, () => {
+    const { events, state } = readLedger(context.paths);
+    assertCurrentRuntime(context, state, policy);
+    const workPackage = state.packages.find((entry) => entry.id === packageId);
+    if (!workPackage) throw extensionError(`runtime mission has no work package "${packageId}"`, 'UNKNOWN_WORK_PACKAGE');
+    const prior = events.find((event) => event.type === 'verification' && event.verification?.id === verification.id);
+    if (prior) {
+      if (prior.packageId !== packageId || digest(prior.verification) !== digest(verification)) throw extensionError('verification receipt id was reused for different data', 'RUNTIME_IDEMPOTENCY_CONFLICT');
+      return { changed: false, replayedSequence: prior.sequence, status: reportRuntime(context, state), verification: publicDeliveryReceipt(prior.verification) };
+    }
+    if (workPackage.state !== 'verifying') throw extensionError('verification requires a verifying package', 'RUNTIME_VERIFICATION_STATE');
+    const verificationEvent = {
+      schemaVersion: EVENT_VERSION,
+      sequence: state.sequence + 1,
+      at,
+      type: 'verification',
+      actor: { role: 'runtime', id: 'runtime-host' },
+      packageId,
+      verification: publicDeliveryReceipt(verification)
+    };
+    const verificationState = applyEvent(state, verificationEvent);
+    const passed = verification.outcome === 'passed';
+    const transition = {
+      schemaVersion: EVENT_VERSION,
+      sequence: verificationEvent.sequence + 1,
+      at,
+      type: 'transition',
+      actor: { role: 'runtime', id: 'runtime-host' },
+      packageId,
+      from: 'verifying',
+      to: passed ? 'in_review' : 'blocked',
+      expectedVersion: workPackage.version,
+      ...(!passed ? { reason: `delivery verification ${verification.outcome}` } : {})
+    };
+    applyEvent(verificationState, transition);
+    const committed = appendEvents(context.paths, events, [verificationEvent, transition]);
+    return { changed: true, status: reportRuntime(context, committed.state), verification: publicDeliveryReceipt(verification), package: publicPackage(committed.state.packages.find((entry) => entry.id === packageId)) };
+  });
+}
+
+/** Bind an independent reviewer approval to one exact verified candidate tuple. */
+export function approveRuntimeCandidate({ missionFile, packageId, approval, actor, projectDir = '.', policy = defaultRuntimePolicy(), now } = {}) {
+  const context = runtimeContext({ missionFile, projectDir, requireCurrent: true });
+  const requestedActor = assertRuntimeActor(actor);
+  try { validateApprovalReceipt(approval); } catch (error) { throw extensionError(error.message, 'INVALID_RUNTIME_APPROVAL'); }
+  const at = nowIso(now);
+  return withRuntimeLock(context.paths, () => {
+    const { events, state } = readLedger(context.paths);
+    assertCurrentRuntime(context, state, policy);
+    const workPackage = state.packages.find((entry) => entry.id === packageId);
+    if (!workPackage) throw extensionError(`runtime mission has no work package "${packageId}"`, 'UNKNOWN_WORK_PACKAGE');
+    const prior = events.find((event) => event.type === 'approval' && event.approval?.id === approval.id);
+    if (prior) {
+      if (prior.packageId !== packageId || digest(prior.approval) !== digest(approval)) throw extensionError('approval receipt id was reused for different data', 'RUNTIME_IDEMPOTENCY_CONFLICT');
+      return { changed: false, replayedSequence: prior.sequence, status: reportRuntime(context, state), approval: publicDeliveryReceipt(prior.approval) };
+    }
+    if (workPackage.state !== 'in_review') throw extensionError('approval requires a package in review', 'RUNTIME_APPROVAL_STATE');
+    const approvalEvent = {
+      schemaVersion: EVENT_VERSION,
+      sequence: state.sequence + 1,
+      at,
+      type: 'approval',
+      actor: requestedActor,
+      packageId,
+      approval: publicDeliveryReceipt(approval)
+    };
+    const approvalState = applyEvent(state, approvalEvent);
+    const transition = {
+      schemaVersion: EVENT_VERSION,
+      sequence: approvalEvent.sequence + 1,
+      at,
+      type: 'transition',
+      actor: requestedActor,
+      packageId,
+      from: 'in_review',
+      to: 'approved',
+      expectedVersion: workPackage.version
+    };
+    applyEvent(approvalState, transition);
+    const committed = appendEvents(context.paths, events, [approvalEvent, transition]);
+    return { changed: true, status: reportRuntime(context, committed.state), approval: publicDeliveryReceipt(approval), package: publicPackage(committed.state.packages.find((entry) => entry.id === packageId)) };
+  });
+}
+
+/** Queue an approved exact tuple; M5 deliberately has no local/forge merge action. */
+export function queueRuntimeCandidate({ missionFile, packageId, queue, actor, projectDir = '.', policy = defaultRuntimePolicy(), now } = {}) {
+  const context = runtimeContext({ missionFile, projectDir, requireCurrent: true });
+  const requestedActor = assertRuntimeActor(actor);
+  try { validateQueueReceipt(queue); } catch (error) { throw extensionError(error.message, 'INVALID_RUNTIME_QUEUE'); }
+  const at = nowIso(now);
+  return withRuntimeLock(context.paths, () => {
+    const { events, state } = readLedger(context.paths);
+    assertCurrentRuntime(context, state, policy);
+    const workPackage = state.packages.find((entry) => entry.id === packageId);
+    if (!workPackage) throw extensionError(`runtime mission has no work package "${packageId}"`, 'UNKNOWN_WORK_PACKAGE');
+    const prior = events.find((event) => event.type === 'queue' && event.queue?.id === queue.id);
+    if (prior) {
+      if (prior.packageId !== packageId || digest(prior.queue) !== digest(queue)) throw extensionError('queue receipt id was reused for different data', 'RUNTIME_IDEMPOTENCY_CONFLICT');
+      return { changed: false, replayedSequence: prior.sequence, status: reportRuntime(context, state), queue: publicDeliveryReceipt(prior.queue) };
+    }
+    if (workPackage.state !== 'approved') throw extensionError('queue requires an approved package', 'RUNTIME_QUEUE_STATE');
+    const queueEvent = {
+      schemaVersion: EVENT_VERSION,
+      sequence: state.sequence + 1,
+      at,
+      type: 'queue',
+      actor: requestedActor,
+      packageId,
+      queue: publicDeliveryReceipt(queue)
+    };
+    const queueState = applyEvent(state, queueEvent);
+    const transition = {
+      schemaVersion: EVENT_VERSION,
+      sequence: queueEvent.sequence + 1,
+      at,
+      type: 'transition',
+      actor: requestedActor,
+      packageId,
+      from: 'approved',
+      to: 'queued',
+      expectedVersion: workPackage.version
+    };
+    applyEvent(queueState, transition);
+    const committed = appendEvents(context.paths, events, [queueEvent, transition]);
+    return { changed: true, status: reportRuntime(context, committed.state), queue: publicDeliveryReceipt(queue), package: publicPackage(committed.state.packages.find((entry) => entry.id === packageId)) };
   });
 }
 
