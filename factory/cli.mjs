@@ -25,6 +25,7 @@ import { createMission, missionStatus, readMission, validateMission } from './li
 import { addStore, copyStoreAsset, initStore, previewStoreRefresh, readStoreState, refreshStore, storeStatus } from './lib/stores.mjs';
 import { createWorkspace, recoverWorkspaces, removeWorkspace, workspaceStatus } from './lib/workspaces.mjs';
 import { allocateRuntimePackage, heartbeatRuntimeLease, initializeRuntime, recoverRuntime, runtimeStatus, transitionRuntimePackage } from './lib/runtime.mjs';
+import { runRuntimeAgent, runtimeAgentStatus } from './lib/runtime-agent.mjs';
 import { createRuntimeServer, listenRuntimeServer } from './lib/runtime-server.mjs';
 import { buildPlan, loadPolicy } from './lib/planner.mjs';
 import { loadProfile, KINDS, STAGES, SCALES, TRAITS, RISK_FLAGS } from './lib/profile.mjs';
@@ -46,7 +47,7 @@ const option = (name, fallback) => {
 const VALUE_FLAGS = new Set([
   '-o', '--out', '--repo', '--name', '--idea', '--profile', '--packet',
   '--project', '--modules', '--evidence', '--file', '--ref', '--title', '--from-store', '--types', '--acknowledge', '--target',
-  '--assignee', '--lease-ms', '--run', '--lease-token', '--to', '--actor', '--expected-version', '--port', '--token'
+  '--assignee', '--lease-ms', '--run', '--lease-token', '--to', '--actor', '--expected-version', '--port', '--token', '--policy'
 ]);
 const positional = rest.filter((item, index) => !item.startsWith('-') && !(index > 0 && VALUE_FLAGS.has(rest[index - 1])));
 
@@ -93,6 +94,9 @@ Usage
   vld runtime allocate <mission.json> <package> --assignee <implementer-id> [--lease-ms <ms>] [--project <dir>] [--json]
   vld runtime heartbeat <mission.json> <package> --run <run-id> --lease-token <token> --actor implementer:<id> [--lease-ms <ms>]
   vld runtime transition <mission.json> <package> --to <state> --actor <role:id> --expected-version <n> [--lease-token <token>]
+  vld runtime agent run <mission.json> <package> --policy <agent-policy.json> --lease-token <token> [--project <dir>] [--json]
+  vld runtime agent status <mission.json> [--project <dir>] [--json]
+                                     opt-in fake or one-declared-argv adapter; local processes are read-only without a sandbox
   vld runtime serve <mission.json> [--port <0-65535>] [--token <local-token>] [--project <dir>]
                                      optional loopback-only host state, leases and fake-run receipts; never starts an agent
   vld mcp                            run the MCP server over stdio
@@ -1113,11 +1117,50 @@ function printRuntimeReport(action, report) {
   console.log(`\n${report.ok === false ? 'FAIL' : 'PASS'}\n`);
 }
 
-function runRuntime() {
+async function runRuntime() {
   const [action, missionFile, packageId] = positional;
   const project = option('--project', '.');
   const json = hasFlag('--json');
   try {
+    if (action === 'agent') {
+      const [_, agentAction, agentMissionFile, agentPackageId] = positional;
+      if (agentAction === 'status') {
+        if (!agentMissionFile) fail('Usage: vld runtime agent status <mission.json> [--project <dir>]');
+        const result = runtimeAgentStatus({ missionFile: agentMissionFile, projectDir: project });
+        if (json) console.log(JSON.stringify(result, null, 2));
+        else {
+          console.log(`\nruntime agent status · ${result.runtime.missionId}\n`);
+          for (const agentRun of result.agentRuns) console.log(`  ${agentRun.packageId.padEnd(20)} ${agentRun.adapter.padEnd(14)} ${agentRun.outcome.padEnd(11)} ${agentRun.id}`);
+          if (result.agentRuns.length === 0) console.log('  · no durable adapter receipts');
+          for (const warning of result.warnings) console.log(`  ! ${warning}`);
+          console.log(`\n${result.ok ? 'PASS' : 'FAIL'}\n`);
+        }
+        process.exit(result.ok ? 0 : 1);
+      }
+      if (agentAction === 'run') {
+        if (!agentMissionFile || !agentPackageId) fail('Usage: vld runtime agent run <mission.json> <package> --policy <agent-policy.json> --lease-token <token>');
+        const policyFile = option('--policy', null);
+        const leaseToken = option('--lease-token', null);
+        if (!policyFile || !leaseToken) fail('runtime agent run requires --policy and --lease-token');
+        const controller = new AbortController();
+        const interrupt = () => controller.abort();
+        process.once('SIGINT', interrupt);
+        try {
+          const result = await runRuntimeAgent({ missionFile: agentMissionFile, packageId: agentPackageId, policyFile, leaseToken, projectDir: project, signal: controller.signal });
+          if (json) console.log(JSON.stringify(result, null, 2));
+          else {
+            printRuntimeReport('agent run', result.status);
+            console.log(`  adapter   ${result.agentRun.adapter}`);
+            console.log(`  outcome   ${result.agentRun.outcome}`);
+            console.log(`  receipt   ${result.agentRun.id}\n`);
+          }
+          process.exit(result.ok ? 0 : 1);
+        } finally {
+          process.removeListener('SIGINT', interrupt);
+        }
+      }
+      fail('Usage: vld runtime agent run|status <mission.json> [package]');
+    }
     if (action === 'init') {
       if (!missionFile) fail('Usage: vld runtime init <mission.json> [--project <dir>]');
       const result = initializeRuntime({ missionFile, projectDir: project });
@@ -1260,7 +1303,7 @@ switch (command) {
     runWorkspace();
     break;
   case 'runtime':
-    runRuntime();
+    runRuntime().catch((error) => fail(error.message));
     break;
   case 'mcp':
     runMcp();

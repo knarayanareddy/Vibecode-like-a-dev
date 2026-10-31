@@ -546,6 +546,35 @@ export function workspaceStatus({ missionFile, projectDir = '.' } = {}) {
 }
 
 /**
+ * Return one healthy, frozen workspace for the optional Runtime adapter host.
+ * This is read-only: M4 must not bypass the manual allocator or invent a path.
+ */
+export function runtimeWorkspaceAllocation({ missionFile, packageId, projectDir = '.' } = {}) {
+  const repo = primaryWorkspaceRepository(projectDir);
+  const project = repo.root;
+  const current = missionCurrentOrThrow(missionFile, project);
+  const workPackage = current.mission.workPackages.find((entry) => entry.id === packageId);
+  if (!workPackage) throw extensionError(`mission "${current.mission.id}" has no work package "${packageId}"`, 'UNKNOWN_WORK_PACKAGE');
+  const loaded = readWorkspaceState(repo);
+  if (loaded.errors.length) throw extensionError(`workspace state is invalid:\n${loaded.errors.map((error) => `- ${error}`).join('\n')}`, 'INVALID_WORKSPACE_STATE');
+  const allocation = loaded.state.allocations.find((entry) => entry.missionDigest === digest(current.mission) && entry.packageId === packageId);
+  if (!allocation || allocation.status !== 'allocated') throw extensionError(`work package "${packageId}" has no allocated workspace`, 'WORKSPACE_NOT_FOUND');
+  const health = healthForAllocation(allocation, listWorktrees(repo), workspaceRoot(repo));
+  if (health.state !== 'healthy') throw extensionError(`workspace is ${health.state}: ${health.detail}; run vld workspace recover`, 'WORKSPACE_RECOVERY_REQUIRED');
+  return {
+    id: allocation.id,
+    missionId: allocation.missionId,
+    missionDigest: allocation.missionDigest,
+    packageId: allocation.packageId,
+    worktree: allocation.worktree,
+    branch: allocation.branch,
+    baseCommit: allocation.baseCommit,
+    targetCommit: allocation.targetCommit,
+    resourceClaims: [...allocation.resourceClaims]
+  };
+}
+
+/**
  * Reconcile a stale lock and interrupted removal. It intentionally never deletes
  * an unowned worktree or a remaining branch; recovery favours preserving work.
  */

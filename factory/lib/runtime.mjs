@@ -38,7 +38,7 @@ const LOCK_VERSION = 1;
 const MAX_RECEIPTS = 200;
 const COMMIT = /^[a-f0-9]{40}$/;
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9][A-Za-z0-9._-]{7,120}$/;
-const EVENT_TYPES = new Set(['initialized', 'allocated', 'heartbeat', 'transition', 'ready', 'lease-expired']);
+const EVENT_TYPES = new Set(['initialized', 'allocated', 'heartbeat', 'transition', 'ready', 'lease-expired', 'agent-run']);
 
 function errorDetail(error) {
   return String(error?.stderr || error?.message || error || '').trim();
@@ -244,6 +244,43 @@ function assertEventActor(actor) {
   return assertRuntimeActor(actor);
 }
 
+function validDigest(value) {
+  return /^[a-f0-9]{64}$/.test(String(value ?? ''));
+}
+
+/** Agent receipts are deliberately metadata-only: no argv, host path, env or raw output. */
+function validateAgentRunReceipt(receipt) {
+  if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt)) throw extensionError('runtime agent receipt must be an object', 'INVALID_RUNTIME_LEDGER');
+  const allowed = new Set(['id', 'adapter', 'policyDigest', 'contextDigest', 'workspaceDigest', 'outcome', 'attempts', 'startedAt', 'finishedAt', 'durationMs', 'output']);
+  for (const key of Object.keys(receipt)) if (!allowed.has(key)) throw extensionError(`runtime agent receipt.${key} is not allowed`, 'INVALID_RUNTIME_LEDGER');
+  if (!ID_PATTERN.test(String(receipt.id ?? ''))) throw extensionError('runtime agent receipt has an invalid id', 'INVALID_RUNTIME_LEDGER');
+  if (!ID_PATTERN.test(String(receipt.adapter ?? ''))) throw extensionError('runtime agent receipt has an invalid adapter', 'INVALID_RUNTIME_LEDGER');
+  for (const field of ['policyDigest', 'contextDigest', 'workspaceDigest']) if (!validDigest(receipt[field])) throw extensionError(`runtime agent receipt has an invalid ${field}`, 'INVALID_RUNTIME_LEDGER');
+  if (!['completed', 'failed', 'cancelled', 'timed-out'].includes(receipt.outcome)) throw extensionError('runtime agent receipt has an invalid outcome', 'INVALID_RUNTIME_LEDGER');
+  if (!Number.isSafeInteger(receipt.attempts) || receipt.attempts < 1 || receipt.attempts > 4) throw extensionError('runtime agent receipt has an invalid attempt count', 'INVALID_RUNTIME_LEDGER');
+  if (typeof receipt.startedAt !== 'string' || Number.isNaN(new Date(receipt.startedAt).getTime()) || typeof receipt.finishedAt !== 'string' || Number.isNaN(new Date(receipt.finishedAt).getTime())) throw extensionError('runtime agent receipt has invalid timestamps', 'INVALID_RUNTIME_LEDGER');
+  if (!Number.isSafeInteger(receipt.durationMs) || receipt.durationMs < 0 || receipt.durationMs > 24 * 60 * 60 * 1_000) throw extensionError('runtime agent receipt has an invalid duration', 'INVALID_RUNTIME_LEDGER');
+  if (!receipt.output || typeof receipt.output !== 'object' || Array.isArray(receipt.output) || Object.keys(receipt.output).some((key) => !new Set(['digest', 'bytes', 'summary']).has(key))) throw extensionError('runtime agent receipt output is invalid', 'INVALID_RUNTIME_LEDGER');
+  if (!validDigest(receipt.output.digest) || !Number.isSafeInteger(receipt.output.bytes) || receipt.output.bytes < 0 || typeof receipt.output.summary !== 'string' || receipt.output.summary.length > 4_000 || /[\r\n\0]/.test(receipt.output.summary)) throw extensionError('runtime agent receipt output is invalid', 'INVALID_RUNTIME_LEDGER');
+  return receipt;
+}
+
+function publicAgentRun(receipt) {
+  return {
+    id: receipt.id,
+    adapter: receipt.adapter,
+    policyDigest: receipt.policyDigest,
+    contextDigest: receipt.contextDigest,
+    workspaceDigest: receipt.workspaceDigest,
+    outcome: receipt.outcome,
+    attempts: receipt.attempts,
+    startedAt: receipt.startedAt,
+    finishedAt: receipt.finishedAt,
+    durationMs: receipt.durationMs,
+    output: { ...receipt.output }
+  };
+}
+
 function validateEvent(event) {
   if (!event || typeof event !== 'object' || Array.isArray(event)) throw extensionError('runtime ledger event must be an object', 'INVALID_RUNTIME_LEDGER');
   if (event.schemaVersion !== EVENT_VERSION) throw extensionError(`runtime ledger event schemaVersion must be ${EVENT_VERSION}`, 'INVALID_RUNTIME_LEDGER');
@@ -258,6 +295,11 @@ function validateEvent(event) {
     return;
   }
   if (!ID_PATTERN.test(String(event.packageId ?? ''))) throw extensionError('runtime event has invalid package id', 'INVALID_RUNTIME_LEDGER');
+  if (event.type === 'agent-run') {
+    if (event.actor.role !== 'runtime' || !ID_PATTERN.test(String(event.runId ?? ''))) throw extensionError('runtime agent event has an invalid actor or run id', 'INVALID_RUNTIME_LEDGER');
+    validateAgentRunReceipt(event.agentRun);
+    return;
+  }
   if (event.type === 'allocated') {
     if (!event.run || !ID_PATTERN.test(String(event.run.holderId ?? '')) || typeof event.run.id !== 'string' || !event.lease || typeof event.lease.tokenDigest !== 'string') throw extensionError('runtime allocation event is incomplete', 'INVALID_RUNTIME_LEDGER');
   }
@@ -305,7 +347,12 @@ function applyEvent(state, event) {
   const next = cloneState(state);
   const workPackage = next.packages.find((entry) => entry.id === event.packageId);
   if (!workPackage) throw extensionError(`runtime event references unknown package ${event.packageId}`, 'INVALID_RUNTIME_LEDGER');
-  if (event.type === 'allocated') {
+  if (event.type === 'agent-run') {
+    if (event.actor.role !== 'runtime' || workPackage.state !== 'running' || workPackage.run?.id !== event.runId) {
+      throw extensionError('runtime agent receipt does not match a running package', 'INVALID_RUNTIME_LEDGER');
+    }
+    if (next.receipts.some((receipt) => receipt.agentRun?.id === event.agentRun.id)) throw extensionError('runtime agent receipt repeats', 'INVALID_RUNTIME_LEDGER');
+  } else if (event.type === 'allocated') {
     assertCanAllocate(event.actor);
     if (workPackage.state !== 'ready' || workPackage.run || workPackage.lease) throw extensionError('runtime allocation event is not valid for package state', 'INVALID_RUNTIME_LEDGER');
     workPackage.state = 'allocated';
@@ -338,7 +385,8 @@ function applyEvent(state, event) {
     packageId: event.packageId,
     actor: event.actor,
     at: event.at,
-    ...(event.from ? { from: event.from, to: event.to } : {})
+    ...(event.from ? { from: event.from, to: event.to } : {}),
+    ...(event.type === 'agent-run' ? { runId: event.runId, agentRun: publicAgentRun(event.agentRun) } : {})
   }].slice(-MAX_RECEIPTS);
   next.sequence = event.sequence;
   return next;
@@ -476,11 +524,19 @@ function reportRuntime(context, state, { warnings = [], recovered = null } = {})
     runtime: {
       missionId: state.mission.id,
       missionDigest: state.mission.digest,
+      packetDigest: state.mission.packetDigest,
+      corePolicyDigest: state.mission.policyDigest,
       policy: { id: state.policy.id, digest: state.policy.digest },
       sequence: state.sequence
     },
     mission: { id: context.mission.id, current: context.missionReport.ok, stale: context.missionReport.stale },
     packages: state.packages.map(publicPackage),
+    agentRuns: state.receipts.filter((receipt) => receipt.type === 'agent-run' && receipt.agentRun).map((receipt) => ({
+      sequence: receipt.sequence,
+      packageId: receipt.packageId,
+      runId: receipt.runId,
+      ...publicAgentRun(receipt.agentRun)
+    })),
     warnings,
     ...(recovered ? { recovered } : {})
   };
@@ -683,6 +739,46 @@ export function transitionRuntimePackage({ missionFile, packageId, to, actor, ex
     const readiness = to === 'merged' ? transitionReadiness(transitioned, event.sequence + 1, at) : [];
     const committed = appendEvents(context.paths, events, [event, ...readiness]);
     return { changed: true, status: reportRuntime(context, committed.state), package: publicPackage(committed.state.packages.find((entry) => entry.id === packageId)) };
+  });
+}
+
+/**
+ * Persist an M4 adapter receipt after a host-controlled adapter attempt. This
+ * does not advance lifecycle state; the host performs the separate transition
+ * only after the receipt is durable. Raw process output/path/env never enter it.
+ */
+export function recordRuntimeAgentReceipt({ missionFile, packageId, runId, agentRun, projectDir = '.', actor = { role: 'runtime', id: 'runtime-host' }, policy = defaultRuntimePolicy(), now } = {}) {
+  const context = runtimeContext({ missionFile, projectDir, requireCurrent: true });
+  const requestedActor = assertRuntimeActor(actor);
+  if (requestedActor.role !== 'runtime') throw extensionError('only the Runtime host may record an agent receipt', 'RUNTIME_ACTOR_FORBIDDEN');
+  if (!ID_PATTERN.test(String(packageId ?? '')) || !ID_PATTERN.test(String(runId ?? ''))) throw extensionError('runtime agent receipt package/run id is invalid', 'INVALID_RUNTIME_AGENT_RECEIPT');
+  try { validateAgentRunReceipt(agentRun); } catch (error) {
+    throw extensionError(error.message, 'INVALID_RUNTIME_AGENT_RECEIPT');
+  }
+  const at = nowIso(now);
+  return withRuntimeLock(context.paths, () => {
+    const { events, state } = readLedger(context.paths);
+    assertCurrentRuntime(context, state, policy);
+    const workPackage = state.packages.find((entry) => entry.id === packageId);
+    if (!workPackage) throw extensionError(`runtime mission has no work package "${packageId}"`, 'UNKNOWN_WORK_PACKAGE');
+    if (workPackage.state !== 'running' || workPackage.run?.id !== runId) throw extensionError('runtime agent receipt must match the active running package', 'RUNTIME_AGENT_RUN_MISMATCH');
+    const prior = events.find((event) => event.type === 'agent-run' && event.agentRun?.id === agentRun.id);
+    if (prior) {
+      if (digest(prior.agentRun) !== digest(agentRun) || prior.packageId !== packageId || prior.runId !== runId) throw extensionError('runtime agent receipt id was reused for different data', 'RUNTIME_IDEMPOTENCY_CONFLICT');
+      return { changed: false, replayedSequence: prior.sequence, status: reportRuntime(context, state), agentRun: publicAgentRun(prior.agentRun) };
+    }
+    const event = {
+      schemaVersion: EVENT_VERSION,
+      sequence: state.sequence + 1,
+      at,
+      type: 'agent-run',
+      actor: requestedActor,
+      packageId,
+      runId,
+      agentRun: publicAgentRun(agentRun)
+    };
+    const committed = appendEvents(context.paths, events, [event]);
+    return { changed: true, status: reportRuntime(context, committed.state), agentRun: publicAgentRun(agentRun) };
   });
 }
 

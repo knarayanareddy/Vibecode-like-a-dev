@@ -1,9 +1,9 @@
 # VLD Platform implementation plan
 
-**Status:** Active implementation plan. Phases 1–3 are implemented in VLD 0.13.0: mission authority, manual worktree safety, and an optional local fake-run Runtime host. No agent/process/model adapter, candidate verifier, merge manager, Studio, GitHub/ACP integration or signed catalog is implemented.
+**Status:** Active implementation plan. Phases 1–3 and the safe M4 adapter-host foundation are implemented in VLD 0.14.0: mission authority, manual worktree safety, optional local Runtime state, deterministic fake runs, and a constrained read-only direct-argv local-process adapter. A write-capable sandbox adapter, ACP transport, candidate verifier, merge manager, Studio, GitHub integration and signed catalog are still unimplemented.
 
 **Companion research:** [PLATFORM-EXPANSION-RESEARCH.md](PLATFORM-EXPANSION-RESEARCH.md)
-**Current baseline:** VLD 0.13.0, deterministic Core with packets, gates, evidence, typed workflows, locked modules/stores, agent handoffs, MCP, bounded exports, versioned mission/workspace foundations and a recovery-aware local Runtime ledger/API with no execution authority.
+**Current baseline:** VLD 0.14.0, deterministic Core with packets, gates, evidence, typed workflows, locked modules/stores, agent handoffs, MCP, bounded exports, versioned mission/workspace foundations, a recovery-aware local Runtime ledger/API, and an opt-in M4 adapter host with no Core execution dependency.
 
 
 ## Implementation progress
@@ -12,7 +12,8 @@
 - [x] **M1 initial mission foundation:** Core validates schema-versioned, complete requirement-linked work-package declarations; it freezes a verified packet digest, Core-policy digest and immutable Git target; `init`, `validate` and read-only `status` have real-Git and public-CLI tests.
 - [x] **M2 manual worktree safety foundation:** `workspace create|status|recover|remove` allocates only a current verified mission package at its frozen commit, uses an atomic common-Git lock and sibling managed root, validates a repository-bound ledger, reports drift and preserves work during recovery. It has real-Git, symlink/state/lock/concurrency, public-CLI and packed-install coverage. [ADR-0004](adr/0004-safe-manual-worktree-allocation.md) fixes its narrow authority boundary.
 - [x] **M3 local Runtime host:** `runtime init|status|allocate|heartbeat|transition|recover|serve` owns versioned fake-run state, policy digest, leases, expected versions, receipts and a bearer-protected loopback API. It has policy/role/lease/recovery/API/public-CLI tests and no execution authority. [ADR-0005](adr/0005-local-runtime-host-and-fake-run-state.md) defines the trust boundary.
-- [ ] **M4 onward:** process/model adapters, candidate verification/review/merge lanes, Studio, GitHub/ACP integration and catalog remain intentionally unimplemented until their preceding phase gates below are completed.
+- [x] **M4 adapter-host foundation:** `runtime agent run|status` has a deterministic fake adapter and a strictly policy-declared direct-argv local process adapter. It verifies an M2 workspace plus M3 lease, owns transitions/receipts, excludes parent credentials and retains only redacted output. [ADR-0006](adr/0006-scoped-agent-adapter-host.md) records why unsandboxed local processes are read-only.
+- [ ] **M4 write sandbox / ACP onward:** a write-capable sandbox adapter, ACP transport, candidate verification/review/merge lanes, Studio, GitHub integration and catalog remain intentionally unimplemented until their preceding phase gates below are completed.
 
 ## 1. Objective and success definition
 
@@ -366,20 +367,20 @@ reconnect(runId) -> current status or explicit unsupported result
 
 ### 7.3 Scheduler checklist
 
-- [ ] Define adapter capability names: `read_workspace`, `write_workspace`, `run_declared_commands`, `network`, `stream_events`, `cancel`, `reconnect`, `sandbox` and any future capability only after ADR review.
-- [ ] Implement a fake adapter with scripted, deterministic event sequences for all normal CI tests.
-- [ ] Implement a local-process adapter with direct argv spawning (`spawn`/`execFile` semantics), binary allowlist and absolute/validated executable resolution. Never use `sh -c`, `eval` or interpolated command strings.
-- [ ] Construct agent context from VLD-controlled packet/work-package material; record a prompt/context digest rather than persisting sensitive raw content by default.
-- [ ] Pass only a strict environment allowlist and explicitly referenced credential handles; never inherit the whole parent environment by default.
-- [ ] Set working directory to the allocated worktree and validate it immediately before launch.
-- [ ] Enforce duration, output-size, process-tree and retry limits; record timeout/cancellation receipts.
-- [ ] Keep agent write authority limited to the worktree. Git push and merge are distinct disabled-by-default capabilities.
-- [ ] Make `plan`/analysis modes read-only when the adapter supports them.
-- [ ] Preserve current `vld agent install` handoffs and document that handoff mode does not imply Runtime execution.
+- [x] Define closed capability names: `readWorkspace`, `writeWorkspace`, `runDeclaredCommands`, `network`, `streamEvents`, `cancel`, `reconnect`, `sandbox`, credential and Git fields; unknown/broadening fields are rejected.
+- [x] Implement a fake adapter with finite deterministic success/failure/silent sequences for normal CI tests.
+- [x] Implement a local-process adapter with one policy-declared direct argv, immediate absolute executable validation and no `sh -c`, `eval`, interpolation or PATH search.
+- [x] Construct a digest-only context from VLD-controlled frozen mission/packet/work-package authority; do not persist a raw prompt/transcript.
+- [x] Pass only a fresh non-secret locale allowlist plus VLD-derived identifiers; never inherit the parent environment or a credential handle.
+- [x] Set CWD to a validated M2 allocated worktree immediately before launch.
+- [x] Enforce duration/output/retry limits, process-group termination where supported, cancellation and redacted timeout/cancellation receipts.
+- [x] Keep Git push/merge/network/credential capabilities disabled. A portable CWD is not a sandbox, so unsandboxed `local-process` is read-only; a write capability is rejected until a later sandbox adapter proves isolation.
+- [x] Make the local-process mode read-only; fake runs are process-free deterministic state fixtures.
+- [x] Preserve current `vld agent install` handoffs and document that handoff mode does not imply Runtime execution.
 
 ### 7.4 ACP v1 adapter checklist
 
-- [ ] Add ACP only in a separate optional package/dependency boundary.
+- [ ] Add ACP only in a separate optional package/dependency boundary. **Deferred:** M4's no-new-dependency host intentionally does not import ACP.
 - [ ] Use the stable ACP v1 API/entry point; reject/disable experimental v2 features by default.
 - [ ] Perform capability negotiation and reject a requested run when peer capabilities do not satisfy policy.
 - [ ] Map ACP sessions/events into VLD's normalized run/event/receipt model without allowing peer events to transition mission state directly.
@@ -390,14 +391,14 @@ reconnect(runId) -> current status or explicit unsupported result
 
 **Process adapter**
 
-- [ ] Use fixture executables that succeed, fail, exit before stream setup, ignore termination, emit huge output, emit malformed structured events, remain silent and spawn a child process.
-- [ ] Verify argv is preserved as discrete arguments; malicious task/package text cannot inject a shell flag or second command.
-- [ ] Verify CWD is the assigned worktree and attempts to substitute another CWD are refused.
-- [ ] Verify policy denial occurs before process spawn for missing write/network/command capability.
-- [ ] Verify only allowlisted environment keys reach the fixture; seed secret environment variables in the parent and assert they are absent.
-- [ ] Verify output is size-bounded/redacted and that raw token-like strings do not appear in receipts/API responses.
-- [ ] Verify timeout/cancel terminates the entire process group where supported, leaves a durable receipt and releases/reconciles lease safely.
-- [ ] Verify retry policy does not duplicate candidate submission and stops at budget.
+- [x] Use fixture executables that succeed, ignore termination, emit oversized output and malformed structured events; fake scripts cover success/failure/silent paths without a process.
+- [x] Verify argv is preserved as discrete arguments; a semicolon remains a literal arg and cannot start a second command.
+- [x] Verify CWD is the validated allocated worktree; a missing/unsafe workspace is refused before spawn.
+- [x] Verify policy validation rejects write/network/credential/broad environment capability before spawn.
+- [x] Seed a parent secret environment variable and assert it is absent from the fixture; only explicit locale/VLD identifiers are present.
+- [x] Verify output is capped/redacted; token-like text and absolute host paths do not appear in durable receipts/status.
+- [x] Verify timeout/cancel terminates the process group where supported and the Runtime host records a receipt then blocks unsafe work.
+- [x] Verify retry count is bounded and does not create a candidate submission (M4 has no candidate authority).
 
 **Agent workflow safety**
 
@@ -420,7 +421,7 @@ reconnect(runId) -> current status or explicit unsupported result
 - [ ] Record command/version/model/configuration without recording credentials; retain raw output only in a protected local result location.
 - [ ] Verify the same user journey through an ACP-capable peer when one is available.
 
-**Phase 4 exit:** a fake and one real opt-in local-process agent can complete a scoped work package without Core model calls or broad credential inheritance; ACP v1 is separately contract-tested if released.
+**M4 foundation exit:** complete for deterministic fake runs and opt-in read-only direct-argv local processes. They require a frozen lease/workspace, never involve Core model calls or broad credential inheritance, and emit host-owned redacted receipts. A write-capable sandbox adapter and ACP v1 remain separate future gates; do not treat a working-directory setting as confinement.
 
 ---
 

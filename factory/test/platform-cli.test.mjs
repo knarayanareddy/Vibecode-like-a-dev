@@ -151,10 +151,26 @@ test('public mission journey freezes a packet/target and reports stale target st
   assert.equal(JSON.parse(runtimeInitialized.stdout).status.packages[0].state, 'ready');
   const runtimeAllocated = await cli(['runtime', 'allocate', 'missions/report-export/mission.json', 'export-api', '--assignee', 'agent-alpha', '--project', project, '--json']);
   assert.equal(runtimeAllocated.code, 0, runtimeAllocated.stderr);
-  assert.match(JSON.parse(runtimeAllocated.stdout).leaseToken, /^lease-/);
+  const runtimeLease = JSON.parse(runtimeAllocated.stdout).leaseToken;
+  assert.match(runtimeLease, /^lease-/);
   const runtimeState = await cli(['runtime', 'status', 'missions/report-export/mission.json', '--project', project, '--json']);
   assert.equal(runtimeState.code, 0, runtimeState.stderr);
   assert.equal(JSON.parse(runtimeState.stdout).packages[0].state, 'allocated');
+
+  const runtimeWorkspace = await cli(['workspace', 'create', 'missions/report-export/mission.json', 'export-api', '--project', project, '--json']);
+  assert.equal(runtimeWorkspace.code, 0, runtimeWorkspace.stderr);
+  const fakePolicy = {
+    schemaVersion: 1, id: 'cli-fake-policy', adapter: 'fake', mode: 'write-workspace',
+    capabilities: { readWorkspace: true, writeWorkspace: true, runDeclaredCommands: false, network: false, streamEvents: true, cancel: true, reconnect: true, sandbox: true, credentialAccess: false, gitPush: false, gitMerge: false },
+    limits: { durationMs: 1000, outputBytes: 1024, retryBudget: 0 }, environment: {}, command: { script: 'succeed', executable: null, args: [] }
+  };
+  writeFileSync(path.join(project, 'agent-policy.json'), `${JSON.stringify(fakePolicy)}\n`);
+  const agentRun = await cli(['runtime', 'agent', 'run', 'missions/report-export/mission.json', 'export-api', '--policy', 'agent-policy.json', '--lease-token', runtimeLease, '--project', project, '--json']);
+  assert.equal(agentRun.code, 0, agentRun.stderr);
+  assert.equal(JSON.parse(agentRun.stdout).status.packages[0].state, 'changes_ready');
+  const agentStatus = await cli(['runtime', 'agent', 'status', 'missions/report-export/mission.json', '--project', project, '--json']);
+  assert.equal(agentStatus.code, 0, agentStatus.stderr);
+  assert.equal(JSON.parse(agentStatus.stdout).agentRuns[0].adapter, 'fake');
 
   writeFileSync(path.join(project, 'README.md'), '# next target\n');
   execFileSync('git', ['add', 'README.md'], { cwd: project });
