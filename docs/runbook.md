@@ -22,6 +22,32 @@
 Packets are plain files under version control, so a bad packet is reverted with
 `git checkout -- <packet>` and regenerated with `vld compile … --force`.
 
+## Signed catalog trust incident
+
+A catalog remote is transport, not authority. If an index/package/payload signature,
+expiry, publisher identity or digest fails:
+
+1. **Quarantine:** do not run `vld catalog update`; preserve `.vld/catalog.json`,
+   `.vld/catalog-root.json` and the affected `.vld/catalogs/CATALOG_ID` directory
+   for review. `vld catalog status CATALOG_ID` performs an offline verification and records
+   the failed trust decision without contacting a remote.
+2. **Contain:** copied content is inert and cannot execute or enable itself. Locate
+   its explicit provenance with `.vld/catalog-copies.json`; stop treating affected
+   copies as reviewed guidance until their publisher/digest is confirmed. There is
+   no catalog-based agent, plugin, shell or compiler-policy execution path to
+   disable in v1.
+3. **Rollback:** retain the existing lock/cache rather than acknowledging a changed
+   commit. Restore a previously reviewed catalog cache/lock from version control or
+   a backup only after `catalog status` passes against the still-trusted root.
+4. **Revoke/rotate:** obtain the publisher's reviewed replacement root metadata.
+   Root rotation requires its exact digest acknowledgement and signatures meeting
+   the currently trusted root threshold, for example: `vld catalog trust
+   reviewed-root-v2.json --acknowledge SHA256_OF_REVIEWED_ROOT`. Re-add/review
+   catalogs under the new root; do not hand-edit catalog locks.
+5. **Audit:** review `catalog.json` for package publisher/version/digest and
+   `catalog-copies.json` for affected output paths, then record the incident and
+   recovery decision in the project's normal review trail.
+
 ## What this document does not cover
 
 Nothing runs as a service, so there is no availability incident to run down. If that

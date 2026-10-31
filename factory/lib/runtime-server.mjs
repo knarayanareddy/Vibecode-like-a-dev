@@ -7,10 +7,12 @@
  */
 
 import http from 'node:http';
+import path from 'node:path';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { extensionError, ID_PATTERN } from './extension-utils.mjs';
 import { assertRuntimeActor } from './runtime-policy.mjs';
 import { assertRuntimeRequest, runtimeFailure, runtimeSuccess } from './runtime-contracts.mjs';
+import { catalogStatus, readCatalogState } from './catalog.mjs';
 import { STUDIO_PATH, studioCapabilities, studioContentSecurityPolicy, studioHtml, studioNonce } from './studio.mjs';
 import {
   allocateRuntimePackage,
@@ -101,6 +103,27 @@ function authenticate(request, identities) {
   throw extensionError('Runtime API bearer token is invalid', 'RUNTIME_UNAUTHORIZED');
 }
 
+function studioCatalogProjection(report, projectDir) {
+  const redact = (value) => String(value ?? '').split(path.resolve(projectDir)).join('<project>').replace(/[\r\n\0]/g, ' ').slice(0, 500);
+  return {
+    ok: report.ok,
+    errors: (report.errors ?? []).map(redact),
+    ...(report.trustedRoot ? { trustedRoot: { ...report.trustedRoot } } : {}),
+    catalogs: (report.catalogs ?? []).map((catalog) => ({
+      id: catalog.id,
+      commit: catalog.commit,
+      rootDigest: catalog.rootDigest,
+      indexDigest: catalog.indexDigest,
+      indexVersion: catalog.indexVersion,
+      indexExpiresAt: catalog.indexExpiresAt,
+      snapshotDigest: catalog.snapshotDigest,
+      packages: (catalog.packages ?? []).map((item) => ({ name: item.name, version: item.version, license: item.license, publisher: { ...item.publisher }, manifestDigest: item.manifestDigest, coreCompatibility: item.coreCompatibility, releaseTimestamp: item.releaseTimestamp, capabilities: [...item.capabilities] })),
+      drift: (catalog.drift ?? []).map(redact),
+      ok: catalog.ok
+    }))
+  };
+}
+
 function dispatch({ request, actor, missionFile, projectDir, close }) {
   const params = request.params;
   switch (request.method) {
@@ -109,7 +132,16 @@ function dispatch({ request, actor, missionFile, projectDir, close }) {
       const status = runtimeStatus({ missionFile, projectDir });
       // This is advisory display metadata only. Every action below still goes
       // through the ordinary Runtime role/policy validation path.
-      return { ...status, studio: { protocolVersion: 1, actor: { ...actor }, actions: studioCapabilities(actor) } };
+      const catalog = readCatalogState(projectDir);
+      return {
+        ...status,
+        studio: {
+          protocolVersion: 1,
+          actor: { ...actor },
+          actions: studioCapabilities(actor),
+          ...(catalog.exists ? { catalog: studioCatalogProjection(catalogStatus(projectDir), projectDir) } : {})
+        }
+      };
     }
     case 'allocate': {
       closedParams(params, new Set(['packageId', 'assignee', 'leaseMs']), 'allocate');

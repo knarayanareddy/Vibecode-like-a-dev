@@ -1,9 +1,9 @@
 # VLD Platform implementation plan
 
-**Status:** Active implementation plan. Phases 1–3, the safe M4 adapter-host foundation, the closed M5 candidate/review foundation and an M6 local Studio foundation are implemented in VLD 0.16.0: mission authority, manual worktree safety, optional local Runtime state, deterministic fake runs, a constrained read-only direct-argv local-process adapter, exact candidate receipt identity, detached packet integration, independent local review/queue receipts, and a CSP-protected local Runtime dashboard/VS Code command entry. A write-capable sandbox adapter, ACP transport, project command verifier, merge manager, full approval/store surfaces, GitHub integration and signed catalog are still unimplemented.
+**Status:** Active implementation plan. Phases 1–3, the safe M4 adapter-host foundation, the closed M5 candidate/review foundation, an M6 local Studio foundation and an M7 signed content-catalog foundation are implemented in VLD 0.17.0: mission authority, manual worktree safety, optional local Runtime state, deterministic fake runs, a constrained read-only direct-argv local-process adapter, exact candidate receipt identity, detached packet integration, independent local review/queue receipts, a CSP-protected local Runtime dashboard/VS Code command entry, and a threshold-signed inert catalog. A write-capable sandbox adapter, ACP transport, project command verifier, merge manager, full approval/store surfaces, GitHub integration and executable adapter catalog are still unimplemented.
 
 **Companion research:** [PLATFORM-EXPANSION-RESEARCH.md](PLATFORM-EXPANSION-RESEARCH.md)
-**Current baseline:** VLD 0.16.0, deterministic Core with packets, gates, evidence, typed workflows, locked modules/stores, agent handoffs, MCP, bounded exports, versioned mission/workspace foundations, a recovery-aware local Runtime ledger/API, an opt-in M4 adapter host, an M5 no-merge local candidate/review host and an M6 local Runtime client with no Core execution dependency.
+**Current baseline:** VLD 0.17.0, deterministic Core with packets, gates, evidence, typed workflows, locked modules/stores, agent handoffs, MCP, bounded exports, versioned mission/workspace foundations, a recovery-aware local Runtime ledger/API, an opt-in M4 adapter host, an M5 no-merge local candidate/review host, an M6 local Runtime client and an M7 content-only catalog with no Core execution dependency.
 
 
 ## Implementation progress
@@ -15,7 +15,8 @@
 - [x] **M4 adapter-host foundation:** `runtime agent run|status` has a deterministic fake adapter and a strictly policy-declared direct-argv local process adapter. It verifies an M2 workspace plus M3 lease, owns transitions/receipts, excludes parent credentials and retains only redacted output. [ADR-0006](adr/0006-scoped-agent-adapter-host.md) records why unsandboxed local processes are read-only.
 - [x] **M5 candidate/review foundation:** `runtime delivery submit|verify|approve|queue|status` freezes exact branch/base/target/packet/policy identities, uses a Runtime-locked detached integration worktree for only an in-process packet check, and writes independent review/queue receipts. It has no project-command, merge, push, PR, forge or credential authority. [ADR-0007](adr/0007-frozen-candidates-and-no-merge-m5-foundation.md) records the boundary.
 - [x] **M6 local Studio foundation:** `studio serve` and Runtime `/studio` provide a static, accessible mission/receipt dashboard through the existing authenticated loopback API; a VS Code command entry opens the dashboard or a read-only inspector. The UI has no Git/agent/shell/merge/forge authority and retains no token. [ADR-0008](adr/0008-local-studio-is-a-runtime-client.md) records the boundary.
-- [ ] **Sandbox / ACP / merge onward:** a write-capable sandbox adapter, ACP transport, project verifier, merge lane manager, full approval/store Studio surfaces, GitHub integration and catalog remain intentionally unimplemented until their preceding phase gates below are completed.
+- [x] **M7 signed content-catalog foundation:** `catalog trust|add|diff|update|status|copy` pins an explicit local Ed25519 trust root and verifies threshold-signed canonical index/package metadata and bounded inert payloads before cache/lock/copy. It has no executable/plugin/enablement authority. [ADR-0009](adr/0009-signed-content-only-catalog.md) records the boundary.
+- [ ] **Sandbox / ACP / merge onward:** a write-capable sandbox adapter, ACP transport, project verifier, merge lane manager, full approval/store Studio surfaces, GitHub integration and executable adapter catalog remain intentionally unimplemented until their preceding phase gates below are completed.
 
 ## 1. Objective and success definition
 
@@ -549,19 +550,19 @@ Evolve locked shared stores into a curated catalog of inert, schema-validated co
 
 ### 10.2 Content catalog v1 checklist
 
-- [ ] Restrict v1 payload types to Markdown guidance, JSON modules/bundles, typed artifact templates, workflow declarations, test fixtures and export schemas.
-- [ ] Define canonical catalog package manifest: name, version, license, Core compatibility range, payload paths/digests, publisher identity, signature/bundle, release timestamp, replacement/revocation metadata and capabilities (`content-only` for v1).
-- [ ] Define a root-of-trust file and threshold/key-rotation process. Use a TUF-inspired signed-index design; do not implement ad hoc unsigned update discovery.
-- [ ] Verify content digest, signature/trust policy, schema and compatibility before any copy/install/enable action.
-- [ ] Reuse and preserve the existing candidate diff + exact acknowledgement update flow.
-- [ ] Lock catalog package identity/version/digests in the consuming project and include provenance in copied artifacts/exports.
-- [ ] Support offline verification from a previously trusted root/index/cache where possible.
-- [ ] Reject expired, revoked, untrusted or malformed metadata without mutating local locks/content.
-- [ ] Make publisher identity, content digest and trust decision visible in CLI/Studio.
+- [x] Restrict v1 payload types to bounded Markdown guidance/artifact templates and JSON modules/bundles/workflows/test fixtures/export schemas; all package capabilities must be exactly `content-only`.
+- [x] Define canonical package metadata: name/version/license/Core compatibility/payload paths+bytes+digests/publisher/release timestamp/replacement/revocation/capabilities/signatures (M7 foundation).
+- [x] Define explicit local root trust with Ed25519 threshold keys and signed, acknowledged key rotation; use canonical key-sorted signed index/package metadata rather than unsigned discovery (M7 foundation).
+- [x] Verify payload digest, signature/trust policy, regular-file/safe-path bounds, schema and Core compatibility before cache/lock/copy; catalog v1 has no install/enable operation.
+- [x] Reuse candidate preview and exact reviewed Git-commit acknowledgement before an atomic refresh (M7 foundation).
+- [x] Lock catalog package identity/version/publisher/payload digests and record copied-output provenance in a separate project lock (M7 foundation).
+- [x] Support offline verification of trusted root/index/cache/lock through `catalog status` (M7 foundation).
+- [x] Reject expired, revoked, untrusted, malformed, incompatible or signature/digest-altered metadata without mutating local cache/locks (M7 foundation).
+- [x] Make publisher identity, content/index/root digest and trust decision visible in CLI status and Studio when a catalog is configured (M7 foundation).
 
 ### 10.3 Executable adapters: deferred boundary checklist
 
-- [ ] Do not accept executable adapters in catalog v1.
+- [x] Do not accept executable adapters in catalog v1: payload schema/extensions and `content-only` capabilities reject them before cache/lock/copy.
 - [ ] Before admitting adapters, design a separate-process RPC protocol, explicit capability grants, version/digest pinning, installation isolation, crash containment and revocation/disable behavior.
 - [ ] Prove an adapter process cannot import or mutate Core compiler policy/packet internals directly.
 - [ ] Require explicit local enablement for every executable adapter even if a catalog signature is trusted.
@@ -571,23 +572,23 @@ Evolve locked shared stores into a curated catalog of inert, schema-validated co
 
 **Cryptographic and metadata validation**
 
-- [ ] Verify valid signed index/package fixtures install successfully and produce exact locks.
-- [ ] Reject altered payload digest, altered manifest, invalid signature, unknown key, insufficient signature threshold, expired metadata, wrong version, revoked artifact and incompatible Core range.
-- [ ] Test root/key rotation, rollback/freeze attack detection and offline cached verification fixtures.
-- [ ] Verify canonical serialization rules so signature verification is not dependent on JSON key ordering.
+- [x] Verify a valid threshold-signed index/package fixture pins exact cache/lock identity and copies only with provenance (M7 foundation test).
+- [x] Reject altered payload/index digest, invalid signature and incompatible Core range without lock mutation (M7 foundation test); unknown-key/threshold/expiry/revocation fixtures remain to add.
+- [x] Test acknowledged old-root-signed key rotation and offline cached verification/digest-drift detection (M7 foundation test); rollback/freeze fixture remains to add.
+- [x] Verify signatures use canonical key-sorted serialization through stable canonical signing helpers (M7 foundation test fixture signs/reloads separately ordered JSON).
 
 **Content safety**
 
-- [ ] Feed catalog content containing shell snippets, path traversal paths, symlinks, oversized files, malformed JSON and malicious Markdown; verify it is inert, bounded and rejected/safely rendered according to type.
-- [ ] Assert catalog workflows cannot introduce arbitrary `run` commands beyond VLD's typed/allowlisted workflow rules.
-- [ ] Assert catalog modules/templates cannot become compiler inputs or mutate a packet without the explicit existing Core flow.
-- [ ] Test diff preview has no project mutation and update refuses any commit/index that differs from the acknowledged target.
+- [x] Enforce safe relative paths, regular non-symlink bounded payloads, strict JSON/Markdown extension types and inert copy-only semantics; shell text is content, never executed (M7 foundation). Malformed/oversized/symlink corpus fixtures remain to add.
+- [x] Validate catalog workflow payloads with VLD's typed/allowlisted workflow validator, so arbitrary `run` commands are rejected (M7 foundation).
+- [x] Catalog copy cannot enable a module/apply a bundle/run a workflow or alter compiler inputs; only explicit existing Core flows retain those authorities (M7 foundation).
+- [x] Test signed diff preview leaves the lock unchanged and update rejects any commit differing from the acknowledged candidate (M7 foundation test).
 
 **Supply-chain/release**
 
-- [ ] Use independent test keys and fixtures; never commit private signing keys.
+- [x] Use runtime-generated independent Ed25519 test keys/fixtures; no private signing key is committed.
 - [ ] Run a packed-install journey that validates catalog verification with no network after fixture cache preparation.
-- [ ] Add an incident runbook: revoke, quarantine, pin rollback, audit affected locks and rotate trust metadata.
+- [x] Add a catalog trust incident runbook covering quarantine, inert-content containment, pinned rollback, copied-output audit and threshold-signed root rotation.
 
 **Phase 7 exit:** curated content is signed, pinned, reviewable and fail-closed; no catalog content can execute code or bypass Core policy.
 
@@ -649,8 +650,8 @@ Evolve locked shared stores into a curated catalog of inert, schema-validated co
 | M4: Process adapter | Scoped local-agent execution | First end-to-end agent vertical | ACP/real agent pilot |
 | M5: Merge queue | Candidate/integration/review/merge receipts | Completes idea-to-verified-merge path | Forge adapter |
 | M6: Studio | Visual local control center | Makes the now-proven Runtime accessible | Optional desktop shell |
-| M7: ACP + GitHub adapter | Portable sessions and remote PR flow | Adds integrations to a tested host contract | Team/remote use |
-| M8: Signed content catalog | Curated extension distribution | Builds on existing stores without executable plugins | Future adapters catalog |
+| M7: Signed content catalog | Curated inert content distribution | Builds on existing stores without executable plugins | Future adapter catalog |
+| M8: ACP + GitHub adapter | Portable sessions and remote PR flow | Adds integrations to a tested host contract | Team/remote use |
 | M9: Remote runners/desktop/adapter catalog | Scale and distribution | Only after local security/recovery is proven | Enterprise roadmap |
 
 A useful product beta can ship after **M6**: a user can compile, create a mission, run a selected local agent in an isolated worktree, inspect/review evidence in Studio, and merge through a guarded local/PR path. M7–M9 broaden integrations and distribution; they should not delay proving the local workflow.

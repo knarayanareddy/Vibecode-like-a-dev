@@ -22,6 +22,7 @@ import { exportPacket } from './lib/exports.mjs';
 import { buildIndex, loadIndex, writeIndex } from './lib/indexer.mjs';
 import { enableModules, listModules, moduleStatus } from './lib/modules.mjs';
 import { createMission, missionStatus, readMission, validateMission } from './lib/missions.mjs';
+import { addCatalog, catalogStatus, copyCatalogPayload, previewCatalogRefresh, readCatalogState, refreshCatalog, trustCatalogRoot } from './lib/catalog.mjs';
 import { addStore, copyStoreAsset, initStore, previewStoreRefresh, readStoreState, refreshStore, storeStatus } from './lib/stores.mjs';
 import { createWorkspace, recoverWorkspaces, removeWorkspace, workspaceStatus } from './lib/workspaces.mjs';
 import { allocateRuntimePackage, heartbeatRuntimeLease, initializeRuntime, recoverRuntime, runtimeStatus, transitionRuntimePackage } from './lib/runtime.mjs';
@@ -76,6 +77,9 @@ Usage
                                      generate a bounded interoperability view; the VLD packet remains authoritative
   vld store init <dir> [--id <id>] | add <id> <git-url> | diff <id> | update <id> --acknowledge <commit>
                                      fetch, review, pin and verify read-only Git-backed shared delivery stores
+  vld catalog trust <root.json> | add <id> <git-url> | diff <id> | update <id> --acknowledge <commit>
+  vld catalog status [id] | copy <id> <package> <payload> --out <file>
+                                     verify a threshold-signed, content-only catalog; it cannot execute or enable content
   vld module list|enable|status|verify [ids] [--project <dir>] [--json]
                                      manage version-locked optional delivery modules
   vld bundle list|show|apply <id> [--profile <file>] [--project <dir>] [--dry-run]
@@ -741,6 +745,76 @@ function runStore() {
   } catch (error) { fail(error.message); }
 }
 
+function printCatalogRefreshPreview(report, { json = false } = {}) {
+  if (json) { console.log(JSON.stringify(report, null, 2)); return; }
+  const { current, next, changes } = report;
+  console.log(`\ncatalog refresh preview · ${current.id}\n`);
+  console.log(`  locked   ${current.commit}`);
+  console.log(`  remote   ${next.commit}${changes.commitChanged ? '' : ' (unchanged)'}`);
+  console.log(`  root     ${next.rootDigest.slice(0, 16)}…`);
+  for (const item of changes.added) console.log(`  + package ${item.name}@${item.version}`);
+  for (const item of changes.removed) console.log(`  - package ${item.name}@${item.version}`);
+  for (const item of changes.changedPackages) console.log(`  ~ package ${item.name}@${item.version}`);
+  if (!changes.changed) console.log('\n  No catalog update. Project state was not changed.\n');
+  else console.log(`\n  Project state was not changed. Review signed metadata and payload digest changes, then run:\n  vld catalog update ${current.id} --acknowledge ${next.commit} --project ${displayPath(report.project)}\n`);
+}
+
+function runCatalog() {
+  const [action = 'status', id, third, fourth] = positional;
+  const project = option('--project', '.');
+  try {
+    if (action === 'trust') {
+      if (!id) fail('Usage: vld catalog trust <root.json> [--acknowledge <root-digest>] [--project <dir>]');
+      const result = trustCatalogRoot({ projectDir: project, rootFile: id, acknowledge: option('--acknowledge', null) });
+      if (hasFlag('--json')) console.log(JSON.stringify(result, null, 2));
+      else console.log(`\n✓ ${result.changed ? 'trusted' : 'already trusted'} catalog root v${result.root.version} · ${result.root.digest}\n`);
+      return;
+    }
+    if (action === 'add') {
+      if (!id || !third) fail('Usage: vld catalog add <id> <git-url> [--ref <branch|tag>] [--project <dir>]');
+      const result = addCatalog({ projectDir: project, id, repository: third, ref: option('--ref', null) });
+      if (hasFlag('--json')) console.log(JSON.stringify(result, null, 2));
+      else console.log(`\n✓ pinned signed catalog ${result.catalog.id} at ${result.catalog.commit}\n  ${result.catalog.packages.length} verified content-only package(s) · ${displayPath(result.file)}\n`);
+      return;
+    }
+    if (action === 'diff') {
+      if (!id) fail('Usage: vld catalog diff <id> [--project <dir>]');
+      printCatalogRefreshPreview(previewCatalogRefresh({ projectDir: project, id }), { json: hasFlag('--json') });
+      return;
+    }
+    if (action === 'update') {
+      if (!id) fail('Usage: vld catalog update <id> --acknowledge <full-commit> [--project <dir>]');
+      const result = refreshCatalog({ projectDir: project, id, acknowledge: option('--acknowledge', null) });
+      if (hasFlag('--json')) console.log(JSON.stringify(result, null, 2));
+      else if (result.unchanged) console.log(`\n✓ catalog ${result.catalog.id} is already pinned at ${result.catalog.commit}; no state changed.\n`);
+      else console.log(`\n✓ refreshed catalog ${result.catalog.id} at ${result.catalog.commit}\n  acknowledgement ${result.catalog.acknowledgedCommit} recorded in ${displayPath(result.file)}\n`);
+      return;
+    }
+    if (action === 'copy') {
+      if (!id || !third || !fourth) fail('Usage: vld catalog copy <id> <package> <payload> --out <file> [--project <dir>]');
+      const result = copyCatalogPayload({ projectDir: project, catalogId: id, packageName: third, payloadId: fourth, out: option('--out', null), force: hasFlag('--force') });
+      if (hasFlag('--json')) console.log(JSON.stringify({ ...result, source: undefined }, null, 2));
+      else console.log(`\n✓ copied verified ${id}/${third}/${fourth} to ${displayPath(result.output)}\n  publisher ${result.provenance.publisher} · digest ${result.provenance.payloadDigest}\n`);
+      return;
+    }
+    if (action === 'list' || action === 'status') {
+      const report = action === 'list' ? readCatalogState(project) : catalogStatus(project, id ?? null);
+      if (hasFlag('--json')) console.log(JSON.stringify(action === 'list' ? { ...report, catalogs: report.state?.catalogs ?? [] } : report, null, 2));
+      else {
+        const catalogs = action === 'list' ? report.state?.catalogs ?? [] : report.catalogs;
+        console.log(`\nsigned content catalogs · ${displayPath(report.project)}\n`);
+        for (const catalog of catalogs) console.log(`  ${catalog.ok === false ? '!' : '✓'} ${catalog.id.padEnd(20)} ${catalog.commit ? catalog.commit.slice(0, 12) : 'unlocked'} · ${(catalog.packages ?? []).length} package(s)`);
+        for (const error of report.errors ?? []) console.log(`  ✗ ${error}`);
+        if (action === 'status') for (const catalog of catalogs) for (const drift of catalog.drift ?? []) console.log(`  ! ${catalog.id}: ${drift}`);
+        console.log(`\n${report.ok === false ? 'FAIL' : 'PASS'}\n`);
+      }
+      if (report.ok === false) process.exit(1);
+      return;
+    }
+    fail('Usage: vld catalog trust|add|diff|update|list|status|copy');
+  } catch (error) { fail(error.message); }
+}
+
 function runModule() {
   const [action = 'list', ids] = positional;
   const project = option('--project', '.');
@@ -1353,6 +1427,9 @@ switch (command) {
     break;
   case 'store':
     runStore();
+    break;
+  case 'catalog':
+    runCatalog();
     break;
   case 'module':
     runModule();
