@@ -6,7 +6,7 @@
 
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -102,6 +102,68 @@ test('public platform journey: bundle, module lock, Codex handoff and discovery 
   assert.ok(JSON.parse(status.stdout).steps.every((step) => step.status === 'complete'));
 });
 
+
+test('public mission journey freezes a packet/target and reports stale target state without launching an agent', async (t) => {
+  const project = mkdtempSync(path.join(os.tmpdir(), 'vld-mission-cli-'));
+  t.after(() => rmSync(project, { recursive: true, force: true }));
+  cpSync(path.join(ROOT, 'examples', 'retro-board', 'spec'), path.join(project, 'specs'), { recursive: true });
+  execFileSync('git', ['init', '-q'], { cwd: project });
+  execFileSync('git', ['config', 'user.email', 'mission@example.invalid'], { cwd: project });
+  execFileSync('git', ['config', 'user.name', 'Mission Test'], { cwd: project });
+  execFileSync('git', ['add', 'specs'], { cwd: project });
+  execFileSync('git', ['commit', '-qm', 'packet'], { cwd: project });
+
+  const requirements = JSON.parse(readFileSync(path.join(project, 'specs', 'spec.json'), 'utf8')).requirements.map((requirement) => requirement.id);
+  writeFileSync(path.join(project, 'definition.json'), `${JSON.stringify({
+    schemaVersion: 1,
+    id: 'report-export',
+    title: 'Implement report export in an isolated package',
+    workPackages: [{ id: 'export-api', title: 'Implement export behavior with tests', requirements, dependsOn: [], resourceClaims: { paths: ['src/export/**', 'test/export/**'] } }]
+  }, null, 2)}
+`);
+
+  const initialized = await cli(['mission', 'init', 'definition.json', '--packet', 'specs', '--project', project, '--json']);
+  assert.equal(initialized.code, 0, initialized.stderr);
+  const mission = JSON.parse(initialized.stdout);
+  assert.equal(mission.ok, true);
+  assert.ok(existsSync(path.join(project, 'missions', 'report-export', 'mission.json')));
+  assert.match(mission.mission.target.commit, /^[a-f0-9]{40}$/);
+  assert.equal(existsSync(path.join(project, '.vld', 'runtime')), false, 'the mission command does not start a runtime');
+
+  const validated = await cli(['mission', 'validate', 'missions/report-export/mission.json', '--project', project, '--json']);
+  assert.equal(validated.code, 0, validated.stderr);
+  assert.equal(JSON.parse(validated.stdout).ok, true);
+
+  const workspace = await cli(['workspace', 'create', 'missions/report-export/mission.json', 'export-api', '--project', project, '--json']);
+  assert.equal(workspace.code, 0, workspace.stderr);
+  const allocation = JSON.parse(workspace.stdout).allocation;
+  assert.ok(existsSync(allocation.worktree));
+  assert.match(allocation.branch, /^vld\/report-export\/export-api$/);
+  const workspaceStatus = await cli(['workspace', 'status', 'missions/report-export/mission.json', '--project', project, '--json']);
+  assert.equal(workspaceStatus.code, 0, workspaceStatus.stderr);
+  assert.equal(JSON.parse(workspaceStatus.stdout).packageStatus[0].status.state, 'healthy');
+  const workspaceRemoved = await cli(['workspace', 'remove', 'missions/report-export/mission.json', 'export-api', '--project', project, '--json']);
+  assert.equal(workspaceRemoved.code, 0, workspaceRemoved.stderr);
+  assert.equal(existsSync(allocation.worktree), false);
+
+  writeFileSync(path.join(project, 'README.md'), '# next target\n');
+  execFileSync('git', ['add', 'README.md'], { cwd: project });
+  execFileSync('git', ['commit', '-qm', 'target moved'], { cwd: project });
+  const stale = await cli(['mission', 'status', 'missions/report-export/mission.json', '--project', project, '--json']);
+  assert.equal(stale.code, 1, stale.stderr);
+  assert.equal(JSON.parse(stale.stdout).stale[0].kind, 'target');
+
+  const missingPacket = await cli(['mission', 'init', 'definition.json', '--project', project]);
+  assert.equal(missingPacket.code, 2);
+  assert.match(missingPacket.stderr, /requires --packet/);
+  const packetWithoutValue = await cli(['mission', 'init', 'definition.json', '--project', project, '--packet']);
+  assert.equal(packetWithoutValue.code, 2);
+  assert.match(packetWithoutValue.stderr, /requires --packet/);
+  const targetWithoutValue = await cli(['mission', 'init', 'definition.json', '--project', project, '--packet', 'specs', '--target']);
+  assert.equal(targetWithoutValue.code, 2);
+  assert.match(targetWithoutValue.stderr, /--target requires a ref value/);
+});
+
 test('public store journey pins a file-backed Git snapshot and reports clean failures', async (t) => {
   const workspace = mkdtempSync(path.join(os.tmpdir(), 'vld-store-cli-'));
   t.after(() => rmSync(workspace, { recursive: true, force: true }));
@@ -126,8 +188,39 @@ test('public store journey pins a file-backed Git snapshot and reports clean fai
   assert.equal(assets.code, 0, assets.stderr); assert.equal(JSON.parse(assets.stdout).stores[0].assets[0].id, 'review-guidance');
   const copied = await cli(['store', 'copy', 'team-playbook', 'review-guidance', '--project', consumer, '--json']);
   assert.equal(copied.code, 0, copied.stderr); assert.match(JSON.parse(copied.stdout).output, /docs\/shared\/team-playbook\/review-guidance\.md$/);
+
+  writeFileSync(path.join(source, 'review.md'), '# Review\n\nReview changed evidence before release.\n');
+  execFileSync('git', ['add', '.'], { cwd: source }); execFileSync('git', ['commit', '-q', '-m', 'refresh candidate'], { cwd: source });
+  const preview = await cli(['store', 'diff', 'team-playbook', '--project', consumer, '--json']);
+  assert.equal(preview.code, 0, preview.stderr);
+  const previewJson = JSON.parse(preview.stdout);
+  assert.equal(previewJson.changes.changed, true);
+  const missingAcknowledgement = await cli(['store', 'update', 'team-playbook', '--project', consumer]);
+  assert.equal(missingAcknowledgement.code, 2); assert.match(missingAcknowledgement.stderr, /--acknowledge/);
+  const updated = await cli(['store', 'update', 'team-playbook', '--acknowledge', previewJson.next.commit, '--project', consumer, '--json']);
+  assert.equal(updated.code, 0, updated.stderr); assert.equal(JSON.parse(updated.stdout).store.acknowledgedCommit, previewJson.next.commit);
+
   const unsafe = await cli(['store', 'add', 'unsafe', '--bad', '--project', consumer]);
   assert.equal(unsafe.code, 2); assert.match(unsafe.stderr, /safe Git URL|Usage/); assert.equal(unsafe.stdout, '');
+});
+
+test('public export journey emits a bounded Spec Kit and Kiro view without replacing packet authority', async (t) => {
+  const workspace = mkdtempSync(path.join(os.tmpdir(), 'vld-export-cli-'));
+  t.after(() => rmSync(workspace, { recursive: true, force: true }));
+  const packet = path.join(ROOT, 'examples', 'retro-board', 'spec');
+
+  const specKit = await cli(['export', 'spec-kit', packet, '--out', path.join(workspace, 'spec-kit'), '--json']);
+  assert.equal(specKit.code, 0, specKit.stderr);
+  assert.equal(JSON.parse(specKit.stdout).source.project, 'retro-board');
+  assert.ok(existsSync(path.join(workspace, 'spec-kit', '.specify', 'memory', 'constitution.md')));
+
+  const kiro = await cli(['export', 'kiro', packet, '--out', path.join(workspace, 'kiro')]);
+  assert.equal(kiro.code, 0, kiro.stderr);
+  assert.match(kiro.stdout, /generated, one-way interoperability/);
+  assert.ok(existsSync(path.join(workspace, 'kiro', '.kiro', 'specs', 'vld-packet', 'requirements.md')));
+
+  const invalid = await cli(['export', 'made-up', packet, '--out', path.join(workspace, 'invalid')]);
+  assert.equal(invalid.code, 2); assert.match(invalid.stderr, /unknown export format/);
 });
 
 test('public platform failures are clean usage/input errors, not agent invocations or stack traces', async (t) => {

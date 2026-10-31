@@ -18,9 +18,12 @@ import { agentStatus, installAgent, listAdapters } from './lib/agents.mjs';
 import { applyBundle, getBundle, listBundles } from './lib/bundles.mjs';
 import { CHANGE_TEMPLATE, applyChange, archiveChange, emitChange, planChange, verifyChange } from './lib/change.mjs';
 import { emitPacket } from './lib/emit/index.mjs';
+import { exportPacket } from './lib/exports.mjs';
 import { buildIndex, loadIndex, writeIndex } from './lib/indexer.mjs';
 import { enableModules, listModules, moduleStatus } from './lib/modules.mjs';
-import { addStore, copyStoreAsset, initStore, readStoreState, refreshStore, storeStatus } from './lib/stores.mjs';
+import { createMission, missionStatus, readMission, validateMission } from './lib/missions.mjs';
+import { addStore, copyStoreAsset, initStore, previewStoreRefresh, readStoreState, refreshStore, storeStatus } from './lib/stores.mjs';
+import { createWorkspace, recoverWorkspaces, removeWorkspace, workspaceStatus } from './lib/workspaces.mjs';
 import { buildPlan, loadPolicy } from './lib/planner.mjs';
 import { loadProfile, KINDS, STAGES, SCALES, TRAITS, RISK_FLAGS } from './lib/profile.mjs';
 import { completeWorkflowStep, getWorkflow, listWorkflows, runWorkflow, workflowStatus } from './lib/workflows.mjs';
@@ -40,7 +43,7 @@ const option = (name, fallback) => {
 };
 const VALUE_FLAGS = new Set([
   '-o', '--out', '--repo', '--name', '--idea', '--profile', '--packet',
-  '--project', '--modules', '--evidence', '--file', '--ref', '--title', '--from-store', '--types'
+  '--project', '--modules', '--evidence', '--file', '--ref', '--title', '--from-store', '--types', '--acknowledge', '--target'
 ]);
 const positional = rest.filter((item, index) => !item.startsWith('-') && !(index > 0 && VALUE_FLAGS.has(rest[index - 1])));
 
@@ -64,8 +67,10 @@ Usage
   vld change init <dir>              write change.json to fill in
   vld artifact list|init|validate|verify|status <type> [id] [--from-store store/asset] [--project <dir>]
                                      generate, validate and cross-check product, architecture, delivery, review and QA artifacts
-  vld store init <dir> [--id <id>] | add <id> <git-url> | update|status [id] | assets|copy <id> [asset]
-                                     fetch, pin and verify read-only Git-backed shared delivery stores
+  vld export <spec-kit|kiro> <packet-dir> -o <dir> [--force]
+                                     generate a bounded interoperability view; the VLD packet remains authoritative
+  vld store init <dir> [--id <id>] | add <id> <git-url> | diff <id> | update <id> --acknowledge <commit>
+                                     fetch, review, pin and verify read-only Git-backed shared delivery stores
   vld module list|enable|status|verify [ids] [--project <dir>] [--json]
                                      manage version-locked optional delivery modules
   vld bundle list|show|apply <id> [--profile <file>] [--project <dir>] [--dry-run]
@@ -74,6 +79,13 @@ Usage
                                      install or inspect generated Codex, Claude Code or Copilot handoffs
   vld workflow list|lint|run|status|complete <id> [step] [--project <dir>]
                                      typed resumable workflows; \`run\` previews unless --execute is supplied
+  vld mission init <definition.json> --packet <dir> [--target HEAD] [--project <dir>] [-o <file>]
+  vld mission validate|status <mission.json> [--project <dir>] [--json]
+                                     freeze a verified packet and Git target into versioned work packages; no agent is run
+  vld workspace create <mission.json> <package> [--project <dir>] [--json]
+  vld workspace status|recover <mission.json> [--project <dir>] [--json]
+  vld workspace remove <mission.json> <package> [--discard --acknowledge <workspace-id>] [--project <dir>]
+                                     allocate, inspect, reconcile or safely remove one Git worktree; no agent is run
   vld mcp                            run the MCP server over stdio
   vld index [--check]                rebuild primitives/index.json
 
@@ -600,39 +612,81 @@ function runArtifact() {
   } catch (error) { fail(error.message); }
 }
 
+function runExport() {
+  const [format, packetDir] = positional;
+  const out = option('-o', option('--out', null));
+  if (!format || !packetDir || !out) fail('Usage: vld export <spec-kit|kiro> <packet-dir> -o <dir> [--force]');
+  try {
+    const result = exportPacket({ format, packetDir, outDir: out, force: hasFlag('--force') });
+    if (hasFlag('--json')) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.log(`\n✓ exported ${result.source.requirements} VLD requirements as a ${format} view\n`);
+      console.log(`  output   ${displayPath(result.out)}`);
+      console.log(`  manifest ${displayPath(result.manifest)}`);
+      console.log('\n  This is generated, one-way interoperability. Edit VLD sources and export again; do not treat these files as requirement authority.\n');
+    }
+  } catch (error) { fail(error.message); }
+}
+
+function printStoreRefreshPreview(report, { json = false } = {}) {
+  if (json) {
+    console.log(JSON.stringify(report, null, 2));
+    return;
+  }
+  const { current, next, changes } = report;
+  console.log(`\nstore refresh preview · ${current.id}\n`);
+  console.log(`  locked   ${current.commit}`);
+  console.log(`  remote   ${next.commit}${changes.commitChanged ? '' : ' (unchanged)'}`);
+  if (changes.metadata.length) console.log(`  metadata ${changes.metadata.join(', ')}`);
+  for (const asset of changes.assets.added) console.log(`  + asset  ${asset.id} (${asset.kind})`);
+  for (const asset of changes.assets.removed) console.log(`  - asset  ${asset.id} (${asset.kind})`);
+  for (const asset of changes.assets.changed) console.log(`  ~ asset  ${asset.id} (${asset.fields.join(', ')})`);
+  if (!changes.changed) {
+    console.log('\n  No snapshot update. Project state was not changed.\n');
+    return;
+  }
+  console.log(`\n  Project state was not changed. Review the remote commit and asset digest changes, then run:\n  vld store update ${current.id} --acknowledge ${next.commit} --project ${displayPath(report.project)}\n`);
+}
+
 function runStore() {
-  const [action = 'status', id, repository] = positional;
+  const [action = 'status', id, third] = positional;
   const project = option('--project', '.');
   try {
     if (action === 'init') {
-      if (!id) fail('Usage: vld store init <directory> [--id <store-id>] [--title <title>]');
       const result = initStore({ directory: id, id: option('--id', null), title: option('--title', null), force: hasFlag('--force') });
       if (hasFlag('--json')) console.log(JSON.stringify(result, null, 2));
-      else console.log(`\n✓ wrote shared store skeleton in ${displayPath(result.directory)}\n\n  Add reviewed assets, commit it with Git, then consume it with:\n  vld store add ${result.manifest.id} <git-url> --project <project>\n`);
+      else console.log(`\n✓ wrote ${result.manifest}\n\nCommit the manifest and its declared Markdown assets before another project consumes it.\n`);
       return;
     }
     if (action === 'add') {
-      if (!id || !repository) fail('Usage: vld store add <id> <git-url> [--ref <branch-or-tag>] [--project <dir>]');
-      const result = addStore({ projectDir: project, id, repository, ref: option('--ref', null), refresh: hasFlag('--refresh') });
+      if (!id || !third) fail('Usage: vld store add <id> <git-url> [--ref <branch|tag>] [--project <dir>]');
+      const result = addStore({ projectDir: project, id, repository: third, ref: option('--ref', null) });
       if (hasFlag('--json')) console.log(JSON.stringify(result, null, 2));
-      else console.log(`\n✓ ${result.refreshed ? 'refreshed' : 'locked'} store ${result.store.id}\n\n  commit    ${result.store.commit}\n  assets    ${result.store.assets.length}\n  cache     ${displayPath(path.join(result.project, '.vld', 'stores', result.store.id))}\n  lock      ${displayPath(result.file)}\n`);
+      else console.log(`\n✓ pinned store ${result.store.id} at ${result.store.commit}\n  ${result.store.assets.length} declared asset(s) · ${displayPath(result.file)}\n`);
+      return;
+    }
+    if (action === 'diff') {
+      if (!id) fail('Usage: vld store diff <id> [--project <dir>]');
+      printStoreRefreshPreview(previewStoreRefresh({ projectDir: project, id }), { json: hasFlag('--json') });
       return;
     }
     if (action === 'update') {
-      if (!id) fail('Usage: vld store update <id> [--project <dir>]');
-      const result = refreshStore({ projectDir: project, id });
+      if (!id) fail('Usage: vld store update <id> --acknowledge <full-commit> [--project <dir>]');
+      const result = refreshStore({ projectDir: project, id, acknowledge: option('--acknowledge', null) });
       if (hasFlag('--json')) console.log(JSON.stringify(result, null, 2));
-      else console.log(`\n✓ refreshed store ${result.store.id} at ${result.store.commit}\n`);
+      else if (result.unchanged) console.log(`\n✓ store ${result.store.id} is already pinned at ${result.store.commit}; no state changed.\n`);
+      else console.log(`\n✓ refreshed store ${result.store.id} at ${result.store.commit}\n  acknowledgement ${result.store.acknowledgedCommit} recorded in ${displayPath(result.file)}\n`);
       return;
     }
     if (action === 'assets') {
-      if (!id) fail('Usage: vld store assets <store-id> [--project <dir>]');
+      if (!id) fail('Usage: vld store assets <id> [--project <dir>]');
       const report = storeStatus(project, id);
       if (hasFlag('--json')) console.log(JSON.stringify(report, null, 2));
       else {
         const store = report.stores[0];
         console.log(`\nstore assets · ${id}\n`);
-        for (const asset of store?.assets ?? []) console.log(`  ${asset.id.padEnd(22)} ${asset.kind}${asset.artifact ? ` · ${asset.artifact}` : ''}`);
+        for (const asset of store?.assets ?? []) console.log(`  ${asset.id.padEnd(26)} ${asset.kind}${asset.artifact ? ` · ${asset.artifact}` : ''} · ${asset.file}`);
         for (const error of report.errors) console.log(`  ✗ ${error}`);
         for (const drift of store?.drift ?? []) console.log(`  ! ${drift}`);
         console.log(`\n${report.ok ? 'PASS' : 'FAIL'}\n`);
@@ -641,13 +695,13 @@ function runStore() {
       return;
     }
     if (action === 'copy') {
-      if (!id || !repository) fail('Usage: vld store copy <store-id> <asset-id> [--out <relative.md>] [--project <dir>]');
-      const result = copyStoreAsset({ projectDir: project, storeId: id, assetId: repository, out: option('--out', null), force: hasFlag('--force') });
+      if (!id || !third) fail('Usage: vld store copy <id> <asset-id> [--out <file>] [--project <dir>]');
+      const result = copyStoreAsset({ projectDir: project, storeId: id, assetId: third, out: option('--out', null), force: hasFlag('--force') });
       if (hasFlag('--json')) console.log(JSON.stringify({ ...result, content: undefined }, null, 2));
-      else console.log(`\n✓ copied verified ${result.asset.kind} ${id}/${repository} to ${displayPath(result.output)}\n`);
+      else console.log(`\n✓ copied verified ${id}/${third} to ${displayPath(result.output)}\n`);
       return;
     }
-    if (action === 'status' || action === 'list') {
+    if (action === 'list' || action === 'status') {
       const report = action === 'list' ? readStoreState(project) : storeStatus(project, id ?? null);
       if (hasFlag('--json')) console.log(JSON.stringify(action === 'list' ? { ...report, stores: report.state?.stores ?? [] } : report, null, 2));
       else {
@@ -661,7 +715,7 @@ function runStore() {
       if (report.ok === false) process.exit(1);
       return;
     }
-    fail('Usage: vld store init|add|update|list|status|assets|copy');
+    fail('Usage: vld store init|add|diff|update|list|status|assets|copy');
   } catch (error) { fail(error.message); }
 }
 
@@ -889,6 +943,136 @@ function runWorkflowCommand() {
   }
 }
 
+function printMissionReport(label, report) {
+  console.log(`\nmission ${label} · ${displayPath(report.file ?? '')}\n`);
+  for (const pass of report.passes ?? []) console.log(`  ✓ ${pass}`);
+  for (const stale of report.stale ?? []) {
+    if (stale.kind === 'target') console.log(`  ! target moved: ${stale.expected} -> ${stale.actual}`);
+    else if (stale.kind === 'target-unresolved') console.log(`  ! target cannot be resolved: ${stale.detail}`);
+    else console.log(`  ! ${stale.kind} differs from the current project`);
+  }
+  for (const warning of report.warnings ?? []) console.log(`  ! ${warning}`);
+  for (const error of report.errors ?? []) console.log(`  ✗ ${error}`);
+  const requirements = report.requirements ? ` · ${report.requirements.assigned}/${report.requirements.total} requirements assigned` : '';
+  console.log(`\n${report.ok ? 'PASS' : 'FAIL'}${requirements}\n`);
+}
+
+function runMission() {
+  const [action, file] = positional;
+  const project = option('--project', '.');
+  try {
+    if (action === 'init') {
+      if (!file) fail('Usage: vld mission init <definition.json> --packet <dir> [--target HEAD] [--project <dir>]');
+      const packet = option('--packet', null);
+      if (!packet) fail('mission init requires --packet <verified-packet-dir>');
+      const target = option('--target', null);
+      if (hasFlag('--target') && !target) fail('mission init --target requires a ref value');
+      const definition = readMission(file, { projectDir: project }).mission;
+      const result = createMission({
+        definition,
+        projectDir: project,
+        packetDir: packet,
+        targetRef: target ?? 'HEAD',
+        outFile: option('-o', option('--out', null)),
+        force: hasFlag('--force')
+      });
+      const output = { ok: true, file: result.file, mission: result.mission, digest: result.digest, warnings: result.warnings, passes: result.passes };
+      if (hasFlag('--json')) console.log(JSON.stringify(output, null, 2));
+      else {
+        console.log(`\n✓ wrote ${displayPath(result.file)}\n`);
+        console.log(`  packet    ${result.mission.packet.path} @ ${result.mission.packet.digest}`);
+        console.log(`  target    ${result.mission.target.ref} @ ${result.mission.target.commit}`);
+        console.log(`  packages  ${result.mission.workPackages.length} · ${result.mission.workPackages.reduce((count, workPackage) => count + workPackage.requirements.length, 0)} requirement assignments`);
+        for (const warning of result.warnings) console.log(`  ! ${warning}`);
+        console.log(`\nNext\n  vld mission status ${displayPath(result.file)} --project ${displayPath(path.resolve(project))}\n`);
+      }
+      return;
+    }
+    if (action === 'validate') {
+      if (!file) fail('Usage: vld mission validate <mission.json> [--project <dir>]');
+      const loaded = readMission(file, { projectDir: project });
+      const report = { ...validateMission(loaded.mission, { projectDir: loaded.project }), file: loaded.file };
+      if (hasFlag('--json')) console.log(JSON.stringify(report, null, 2));
+      else printMissionReport('validate', report);
+      process.exit(report.ok ? 0 : 1);
+    }
+    if (action === 'status') {
+      if (!file) fail('Usage: vld mission status <mission.json> [--project <dir>]');
+      const report = missionStatus({ file, projectDir: project });
+      if (hasFlag('--json')) console.log(JSON.stringify(report, null, 2));
+      else printMissionReport('status', report);
+      process.exit(report.ok ? 0 : 1);
+    }
+    fail('Usage: vld mission init|validate|status <definition-or-mission.json>');
+  } catch (error) {
+    fail(error.message);
+  }
+}
+
+function printWorkspaceReport(action, report) {
+  console.log(`\nworkspace ${action} · ${report.mission?.id ?? report.allocation?.missionId ?? ''}\n`);
+  if (report.allocation) {
+    console.log(`  package   ${report.allocation.packageId}`);
+    console.log(`  branch    ${report.allocation.branch}`);
+    console.log(`  worktree  ${report.allocation.worktree}`);
+    if (report.changed === false) console.log('  status    already allocated; no Git state changed');
+    if (report.discarded) console.log('  removal   discarded after exact workspace acknowledgement');
+  }
+  for (const entry of report.packageStatus ?? []) {
+    console.log(`  ${entry.status.state === 'healthy' ? '✓' : entry.status.state === 'unallocated' ? '·' : '!'} ${entry.id.padEnd(20)} ${entry.status.state}${entry.status.detail ? ` — ${entry.status.detail}` : ''}`);
+  }
+  if (report.recoveredLock) console.log(`  ✓ removed stale lock ${report.recoveredLock.directory}`);
+  for (const entry of report.finalized ?? []) console.log(`  ✓ finalized interrupted removal ${entry.id}${entry.branchRetained ? ' (branch retained)' : ''}`);
+  for (const id of report.reset ?? []) console.log(`  ✓ restored interrupted removal ${id}`);
+  for (const warning of report.warnings ?? []) console.log(`  ! ${warning}`);
+  for (const error of report.errors ?? []) console.log(`  ✗ ${error}`);
+  console.log(`\n${report.ok === false ? 'FAIL' : 'PASS'}\n`);
+}
+
+function runWorkspace() {
+  const [action, missionFile, packageId] = positional;
+  const project = option('--project', '.');
+  try {
+    if (action === 'create') {
+      if (!missionFile || !packageId) fail('Usage: vld workspace create <mission.json> <package> [--project <dir>]');
+      const result = createWorkspace({ missionFile, packageId, projectDir: project });
+      if (hasFlag('--json')) console.log(JSON.stringify({ ok: true, ...result }, null, 2));
+      else printWorkspaceReport('create', { ok: true, ...result });
+      return;
+    }
+    if (action === 'status') {
+      if (!missionFile) fail('Usage: vld workspace status <mission.json> [--project <dir>]');
+      const report = workspaceStatus({ missionFile, projectDir: project });
+      if (hasFlag('--json')) console.log(JSON.stringify(report, null, 2));
+      else printWorkspaceReport('status', report);
+      process.exit(report.ok ? 0 : 1);
+    }
+    if (action === 'recover') {
+      if (!missionFile) fail('Usage: vld workspace recover <mission.json> [--project <dir>]');
+      const report = recoverWorkspaces({ missionFile, projectDir: project });
+      if (hasFlag('--json')) console.log(JSON.stringify(report, null, 2));
+      else printWorkspaceReport('recover', report);
+      process.exit(report.ok ? 0 : 1);
+    }
+    if (action === 'remove') {
+      if (!missionFile || !packageId) fail('Usage: vld workspace remove <mission.json> <package> [--discard --acknowledge <workspace-id>] [--project <dir>]');
+      const result = removeWorkspace({
+        missionFile,
+        packageId,
+        projectDir: project,
+        discard: hasFlag('--discard'),
+        acknowledge: option('--acknowledge', null)
+      });
+      if (hasFlag('--json')) console.log(JSON.stringify({ ok: true, ...result }, null, 2));
+      else printWorkspaceReport('remove', { ok: true, ...result });
+      return;
+    }
+    fail('Usage: vld workspace create|status|recover|remove <mission.json> [package]');
+  } catch (error) {
+    fail(error.message);
+  }
+}
+
 function runMcp() {
   import('./lib/mcp.mjs').then(({ serve, TOOLS }) => {
     console.error(`vibecode-like-a-dev MCP server · ${TOOLS.length} tools · stdio`);
@@ -927,6 +1111,9 @@ switch (command) {
   case 'artifact':
     runArtifact();
     break;
+  case 'export':
+    runExport();
+    break;
   case 'store':
     runStore();
     break;
@@ -941,6 +1128,12 @@ switch (command) {
     break;
   case 'workflow':
     runWorkflowCommand();
+    break;
+  case 'mission':
+    runMission();
+    break;
+  case 'workspace':
+    runWorkspace();
     break;
   case 'mcp':
     runMcp();
