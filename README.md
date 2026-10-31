@@ -210,7 +210,38 @@ vld workflow run discovery --execute
 | **Shared stores** | Pin advisory Markdown and typed artifact templates from Git | `diff` fetches a validated candidate without mutating the project; an update requires the exact reviewed 40-character commit acknowledgement, records it in the lock, and cannot affect compiler or workflow state. |
 | **Interoperability exports** | Bounded Spec Kit and Kiro layouts from a compiled packet | Generated one-way views carry source digest/provenance and state plainly that packet/change manifests remain authoritative. |
 
-The result is one repository and one `vld` CLI, while the packet remains portable and small. Use the agent-facing modules where they help; use the compiler and generated gates as the authority. See [ADR-0002](docs/adr/0002-optional-platform-extensions.md) for the extension boundary and security model. For the researched, future VLD Platform path—Studio, mission runtime, agent scheduler, worktrees, merge queue and signed catalog—see [the platform expansion study](docs/PLATFORM-EXPANSION-RESEARCH.md); it is a proposal, not an implemented feature set.
+The result is one repository and one `vld` CLI, while the packet remains portable and small. Use the agent-facing modules where they help; use the compiler and generated gates as the authority. See [ADR-0002](docs/adr/0002-optional-platform-extensions.md) for the extension boundary and security model. For the researched, future VLD Platform path—Studio, mission runtime, agent scheduler, worktrees, merge queue and signed catalog—see [the platform expansion study](docs/PLATFORM-EXPANSION-RESEARCH.md) and [implementation plan](docs/VLD-PLATFORM-IMPLEMENTATION-PLAN.md).
+
+### Mission foundation — freeze implementation scope before a runtime exists
+
+`vld mission` is the first implemented VLD Platform foundation. It is **not** an agent runner, workspace allocator or merge tool. It freezes a currently verified packet, the exact current Git target commit and the current Core-policy digest into a reviewable mission declaration. Every packet requirement must be assigned exactly once to a bounded work package before the declaration can be created. The short requirement list below is illustrative; use every `REQ-` ID in the selected packet.
+
+`definition.json` is authored and reviewed by the team:
+
+```json
+{
+  "schemaVersion": 1,
+  "id": "report-export",
+  "title": "Implement a traceable report export workflow",
+  "workPackages": [{
+    "id": "export-api",
+    "title": "Implement report export API and tests",
+    "requirements": ["REQ-001", "REQ-002"],
+    "dependsOn": [],
+    "resourceClaims": { "paths": ["src/export/**", "test/export/**"] }
+  }]
+}
+```
+
+```bash
+# `specs` must already pass `vld verify`; `HEAD` is resolved to a full immutable commit.
+vld mission init definition.json --packet specs --project .
+vld mission validate missions/report-export/mission.json --project .
+# Read-only: reports packet/policy/target drift but never retargets the mission.
+vld mission status missions/report-export/mission.json --project .
+```
+
+Mission declarations live at `missions/<id>/mission.json` by default and remain outside compiler input. The command uses fixed-argv, read-only Git resolution only: it never creates a branch/worktree, starts an agent, invokes a model, reads credentials or changes a Git ref. See [ADR-0003](docs/adr/0003-mission-foundation-and-runtime-boundary.md) for the boundary.
 
 ## What you get
 
@@ -551,6 +582,7 @@ Shipped in v0.4: per-product obligations and red-flag/anti-rationalization table
 Shipped in v0.5: calibrated `search_primitives({ activate: true })` MCP routing + 68-prompt precision/recall & ablation benchmark (`eval-routing.mjs`, 94.3% precision / 100.0% recall in CI, plus live LLM drivers), and the 24-task × 3-arm outcome evaluation harness (`eval-outcome.mjs`, hidden acceptance oracles, review-defect probes, post-merge drift mutations, and live `cmd`/`openai`/`anthropic` agent runners).
 Shipped in v0.6–v0.9: locked capability modules and bundles, agent handoffs, typed delivery workflows, verified Git-store templates, strict artifact evidence gates, and evidence-linked change archives.
 Shipped in v0.10: a packed-install CI journey, reviewable Git-store refresh previews with exact-commit acknowledgement, and bounded `spec-kit` / `kiro` exports from a verified packet.
+Shipped in v0.11: versioned `vld mission init|validate|status`, which freezes a verified packet, Core-policy digest and immutable Git target into complete requirement-linked work packages without starting an agent or changing Git state.
 
 1. **Published live-agent comparison runs** — use the optional protocol above across Claude Code, Codex and open-weight coding agents, preserving raw JSON logs and configuration notes; do not treat an export as a competing source of requirements.
 2. **`vld change --quick`** — for one-line changes that do not deserve a delta: an explicit, labelled path with no probe, for teams that accept the trade.

@@ -21,6 +21,7 @@ import { emitPacket } from './lib/emit/index.mjs';
 import { exportPacket } from './lib/exports.mjs';
 import { buildIndex, loadIndex, writeIndex } from './lib/indexer.mjs';
 import { enableModules, listModules, moduleStatus } from './lib/modules.mjs';
+import { createMission, missionStatus, readMission, validateMission } from './lib/missions.mjs';
 import { addStore, copyStoreAsset, initStore, previewStoreRefresh, readStoreState, refreshStore, storeStatus } from './lib/stores.mjs';
 import { buildPlan, loadPolicy } from './lib/planner.mjs';
 import { loadProfile, KINDS, STAGES, SCALES, TRAITS, RISK_FLAGS } from './lib/profile.mjs';
@@ -41,7 +42,7 @@ const option = (name, fallback) => {
 };
 const VALUE_FLAGS = new Set([
   '-o', '--out', '--repo', '--name', '--idea', '--profile', '--packet',
-  '--project', '--modules', '--evidence', '--file', '--ref', '--title', '--from-store', '--types', '--acknowledge'
+  '--project', '--modules', '--evidence', '--file', '--ref', '--title', '--from-store', '--types', '--acknowledge', '--target'
 ]);
 const positional = rest.filter((item, index) => !item.startsWith('-') && !(index > 0 && VALUE_FLAGS.has(rest[index - 1])));
 
@@ -77,6 +78,9 @@ Usage
                                      install or inspect generated Codex, Claude Code or Copilot handoffs
   vld workflow list|lint|run|status|complete <id> [step] [--project <dir>]
                                      typed resumable workflows; \`run\` previews unless --execute is supplied
+  vld mission init <definition.json> --packet <dir> [--target HEAD] [--project <dir>] [-o <file>]
+  vld mission validate|status <mission.json> [--project <dir>] [--json]
+                                     freeze a verified packet and Git target into versioned work packages; no agent is run
   vld mcp                            run the MCP server over stdio
   vld index [--check]                rebuild primitives/index.json
 
@@ -934,6 +938,72 @@ function runWorkflowCommand() {
   }
 }
 
+function printMissionReport(label, report) {
+  console.log(`\nmission ${label} · ${displayPath(report.file ?? '')}\n`);
+  for (const pass of report.passes ?? []) console.log(`  ✓ ${pass}`);
+  for (const stale of report.stale ?? []) {
+    if (stale.kind === 'target') console.log(`  ! target moved: ${stale.expected} -> ${stale.actual}`);
+    else if (stale.kind === 'target-unresolved') console.log(`  ! target cannot be resolved: ${stale.detail}`);
+    else console.log(`  ! ${stale.kind} differs from the current project`);
+  }
+  for (const warning of report.warnings ?? []) console.log(`  ! ${warning}`);
+  for (const error of report.errors ?? []) console.log(`  ✗ ${error}`);
+  const requirements = report.requirements ? ` · ${report.requirements.assigned}/${report.requirements.total} requirements assigned` : '';
+  console.log(`\n${report.ok ? 'PASS' : 'FAIL'}${requirements}\n`);
+}
+
+function runMission() {
+  const [action, file] = positional;
+  const project = option('--project', '.');
+  try {
+    if (action === 'init') {
+      if (!file) fail('Usage: vld mission init <definition.json> --packet <dir> [--target HEAD] [--project <dir>]');
+      const packet = option('--packet', null);
+      if (!packet) fail('mission init requires --packet <verified-packet-dir>');
+      const target = option('--target', null);
+      if (hasFlag('--target') && !target) fail('mission init --target requires a ref value');
+      const definition = readMission(file, { projectDir: project }).mission;
+      const result = createMission({
+        definition,
+        projectDir: project,
+        packetDir: packet,
+        targetRef: target ?? 'HEAD',
+        outFile: option('-o', option('--out', null)),
+        force: hasFlag('--force')
+      });
+      const output = { ok: true, file: result.file, mission: result.mission, digest: result.digest, warnings: result.warnings, passes: result.passes };
+      if (hasFlag('--json')) console.log(JSON.stringify(output, null, 2));
+      else {
+        console.log(`\n✓ wrote ${displayPath(result.file)}\n`);
+        console.log(`  packet    ${result.mission.packet.path} @ ${result.mission.packet.digest}`);
+        console.log(`  target    ${result.mission.target.ref} @ ${result.mission.target.commit}`);
+        console.log(`  packages  ${result.mission.workPackages.length} · ${result.mission.workPackages.reduce((count, workPackage) => count + workPackage.requirements.length, 0)} requirement assignments`);
+        for (const warning of result.warnings) console.log(`  ! ${warning}`);
+        console.log(`\nNext\n  vld mission status ${displayPath(result.file)} --project ${displayPath(path.resolve(project))}\n`);
+      }
+      return;
+    }
+    if (action === 'validate') {
+      if (!file) fail('Usage: vld mission validate <mission.json> [--project <dir>]');
+      const loaded = readMission(file, { projectDir: project });
+      const report = { ...validateMission(loaded.mission, { projectDir: loaded.project }), file: loaded.file };
+      if (hasFlag('--json')) console.log(JSON.stringify(report, null, 2));
+      else printMissionReport('validate', report);
+      process.exit(report.ok ? 0 : 1);
+    }
+    if (action === 'status') {
+      if (!file) fail('Usage: vld mission status <mission.json> [--project <dir>]');
+      const report = missionStatus({ file, projectDir: project });
+      if (hasFlag('--json')) console.log(JSON.stringify(report, null, 2));
+      else printMissionReport('status', report);
+      process.exit(report.ok ? 0 : 1);
+    }
+    fail('Usage: vld mission init|validate|status <definition-or-mission.json>');
+  } catch (error) {
+    fail(error.message);
+  }
+}
+
 function runMcp() {
   import('./lib/mcp.mjs').then(({ serve, TOOLS }) => {
     console.error(`vibecode-like-a-dev MCP server · ${TOOLS.length} tools · stdio`);
@@ -989,6 +1059,9 @@ switch (command) {
     break;
   case 'workflow':
     runWorkflowCommand();
+    break;
+  case 'mission':
+    runMission();
     break;
   case 'mcp':
     runMcp();

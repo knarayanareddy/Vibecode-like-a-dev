@@ -113,7 +113,7 @@ jobs:
           node factory/cli.mjs change verify /tmp/change/out --project "$project"
 
       # A source checkout can hide omitted package files or an invalid bin link. Exercise
-      # the tarball users receive, including compiler, export, module, artifact and
+      # the tarball users receive, including compiler, export, mission, module, artifact and
       # reviewed shared-store flows. No registry, credentials or network agent calls.
       - name: Packed-install distribution journey
         run: |
@@ -158,6 +158,37 @@ jobs:
           git -C "$work/store" commit -qm initial
           "$vld" store add team-playbook "file://$work/store" --project "$project"
           "$vld" artifact init product-brief --from-store team-playbook/product-brief-template --project "$project"
+
+          # Mission creation must also work from the packed CLI. It reads a verified
+          # project-local packet and resolves HEAD, but cannot launch an agent or mutate refs.
+          cp -R "$work/packet" "$project/specs"
+          git -C "$project" init -q
+          git -C "$project" config user.email vld-ci@example.test
+          git -C "$project" config user.name 'VLD CI'
+          git -C "$project" add specs
+          git -C "$project" commit -qm mission-base
+          node - "$project" <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const project = process.argv[2];
+          const requirements = JSON.parse(fs.readFileSync(path.join(project, 'specs', 'spec.json'), 'utf8')).requirements.map((entry) => entry.id);
+          const definition = {
+            schemaVersion: 1,
+            id: 'packed-mission',
+            title: 'Verify the packaged mission foundation',
+            workPackages: [{
+              id: 'packet-work',
+              title: 'Verify every packet requirement in one package',
+              requirements,
+              dependsOn: [],
+              resourceClaims: { paths: ['src/**', 'test/**'] }
+            }]
+          };
+          fs.writeFileSync(path.join(project, 'mission-definition.json'), `${JSON.stringify(definition, null, 2)}\n`);
+          NODE
+          "$vld" mission init mission-definition.json --packet specs --project "$project"
+          "$vld" mission validate missions/packed-mission/mission.json --project "$project"
+          test -f "$project/missions/packed-mission/mission.json"
 
           printf '%s\n' '<!-- refreshed -->' >> "$work/store/product-brief.md"
           git -C "$work/store" add .

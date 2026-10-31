@@ -6,7 +6,7 @@
 
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -100,6 +100,56 @@ test('public platform journey: bundle, module lock, Codex handoff and discovery 
   const status = await cli(['workflow', 'status', 'discovery', '--project', project, '--json']);
   assert.equal(status.code, 0, status.stderr);
   assert.ok(JSON.parse(status.stdout).steps.every((step) => step.status === 'complete'));
+});
+
+
+test('public mission journey freezes a packet/target and reports stale target state without launching an agent', async (t) => {
+  const project = mkdtempSync(path.join(os.tmpdir(), 'vld-mission-cli-'));
+  t.after(() => rmSync(project, { recursive: true, force: true }));
+  cpSync(path.join(ROOT, 'examples', 'retro-board', 'spec'), path.join(project, 'specs'), { recursive: true });
+  execFileSync('git', ['init', '-q'], { cwd: project });
+  execFileSync('git', ['config', 'user.email', 'mission@example.invalid'], { cwd: project });
+  execFileSync('git', ['config', 'user.name', 'Mission Test'], { cwd: project });
+  execFileSync('git', ['add', 'specs'], { cwd: project });
+  execFileSync('git', ['commit', '-qm', 'packet'], { cwd: project });
+
+  const requirements = JSON.parse(readFileSync(path.join(project, 'specs', 'spec.json'), 'utf8')).requirements.map((requirement) => requirement.id);
+  writeFileSync(path.join(project, 'definition.json'), `${JSON.stringify({
+    schemaVersion: 1,
+    id: 'report-export',
+    title: 'Implement report export in an isolated package',
+    workPackages: [{ id: 'export-api', title: 'Implement export behavior with tests', requirements, dependsOn: [], resourceClaims: { paths: ['src/export/**', 'test/export/**'] } }]
+  }, null, 2)}
+`);
+
+  const initialized = await cli(['mission', 'init', 'definition.json', '--packet', 'specs', '--project', project, '--json']);
+  assert.equal(initialized.code, 0, initialized.stderr);
+  const mission = JSON.parse(initialized.stdout);
+  assert.equal(mission.ok, true);
+  assert.ok(existsSync(path.join(project, 'missions', 'report-export', 'mission.json')));
+  assert.match(mission.mission.target.commit, /^[a-f0-9]{40}$/);
+  assert.equal(existsSync(path.join(project, '.vld', 'runtime')), false, 'the mission command does not start a runtime');
+
+  const validated = await cli(['mission', 'validate', 'missions/report-export/mission.json', '--project', project, '--json']);
+  assert.equal(validated.code, 0, validated.stderr);
+  assert.equal(JSON.parse(validated.stdout).ok, true);
+
+  writeFileSync(path.join(project, 'README.md'), '# next target\n');
+  execFileSync('git', ['add', 'README.md'], { cwd: project });
+  execFileSync('git', ['commit', '-qm', 'target moved'], { cwd: project });
+  const stale = await cli(['mission', 'status', 'missions/report-export/mission.json', '--project', project, '--json']);
+  assert.equal(stale.code, 1, stale.stderr);
+  assert.equal(JSON.parse(stale.stdout).stale[0].kind, 'target');
+
+  const missingPacket = await cli(['mission', 'init', 'definition.json', '--project', project]);
+  assert.equal(missingPacket.code, 2);
+  assert.match(missingPacket.stderr, /requires --packet/);
+  const packetWithoutValue = await cli(['mission', 'init', 'definition.json', '--project', project, '--packet']);
+  assert.equal(packetWithoutValue.code, 2);
+  assert.match(packetWithoutValue.stderr, /requires --packet/);
+  const targetWithoutValue = await cli(['mission', 'init', 'definition.json', '--project', project, '--packet', 'specs', '--target']);
+  assert.equal(targetWithoutValue.code, 2);
+  assert.match(targetWithoutValue.stderr, /--target requires a ref value/);
 });
 
 test('public store journey pins a file-backed Git snapshot and reports clean failures', async (t) => {

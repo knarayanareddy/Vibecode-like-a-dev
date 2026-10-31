@@ -1,9 +1,16 @@
 # VLD Platform implementation plan
 
-**Status:** Proposed implementation plan — no Mission Runtime, Studio, scheduler, merge manager or signed catalog is implemented by this document.
+**Status:** Active implementation plan. The Phase 1 mission foundation (`vld mission init|validate|status`) is implemented in VLD 0.11.0; no Mission Runtime, Studio, scheduler, worktree allocator, merge manager or signed catalog is implemented yet.
 
 **Companion research:** [PLATFORM-EXPANSION-RESEARCH.md](PLATFORM-EXPANSION-RESEARCH.md)
-**Current baseline:** VLD 0.10.0, deterministic Core with packets, gates, evidence, typed workflows, locked modules/stores, agent handoffs, MCP and bounded exports.
+**Current baseline:** VLD 0.11.0, deterministic Core with packets, gates, evidence, typed workflows, locked modules/stores, agent handoffs, MCP, bounded exports and versioned mission declarations.
+
+
+## Implementation progress
+
+- [x] **M0 boundary:** [ADR-0003](adr/0003-mission-foundation-and-runtime-boundary.md) records the Core/mission boundary: mission commands are fixed-argv/read-only with respect to Git and never run an agent, model or Runtime.
+- [x] **M1 initial mission foundation:** Core validates schema-versioned, complete requirement-linked work-package declarations; it freezes a verified packet digest, Core-policy digest and immutable Git target; `init`, `validate` and read-only `status` have real-Git and public-CLI tests.
+- [ ] **M2 onward:** worktree mutation, Runtime leases/state, adapters, merge lanes, Studio and catalog remain intentionally unimplemented until their preceding phase gates below are completed.
 
 ## 1. Objective and success definition
 
