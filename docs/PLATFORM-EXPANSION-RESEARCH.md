@@ -19,7 +19,7 @@ The key architectural rule is non-negotiable:
 
 > **No agent, UI, store or marketplace asset may change VLD Core's policy/packet authority or bypass a verified state transition.**
 
-This is a substantial platform expansion, not a small CLI feature. It is viable because VLD already has much of the correct foundation; the missing components should be added outside its deterministic compiler path.
+This is a substantial platform expansion, not a small CLI feature. It is viable because VLD already has much of the correct foundation; the missing components should be added outside its deterministic compiler path. The staged engineering checklist and test gates are in [VLD-PLATFORM-IMPLEMENTATION-PLAN.md](VLD-PLATFORM-IMPLEMENTATION-PLAN.md).
 
 ---
 
