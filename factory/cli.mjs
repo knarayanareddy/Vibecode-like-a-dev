@@ -23,6 +23,7 @@ import { buildIndex, loadIndex, writeIndex } from './lib/indexer.mjs';
 import { enableModules, listModules, moduleStatus } from './lib/modules.mjs';
 import { createMission, missionStatus, readMission, validateMission } from './lib/missions.mjs';
 import { addStore, copyStoreAsset, initStore, previewStoreRefresh, readStoreState, refreshStore, storeStatus } from './lib/stores.mjs';
+import { createWorkspace, recoverWorkspaces, removeWorkspace, workspaceStatus } from './lib/workspaces.mjs';
 import { buildPlan, loadPolicy } from './lib/planner.mjs';
 import { loadProfile, KINDS, STAGES, SCALES, TRAITS, RISK_FLAGS } from './lib/profile.mjs';
 import { completeWorkflowStep, getWorkflow, listWorkflows, runWorkflow, workflowStatus } from './lib/workflows.mjs';
@@ -81,6 +82,10 @@ Usage
   vld mission init <definition.json> --packet <dir> [--target HEAD] [--project <dir>] [-o <file>]
   vld mission validate|status <mission.json> [--project <dir>] [--json]
                                      freeze a verified packet and Git target into versioned work packages; no agent is run
+  vld workspace create <mission.json> <package> [--project <dir>] [--json]
+  vld workspace status|recover <mission.json> [--project <dir>] [--json]
+  vld workspace remove <mission.json> <package> [--discard --acknowledge <workspace-id>] [--project <dir>]
+                                     allocate, inspect, reconcile or safely remove one Git worktree; no agent is run
   vld mcp                            run the MCP server over stdio
   vld index [--check]                rebuild primitives/index.json
 
@@ -1004,6 +1009,70 @@ function runMission() {
   }
 }
 
+function printWorkspaceReport(action, report) {
+  console.log(`\nworkspace ${action} · ${report.mission?.id ?? report.allocation?.missionId ?? ''}\n`);
+  if (report.allocation) {
+    console.log(`  package   ${report.allocation.packageId}`);
+    console.log(`  branch    ${report.allocation.branch}`);
+    console.log(`  worktree  ${report.allocation.worktree}`);
+    if (report.changed === false) console.log('  status    already allocated; no Git state changed');
+    if (report.discarded) console.log('  removal   discarded after exact workspace acknowledgement');
+  }
+  for (const entry of report.packageStatus ?? []) {
+    console.log(`  ${entry.status.state === 'healthy' ? '✓' : entry.status.state === 'unallocated' ? '·' : '!'} ${entry.id.padEnd(20)} ${entry.status.state}${entry.status.detail ? ` — ${entry.status.detail}` : ''}`);
+  }
+  if (report.recoveredLock) console.log(`  ✓ removed stale lock ${report.recoveredLock.directory}`);
+  for (const entry of report.finalized ?? []) console.log(`  ✓ finalized interrupted removal ${entry.id}${entry.branchRetained ? ' (branch retained)' : ''}`);
+  for (const id of report.reset ?? []) console.log(`  ✓ restored interrupted removal ${id}`);
+  for (const warning of report.warnings ?? []) console.log(`  ! ${warning}`);
+  for (const error of report.errors ?? []) console.log(`  ✗ ${error}`);
+  console.log(`\n${report.ok === false ? 'FAIL' : 'PASS'}\n`);
+}
+
+function runWorkspace() {
+  const [action, missionFile, packageId] = positional;
+  const project = option('--project', '.');
+  try {
+    if (action === 'create') {
+      if (!missionFile || !packageId) fail('Usage: vld workspace create <mission.json> <package> [--project <dir>]');
+      const result = createWorkspace({ missionFile, packageId, projectDir: project });
+      if (hasFlag('--json')) console.log(JSON.stringify({ ok: true, ...result }, null, 2));
+      else printWorkspaceReport('create', { ok: true, ...result });
+      return;
+    }
+    if (action === 'status') {
+      if (!missionFile) fail('Usage: vld workspace status <mission.json> [--project <dir>]');
+      const report = workspaceStatus({ missionFile, projectDir: project });
+      if (hasFlag('--json')) console.log(JSON.stringify(report, null, 2));
+      else printWorkspaceReport('status', report);
+      process.exit(report.ok ? 0 : 1);
+    }
+    if (action === 'recover') {
+      if (!missionFile) fail('Usage: vld workspace recover <mission.json> [--project <dir>]');
+      const report = recoverWorkspaces({ missionFile, projectDir: project });
+      if (hasFlag('--json')) console.log(JSON.stringify(report, null, 2));
+      else printWorkspaceReport('recover', report);
+      process.exit(report.ok ? 0 : 1);
+    }
+    if (action === 'remove') {
+      if (!missionFile || !packageId) fail('Usage: vld workspace remove <mission.json> <package> [--discard --acknowledge <workspace-id>] [--project <dir>]');
+      const result = removeWorkspace({
+        missionFile,
+        packageId,
+        projectDir: project,
+        discard: hasFlag('--discard'),
+        acknowledge: option('--acknowledge', null)
+      });
+      if (hasFlag('--json')) console.log(JSON.stringify({ ok: true, ...result }, null, 2));
+      else printWorkspaceReport('remove', { ok: true, ...result });
+      return;
+    }
+    fail('Usage: vld workspace create|status|recover|remove <mission.json> [package]');
+  } catch (error) {
+    fail(error.message);
+  }
+}
+
 function runMcp() {
   import('./lib/mcp.mjs').then(({ serve, TOOLS }) => {
     console.error(`vibecode-like-a-dev MCP server · ${TOOLS.length} tools · stdio`);
@@ -1062,6 +1131,9 @@ switch (command) {
     break;
   case 'mission':
     runMission();
+    break;
+  case 'workspace':
+    runWorkspace();
     break;
   case 'mcp':
     runMcp();

@@ -190,6 +190,14 @@ jobs:
           "$vld" mission validate missions/packed-mission/mission.json --project "$project"
           test -f "$project/missions/packed-mission/mission.json"
 
+          # The packed CLI also owns the narrow manual workspace foundation. This
+          # allocation is local fixed-argv Git only: no agent, command runner, push or merge.
+          workspace_id=$("$vld" workspace create missions/packed-mission/mission.json packet-work --project "$project" --json \
+            | node -e 'let input="";process.stdin.on("data",part=>input+=part).on("end",()=>process.stdout.write(JSON.parse(input).allocation.id))')
+          test -n "$workspace_id"
+          "$vld" workspace status missions/packed-mission/mission.json --project "$project"
+          "$vld" workspace remove missions/packed-mission/mission.json packet-work --project "$project"
+
           printf '%s\n' '<!-- refreshed -->' >> "$work/store/product-brief.md"
           git -C "$work/store" add .
           git -C "$work/store" commit -qm refresh

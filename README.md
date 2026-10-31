@@ -209,8 +209,9 @@ vld workflow run discovery --execute
 | **Workflows** | Discovery, feature delivery and release readiness | Typed/resumable DAG; human and agent steps require explicit evidence; command steps can only run an allowlisted VLD argv, and artifact validation is an in-process typed gate—not a shell escape hatch. |
 | **Shared stores** | Pin advisory Markdown and typed artifact templates from Git | `diff` fetches a validated candidate without mutating the project; an update requires the exact reviewed 40-character commit acknowledgement, records it in the lock, and cannot affect compiler or workflow state. |
 | **Interoperability exports** | Bounded Spec Kit and Kiro layouts from a compiled packet | Generated one-way views carry source digest/provenance and state plainly that packet/change manifests remain authoritative. |
+| **Manual workspaces** | One Git worktree/branch for each frozen mission package | Repository-wide exclusive lock, sibling managed root, current-mission gate and recovery-aware cleanup; this is not a Runtime, agent executor or merge-conflict guarantee. |
 
-The result is one repository and one `vld` CLI, while the packet remains portable and small. Use the agent-facing modules where they help; use the compiler and generated gates as the authority. See [ADR-0002](docs/adr/0002-optional-platform-extensions.md) for the extension boundary and security model. For the researched, future VLD Platform path—Studio, mission runtime, agent scheduler, worktrees, merge queue and signed catalog—see [the platform expansion study](docs/PLATFORM-EXPANSION-RESEARCH.md) and [implementation plan](docs/VLD-PLATFORM-IMPLEMENTATION-PLAN.md).
+The result is one repository and one `vld` CLI, while the packet remains portable and small. Use the agent-facing modules where they help; use the compiler and generated gates as the authority. See [ADR-0002](docs/adr/0002-optional-platform-extensions.md) for the extension boundary and security model. For the researched, future VLD Platform path—Studio, mission runtime, agent scheduler, merge queue and signed catalog—see [the platform expansion study](docs/PLATFORM-EXPANSION-RESEARCH.md) and [implementation plan](docs/VLD-PLATFORM-IMPLEMENTATION-PLAN.md).
 
 ### Mission foundation — freeze implementation scope before a runtime exists
 
@@ -242,6 +243,28 @@ vld mission status missions/report-export/mission.json --project .
 ```
 
 Mission declarations live at `missions/<id>/mission.json` by default and remain outside compiler input. The command uses fixed-argv, read-only Git resolution only: it never creates a branch/worktree, starts an agent, invokes a model, reads credentials or changes a Git ref. See [ADR-0003](docs/adr/0003-mission-foundation-and-runtime-boundary.md) for the boundary.
+
+### Safe manual workspaces — isolated files, not automatic execution
+
+Once the mission is current and verified, allocate a declared package from the **primary Git checkout root**:
+
+```bash
+# Creates vld/report-export/export-api at the mission's immutable target commit.
+# The checkout is a managed sibling outside this project, never under specs/ or missions/.
+vld workspace create missions/report-export/mission.json export-api --project .
+vld workspace status missions/report-export/mission.json --project .
+
+# Normal removal refuses staged, unstaged, untracked and committed work.
+vld workspace remove missions/report-export/mission.json export-api --project .
+# Only after intentional review, use the exact ID printed by create/status to discard work:
+vld workspace remove missions/report-export/mission.json export-api \
+  --discard --acknowledge workspace-<exact-id> --project .
+
+# Reap a dead lock and reconcile an interrupted removal without blindly deleting a branch.
+vld workspace recover missions/report-export/mission.json --project .
+```
+
+The allocation ledger is `.vld/workspaces.json`; each repository's Git common directory has a short-lived exclusive lock during VLD-owned worktree/branch mutations. `status` only reports drift. `recover` favours preserving work: a remaining branch is retained, not silently deleted. Worktrees isolate working files and indexes, but they share Git refs and can still produce later merge conflicts; resource-claim overlap is only an advisory warning. These commands use fixed local Git argv only—they do **not** run project commands, agents/models, credentials, networks, pushes, PRs or merges. See [ADR-0004](docs/adr/0004-safe-manual-worktree-allocation.md) for the exact safety and recovery contract.
 
 ## What you get
 
@@ -583,6 +606,7 @@ Shipped in v0.5: calibrated `search_primitives({ activate: true })` MCP routing 
 Shipped in v0.6–v0.9: locked capability modules and bundles, agent handoffs, typed delivery workflows, verified Git-store templates, strict artifact evidence gates, and evidence-linked change archives.
 Shipped in v0.10: a packed-install CI journey, reviewable Git-store refresh previews with exact-commit acknowledgement, and bounded `spec-kit` / `kiro` exports from a verified packet.
 Shipped in v0.11: versioned `vld mission init|validate|status`, which freezes a verified packet, Core-policy digest and immutable Git target into complete requirement-linked work packages without starting an agent or changing Git state.
+Shipped in v0.12: `vld workspace create|status|recover|remove`, a manually operated, repository-serialized Git worktree allocator derived only from a current frozen mission. It uses a sibling managed root, atomic recovery-aware locking and exact acknowledged discard; it does not add a Runtime, model/process execution, push, merge or GitHub integration.
 
 1. **Published live-agent comparison runs** — use the optional protocol above across Claude Code, Codex and open-weight coding agents, preserving raw JSON logs and configuration notes; do not treat an export as a competing source of requirements.
 2. **`vld change --quick`** — for one-line changes that do not deserve a delta: an explicit, labelled path with no probe, for teams that accept the trade.

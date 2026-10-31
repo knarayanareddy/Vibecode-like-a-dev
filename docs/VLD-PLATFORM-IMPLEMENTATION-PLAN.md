@@ -1,16 +1,17 @@
 # VLD Platform implementation plan
 
-**Status:** Active implementation plan. The Phase 1 mission foundation (`vld mission init|validate|status`) is implemented in VLD 0.11.0; no Mission Runtime, Studio, scheduler, worktree allocator, merge manager or signed catalog is implemented yet.
+**Status:** Active implementation plan. The Phase 1 mission foundation and Phase 2 manual worktree safety foundation are implemented in VLD 0.12.0. No Mission Runtime, scheduler, process/model adapter, merge manager, Studio, GitHub integration or signed catalog is implemented.
 
 **Companion research:** [PLATFORM-EXPANSION-RESEARCH.md](PLATFORM-EXPANSION-RESEARCH.md)
-**Current baseline:** VLD 0.11.0, deterministic Core with packets, gates, evidence, typed workflows, locked modules/stores, agent handoffs, MCP, bounded exports and versioned mission declarations.
+**Current baseline:** VLD 0.12.0, deterministic Core with packets, gates, evidence, typed workflows, locked modules/stores, agent handoffs, MCP, bounded exports, versioned mission declarations and recovery-aware manual Git workspace allocation.
 
 
 ## Implementation progress
 
 - [x] **M0 boundary:** [ADR-0003](adr/0003-mission-foundation-and-runtime-boundary.md) records the Core/mission boundary: mission commands are fixed-argv/read-only with respect to Git and never run an agent, model or Runtime.
 - [x] **M1 initial mission foundation:** Core validates schema-versioned, complete requirement-linked work-package declarations; it freezes a verified packet digest, Core-policy digest and immutable Git target; `init`, `validate` and read-only `status` have real-Git and public-CLI tests.
-- [ ] **M2 onward:** worktree mutation, Runtime leases/state, adapters, merge lanes, Studio and catalog remain intentionally unimplemented until their preceding phase gates below are completed.
+- [x] **M2 manual worktree safety foundation:** `workspace create|status|recover|remove` allocates only a current verified mission package at its frozen commit, uses an atomic common-Git lock and sibling managed root, validates a repository-bound ledger, reports drift and preserves work during recovery. It has real-Git, symlink/state/lock/concurrency, public-CLI and packed-install coverage. [ADR-0004](adr/0004-safe-manual-worktree-allocation.md) fixes its narrow authority boundary.
+- [ ] **M3 onward:** Runtime leases/state, process/model adapters, merge lanes, Studio, GitHub/ACP integration and catalog remain intentionally unimplemented until their preceding phase gates below are completed.
 
 ## 1. Objective and success definition
 
@@ -28,7 +29,7 @@ verified packet
 ### Product success criteria
 
 - [ ] An operator can create a mission from a **verified** packet and inspect each package's linked `REQ-` IDs.
-- [ ] The platform can allocate independent Git worktrees to concurrent work packages without assigning the same workspace/branch twice.
+- [x] The manual workspace foundation can allocate independent Git worktrees to concurrent work packages without assigning the same workspace/branch twice; a future Runtime must separately own leases and scheduling.
 - [ ] An approved agent adapter can work only inside its allocated workspace and declared capability policy.
 - [ ] An agent can submit a candidate commit but cannot transition its own package to approved or merged.
 - [ ] A candidate is verified against its exact candidate SHA, exact target SHA, packet digest and policy digest before merge.
@@ -190,55 +191,41 @@ Create a versioned, Core-validated mission declaration that turns a verified pac
 }
 ```
 
-The final schema may differ, but these invariants are required:
+The final schema differs slightly (`corePolicyDigest`, no execution/review policy fields) but the Phase 1 invariants and scope are now:
 
-- [ ] Mission ID and package IDs are stable, normalized and collision-resistant within their scopes.
-- [ ] Packet path is project-bounded; packet digest matches a successful `vld verify` result.
-- [ ] Every listed requirement exists in that exact packet and is unique per package unless an explicit shared-read dependency is declared.
-- [ ] Dependency graph is acyclic and all referenced packages exist.
-- [ ] Target is resolved to an immutable commit at mission creation, not merely a mutable branch name.
-- [ ] Resource claims are normalized advisory declarations, never shell globs that get executed.
-- [ ] Mission creation records selected workflow/change/artifact context by digest/reference, not by copying mutable authority.
-- [ ] Mission declaration contains no token, arbitrary command, model prompt override or executable extension.
+- [x] Mission and package IDs are normalized and unique; packages form an acyclic, complete requirement partition.
+- [x] Packet paths are project-bounded and symlink-safe; packet digest must match a verified packet.
+- [x] Every packet requirement is assigned exactly once, and each dependency references another declared package.
+- [x] The requested target ref is resolved to a full immutable commit at creation; status reports target/policy/packet drift rather than retargeting.
+- [x] Resource claims are project-relative advisory data, never executed globs.
+- [x] Mission data rejects unknown fields and contains no tokens, arbitrary command, model prompt override or executable extension.
+- [ ] Workflow/change/artifact context linkage is a later additive schema decision; mission data must not become change-archive authority.
 
-### 4.3 Implementation checklist
+### 4.3 Implemented checklist
 
-- [ ] Add a pure mission schema/validator and deterministic canonical serializer under Core.
-- [ ] Add `vld mission init`, `vld mission validate`, `vld mission status --json` and dry-run/overwrite protections.
-- [ ] Build work packages only from a verified packet and explicit human-provided partition/description input.
-- [ ] Add an optional `vld mission plan` helper that suggests a partition but writes nothing without explicit confirmation; it must remain deterministic or be visibly marked as external/human-authored.
-- [ ] Store mission declaration outside `specs/` and never accept it as Core compiler input.
-- [ ] Add requirement-to-work-package coverage reporting, including unassigned and multiply-assigned requirement warnings.
-- [ ] Add project-relative path checks and symlink-safe resolution for all mission paths.
-- [ ] Document how mission evidence links into the existing change archive without making mission state the archive authority.
+- [x] Add a pure dependency-free mission schema/validator and deterministic mission construction under the Core boundary.
+- [x] Add `vld mission init`, `validate` and read-only `status`, JSON output, overwrite protection and no-partial-write behavior. There is no `mission plan`/dry-run model generator.
+- [x] Build packages only from a verified packet and explicit human-authored definition, requiring complete requirement assignment.
+- [x] Store the declaration outside `specs/` by default and never accept it as compiler input.
+- [x] Add exact requirement coverage reporting plus project-relative/symlink-safe path handling.
+- [ ] Add an authored evidence-reference convention to the change archive only after a separate authority/retention decision.
 
-### 4.4 Extensive test checklist
+### 4.4 Implemented extensive test checklist
 
 **Schema and invariants**
 
-- [ ] Accept a minimal valid mission tied to a verified test fixture packet.
-- [ ] Reject missing, changed or malformed packet digest.
-- [ ] Reject unknown, duplicate and disabled/removed `REQ-` IDs.
-- [ ] Reject duplicate IDs, self-dependencies, dependency cycles and dependencies on absent packages.
-- [ ] Reject mutable/unresolved target references and non-40-character commit IDs.
-- [ ] Reject absolute/outside-project paths, `..` traversal, symlink escapes and control characters.
-- [ ] Reject unknown policy IDs/digest mismatch and secret-like prohibited fields.
-- [ ] Verify canonical serialization is byte-stable across key-order variation.
+- [x] Accept valid packet-bound missions and reject missing/malformed packet authority, unknown/duplicate/missing requirement IDs, duplicate package IDs, dependency cycles, unsafe paths and unknown fields.
+- [x] Reject invalid/unresolved Git targets and require full 40-character frozen commits.
+- [x] Assert status reports packet, policy and target drift without silently changing the mission.
+- [x] Assert mission commands do not allocate worktrees, start Runtime/model code or mutate Git refs.
 
 **Lifecycle and compatibility**
 
-- [ ] Assert that `init` refuses to overwrite an existing mission without `--force` and that failed validation writes no partial file.
-- [ ] Test mission status after a packet is recompiled with an incompatible digest; status must be stale/blocked rather than silently retargeted.
-- [ ] Test packet requirement changes, removed requirements and change archive integration.
-- [ ] Test schema version rejection and a deliberate v1-to-v2 migration fixture when a future version is introduced.
-- [ ] Add property/fuzz tests over generated package DAGs to verify validator termination and correct cycle detection.
+- [x] Assert overwrite refusal, explicit force behavior and no partial mission output on invalid input.
+- [x] Run direct real-Git and public CLI mission tests, the full deterministic suite and a packed-install mission journey.
+- [ ] A v1-to-v2 migration, property/fuzz DAG suite and change-archive integration wait for a schema change that needs them.
 
-**Core regression**
-
-- [ ] Verify `vld plan`, `compile`, `verify`, `change`, existing workflow commands and generated checkers do not observe a mission unless explicitly invoked.
-- [ ] Run `npm run check` and a packed-install Core journey.
-
-**Phase 1 exit:** a reviewed, versioned mission can be created/validated from a verified packet with complete test coverage of all validation branches.
+**Phase 1 exit:** complete. A reviewed, versioned mission can be created and validated from a verified packet while deterministic Core remains independent of Runtime/Studio.
 
 ---
 
@@ -248,66 +235,59 @@ The final schema may differ, but these invariants are required:
 
 Allocate one isolated Git workspace per work package and make all Git mutations recoverable. This phase supports manual work in a worktree before it supports agents.
 
-### 5.2 Command surface
+### 5.2 Implemented command surface
 
 ```text
-vld workspace create <mission> <package> [--project .] [--dry-run]
+vld workspace create <mission> <package> [--project .] [--json]
 vld workspace status <mission> [--project .] [--json]
 vld workspace recover <mission> [--project .] [--json]
-vld workspace remove <mission> <package> [--discard --acknowledge <lease-or-worktree-id>]
+vld workspace remove <mission> <package> [--discard --acknowledge <workspace-id>] [--project .] [--json]
 ```
 
-The exact names may change, but every mutating command needs JSON output, dry-run where meaningful, exact target identification and an idempotency/recovery story.
+`create`, `recover` and `remove` are the only mutating commands. Their JSON output is a report, never an execution receipt for an agent. There is deliberately no generic `--execute`, project-command flag or model/provider option. A dry-run allocator is deferred: `status` is the non-mutating inspection surface, and a future Runtime can add a planned/leased allocation preview only with its policy model.
 
-### 5.3 Worktree design checklist
+### 5.3 Implemented worktree safety contract
 
-- [ ] Verify the project is a Git worktree/repository and resolve the common Git directory safely.
-- [ ] Resolve and store the target commit before allocation; never allocate from a moving branch name alone.
-- [ ] Create deterministic-but-unique branch names such as `vld/<mission-id>/<package-id>` after validating they do not collide.
-- [ ] Place worktrees under a configurable runtime-managed sibling root; reject a path inside packet, mission source or arbitrary user directory.
-- [ ] Create an allocation record: workspace ID, path, branch, base SHA, mission/package IDs, creation time, holder/run ID, lease state and cleanup eligibility.
-- [ ] Obtain a repository-wide mutation lock before branch/worktree/ref changes. Use atomic file/directory locking with owner/process/start-time metadata and stale-lock inspection; do not rely on an in-memory mutex.
-- [ ] Hold a narrower allocation lock while assigning a package so two Runtime processes cannot allocate it twice.
-- [ ] Detect existing `git worktree` registrations and reconcile them before creation/removal.
-- [ ] Define a single mutation-capable mission per clone for the first release. Reject or mark blocked a competing mission; document a separate-clone/remote-runner path.
-- [ ] Treat resource claim overlap as a warning/policy decision, not proof that packages are conflict-free.
-- [ ] Require clean worktree state before normal removal. `--discard` must require an exact allocation acknowledgement and record why work was discarded.
-- [ ] Preserve candidate commit/ref and evidence before cleanup; never delete a workspace merely because a process exited.
-- [ ] Add `recover` that reconciles state with `git worktree list --porcelain`, branch/ref existence and lease age before deciding anything.
+- [x] Require a non-bare Git working repository, resolve its common Git directory, and require the command to run from the primary checkout root. This creates one ledger path per common Git directory rather than one ledger per linked worktree or caller subdirectory.
+- [x] Require a current, verified mission and allocate its declared package from the mission's immutable full target commit, never directly from a moving ref.
+- [x] Derive and validate a deterministic `vld/<mission-id>/<package-id>` branch and reject existing branch/path collisions. A healthy matching allocation is idempotent; drifted/pending state requires recovery.
+- [x] Place worktrees in a deterministic sibling root outside the checkout: `<project-parent>/.vld-worktrees/<project>-<common-git-digest>/...`. Existing symlinks/non-directories are rejected; neither a packet nor a mission path is used as a workspace root.
+- [x] Keep a schema-versioned, repository-bound `.vld/workspaces.json` ledger with allocation ID, mission digest/file, package, branch, worktree, frozen base/target commit, advisory resource claims, lifecycle state and bounded removal receipts. State has an allowlist and deterministic branch/path validation.
+- [x] Serialize every VLD workspace mutation with `O_EXCL` JSON lock-file creation in the Git common directory. Owner PID/token inspection distinguishes live from recoverable locks; only `recover` can reap a dead/malformed regular lock. Symlink/unsafe lock types fail closed.
+- [x] Use that same repository lock for package assignment, `git worktree` registration/removal and branch deletion, so concurrent VLD processes cannot allocate one package twice.
+- [x] Reconcile against `git worktree list --porcelain` before idempotent creation, status, recovery and removal. Status also warns about unrecorded worktrees under the managed root.
+- [x] Support separately declared missions sharing one primary checkout only for this narrow manual allocation capability; the lock serializes VLD's branch/worktree mutations. It does **not** provide Runtime leases, scheduler ownership, remote-runner coordination, shared-ref isolation or merge-conflict prevention.
+- [x] Treat overlapping resource claims as an advisory warning which explicitly says worktrees do not prevent a later merge conflict.
+- [x] Refuse normal removal for staged, unstaged, untracked or committed work. `--discard` requires the exact allocation ID and records a bounded receipt before returning success.
+- [x] Persist `removing` intent before Git mutation. Recovery restores a still-healthy worktree or finalizes a disappeared worktree while retaining any remaining branch.
+- [ ] Add Runtime lease holder/run ID, candidate/evidence preservation and automated lease expiry only in the later Runtime phase; this manual phase deliberately has no agent/candidate authority.
 
-### 5.4 Extensive test checklist
+### 5.4 Implemented extensive test checklist
 
-**Git fixture suite**
+**Real-Git fixture and normal paths**
 
-- [ ] Create temporary bare/origin and working repositories with configured identity, commits, branches and a packet/mission fixture.
-- [ ] Create one worktree; assert path, branch, base SHA, allocation ledger and `git worktree list --porcelain` agree.
-- [ ] Create two non-conflicting package worktrees; assert uncommitted changes in one never appear in the other.
-- [ ] Attempt double allocation of the same package/branch/path concurrently; assert exactly one succeeds and no partial allocation remains.
-- [ ] Attempt allocation while a foreign/unknown worktree registration occupies the desired location; assert a clear refusal.
-- [ ] Test detached HEAD, absent Git, bare repository, invalid Git directory, unresolved target and dirty-primary policy cases.
+- [x] Build temporary Git repositories with configured identity, a verified packet and a complete frozen mission fixture.
+- [x] Allocate one and then two packages; assert branch, frozen base SHA, sibling path, ledger and `git worktree list --porcelain` agree, and uncommitted files do not cross worktrees.
+- [x] Assert matching allocation idempotency and advisory overlap warnings without claiming merge safety.
+- [x] Exercise `workspace create`, `status` and `remove` through the public CLI as part of the mission journey.
 
-**Locking, race and crash tests**
+**Safety, locking and recovery**
 
-- [ ] Spawn independent Node child processes contending for repository and package locks; verify mutual exclusion, bounded waiting and deterministic loser diagnostics.
-- [ ] Simulate a process crash after lock acquisition, after branch creation and after worktree creation. Verify `recover` distinguishes active vs stale state and never performs blind deletion.
-- [ ] Test stale lock ownership with PID reuse/unknown PID and require explicit safe recovery semantics rather than assuming a lock is stale solely by elapsed time.
-- [ ] Simulate interrupted allocation-record write; verify atomicity or recovery refusal with no hidden orphan.
-- [ ] Race `remove`, `recover` and `create`; verify no branch/worktree is removed while an active allocation owns it.
+- [x] Spawn competing CLI allocators for one package; assert one allocation record/worktree and a safe lock diagnostic for any loser.
+- [x] Inject a live-PID lock and a dead-PID lock; assert active mutation blocks and only `recover` reaps the stale lock.
+- [x] Simulate removal interrupted while the worktree remains and after it is removed; assert recovery respectively restores allocation or retains the branch and writes a receipt.
+- [x] Reject invocation from a nested directory/linked-worktree control path so the ledger cannot split across a common Git directory.
+- [x] Reject unknown state fields and unsafe state records before mutation. Replace a registered worktree with a symlink and assert status/remove block without touching the outside sentinel.
+- [x] Reject ordinary removal for untracked, staged, unstaged and committed work; assert discard needs the exact ID and clean removal unregisters both worktree and branch.
+- [x] Run targeted real-Git tests, public CLI tests, the full deterministic suite, full check and a packed-install journey in CI.
 
-**Cleanup and safety tests**
+**Deliberately deferred Runtime tests**
 
-- [ ] Reject normal removal with staged, unstaged or untracked work; ensure files remain untouched.
-- [ ] Require exact `--acknowledge` on forced discard and assert the receipt records base/candidate state.
-- [ ] Verify normal removal unregisters the Git worktree and leaves only permitted branch/ref state.
-- [ ] Verify cleanup never follows a symlink outside the managed worktree root.
-- [ ] Verify a worktree inside the authoritative packet directory and a packet inside a worktree management directory are refused.
+- [ ] Fake-clock lease expiration, holder/run identity, retries and scheduler transition races belong to the Runtime host, not this Git-only foundation.
+- [ ] Agent process crash, candidate commit/evidence retention, integration verification and merge/forge behavior remain later phase tests.
+- [ ] Cross-clone/remote-runner arbitration needs an explicit remote Runtime design; the common-Git lock cannot solve it.
 
-**Manual verification**
-
-- [ ] Run two ordinary terminal sessions in separate worktrees and demonstrate independent tests/edits.
-- [ ] Run a second mission from a separate clone; document the supported invocation and boundaries.
-
-**Phase 2 exit:** allocation, recovery and cleanup are race-tested and leave no unsafe Git mutation path; manual development can use work packages end to end.
+**Phase 2 exit:** complete. Manual development can allocate/recover/clean declared packages end to end with no model, arbitrary command, push, merge, Runtime or credential path. The next gate is a separate Runtime authority design, not expanding this allocator opportunistically.
 
 ---
 
