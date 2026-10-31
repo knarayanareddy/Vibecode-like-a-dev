@@ -213,6 +213,7 @@ vld workflow run discovery --execute
 | **Local Runtime state** | Durable lifecycle, leases and receipts for a frozen mission | Versioned ledger/snapshot, expected versions, idempotency and loopback-only API; it has no implicit process/model/network/credential authority. |
 | **Scoped adapter host** | Deterministic fake runs and one explicit read-only local argv | Separate closed policy, healthy M2 workspace + M3 lease gate, clean environment, output redaction and host-owned receipt; no shell, push, merge, candidate or sandbox-write claim. |
 | **Frozen delivery candidate** | Exact candidate tuple, detached packet integration, independent review and local queue | Runtime validates allocated branch/base ancestry and a live lease; a closed policy permits only in-process packet verification. It records bounded receipts and performs no project command, merge, push, PR, provider or credential action. |
+| **Local Studio** | Browser dashboard and VS Code command entry over the loopback Runtime API | Per-response nonce CSP, manual in-memory bearer token and text-only rendering; Studio has no Git, agent, shell, workspace-file, merge or forge authority. |
 
 The result is one repository and one `vld` CLI, while the packet remains portable and small. Use the agent-facing modules where they help; use the compiler and generated gates as the authority. See [ADR-0002](docs/adr/0002-optional-platform-extensions.md) for the extension boundary and security model. For the researched, future VLD Platform path—Studio, mission runtime, agent scheduler, merge queue and signed catalog—see [the platform expansion study](docs/PLATFORM-EXPANSION-RESEARCH.md) and [implementation plan](docs/VLD-PLATFORM-IMPLEMENTATION-PLAN.md).
 
@@ -331,6 +332,19 @@ vld runtime delivery queue missions/report-export/mission.json export-api \
 ```
 
 `queued` is only an auditable local handoff. This M5 foundation cannot execute a project check, resolve a conflict, create a merge commit, push a branch, create a PR, call GitHub, read credentials or use ambient `gh` login. If frozen packet/target authority drifts, the Runtime blocks additional mutations and retains the immutable receipt history; start a new reviewed mission/runtime rather than reinterpreting approval. See [ADR-0007](docs/adr/0007-frozen-candidates-and-no-merge-m5-foundation.md).
+
+### Local Studio — a visual Runtime client, not a second authority
+
+M6 adds a local browser dashboard at the same loopback Runtime process and a lightweight VS Code command entry (`factory/studio/vscode`). It displays packet/policy digests, a mission board with dependencies/resource claims/lease health, bounded agent receipts, exact delivery receipts and degraded Runtime warnings. It can request only the already typed `allocate` and `recover` Runtime operations; Runtime still validates the caller role and every state transition.
+
+```bash
+# This starts the existing loopback-only Runtime API plus Studio.
+# Copy the one-time token from the terminal and paste it into the dashboard.
+vld studio serve missions/report-export/mission.json --project .
+# Then open the printed http://127.0.0.1:PORT/studio URL.
+```
+
+The dashboard page contains no token, project path or receipt data until an authenticated request succeeds. It has a response-specific nonce CSP, no external assets/storage, no permissive CORS and renders every Runtime field as text rather than trusted HTML. The VS Code commands accept only an exact loopback Studio URL; its WebView keeps a pasted token in extension memory and accepts only a `refresh` message. Studio does **not** serve workspace files, run a Git/agent/shell command, submit delivery candidates, approve, merge, push, create PRs or access a forge. The existing CLI remains the full local workflow. See [ADR-0008](docs/adr/0008-local-studio-is-a-runtime-client.md).
 
 ## What you get
 
@@ -676,6 +690,7 @@ Shipped in v0.12: `vld workspace create|status|recover|remove`, a manually opera
 Shipped in v0.13: optional `vld runtime` host state for a frozen mission: versioned JSONL receipts plus an atomically checked snapshot, leases, role/version/idempotency validation, expiry recovery and a bearer-protected loopback API.
 Shipped in v0.14: `vld runtime agent run|status`, with deterministic fake runs and a policy-declared, direct-argv read-only local-process adapter. The host requires an M2 workspace and M3 lease, never inherits parent credentials, redacts output/path data and retains host-owned receipts. It deliberately does not claim CWD confinement as a write sandbox, and has no candidate, verification, review, push, merge, PR or GitHub/ACP integration.
 Shipped in v0.15: `vld runtime delivery submit|verify|approve|queue|status`, an exact-SHA local candidate/review foundation. It validates allocated-branch/base ancestry, uses one temporary detached integration worktree and a closed in-process packet check, records digest-bound independent review/queue receipts, and intentionally has no project-command, merge, push, PR, forge or credential capability.
+Shipped in v0.16: `vld studio serve` and the Runtime `/studio` dashboard, plus a VS Code command-entry extension. The static local client displays Runtime packet/mission/lease/receipt state through the existing authenticated loopback API, has a nonce CSP and text-only rendering, and can request only typed Runtime allocation/recovery actions—never Git, an agent, a shell, merge or forge work.
 
 1. **Published live-agent comparison runs** — use the optional protocol above across Claude Code, Codex and open-weight coding agents, preserving raw JSON logs and configuration notes; do not treat an export as a competing source of requirements.
 2. **`vld change --quick`** — for one-line changes that do not deserve a delta: an explicit, labelled path with no probe, for teams that accept the trade.

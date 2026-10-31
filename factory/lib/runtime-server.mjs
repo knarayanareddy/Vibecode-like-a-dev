@@ -11,6 +11,7 @@ import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { extensionError, ID_PATTERN } from './extension-utils.mjs';
 import { assertRuntimeActor } from './runtime-policy.mjs';
 import { assertRuntimeRequest, runtimeFailure, runtimeSuccess } from './runtime-contracts.mjs';
+import { STUDIO_PATH, studioCapabilities, studioContentSecurityPolicy, studioHtml, studioNonce } from './studio.mjs';
 import {
   allocateRuntimePackage,
   heartbeatRuntimeLease,
@@ -67,6 +68,21 @@ function json(response, status, value, origin = null) {
   response.end(JSON.stringify(value));
 }
 
+function studioPage(response) {
+  const nonce = studioNonce();
+  const body = studioHtml(nonce);
+  response.writeHead(200, {
+    'content-type': 'text/html; charset=utf-8',
+    'content-length': Buffer.byteLength(body),
+    'cache-control': 'no-store',
+    'content-security-policy': studioContentSecurityPolicy(nonce),
+    'referrer-policy': 'no-referrer',
+    'x-content-type-options': 'nosniff',
+    'x-frame-options': 'DENY'
+  });
+  response.end(body);
+}
+
 function actorMap(identities) {
   const normalized = new Map();
   for (const [token, actor] of Object.entries(identities ?? {})) {
@@ -88,9 +104,13 @@ function authenticate(request, identities) {
 function dispatch({ request, actor, missionFile, projectDir, close }) {
   const params = request.params;
   switch (request.method) {
-    case 'status':
+    case 'status': {
       closedParams(params, new Set(), 'status');
-      return runtimeStatus({ missionFile, projectDir });
+      const status = runtimeStatus({ missionFile, projectDir });
+      // This is advisory display metadata only. Every action below still goes
+      // through the ordinary Runtime role/policy validation path.
+      return { ...status, studio: { protocolVersion: 1, actor: { ...actor }, actions: studioCapabilities(actor) } };
+    }
     case 'allocate': {
       closedParams(params, new Set(['packageId', 'assignee', 'leaseMs']), 'allocate');
       if (!ID_PATTERN.test(String(params.packageId ?? ''))) throw extensionError('allocate params.packageId is invalid', 'INVALID_RUNTIME_REQUEST');
@@ -131,6 +151,10 @@ export function createRuntimeServer({ missionFile, projectDir = '.', host = '127
     const origin = loopbackOrigin(request.headers.origin);
     if (request.headers.origin && !origin) {
       json(response, 403, runtimeFailure(null, extensionError('Runtime API rejects non-loopback browser origins', 'RUNTIME_ORIGIN_FORBIDDEN')));
+      return;
+    }
+    if (request.method === 'GET' && (request.url === STUDIO_PATH || request.url === `${STUDIO_PATH}/`)) {
+      studioPage(response);
       return;
     }
     if (request.method === 'OPTIONS') {

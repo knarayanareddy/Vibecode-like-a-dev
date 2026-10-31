@@ -105,7 +105,9 @@ Usage
   vld runtime delivery status <mission.json> [--project <dir>] [--json]
                                      frozen candidate/packet verification, independent review and a local queue; no merge, push or forge access
   vld runtime serve <mission.json> [--port <0-65535>] [--token <local-token>] [--project <dir>]
-                                     optional loopback-only host state, leases and fake-run receipts; never starts an agent
+                                     loopback-only Runtime API plus the local Studio dashboard; never starts an agent
+  vld studio serve <mission.json> [--port <0-65535>] [--token <local-token>] [--project <dir>]
+                                     launch the same loopback Runtime API and accessible browser Studio; token stays in browser memory only
   vld mcp                            run the MCP server over stdio
   vld index [--check]                rebuild primitives/index.json
 
@@ -1124,6 +1126,31 @@ function printRuntimeReport(action, report) {
   console.log(`\n${report.ok === false ? 'FAIL' : 'PASS'}\n`);
 }
 
+function startStudioServer({ missionFile, project, label = 'Runtime' }) {
+  const token = option('--token', null);
+  const identities = token ? { [token]: { role: 'operator', id: 'local-operator' } } : undefined;
+  const { server, tokens } = createRuntimeServer({ missionFile, projectDir: project, identities });
+  listenRuntimeServer(server, { host: '127.0.0.1', port: integerOption('--port', 0) })
+    .then((address) => {
+      const operatorToken = tokens.find((entry) => entry.actor.role === 'operator');
+      console.error(`VLD ${label} API · http://${address.host}:${address.port}/v1/runtime · loopback only`);
+      console.error(`VLD Studio · http://${address.host}:${address.port}/studio`);
+      console.error(`Local operator token (shown once; paste it into Studio): ${operatorToken.token}`);
+    })
+    .catch((error) => fail(error.message));
+}
+
+function runStudio() {
+  try {
+    const [action, missionFile] = positional;
+    const project = option('--project', '.');
+    if (action !== 'serve' || !missionFile) fail('Usage: vld studio serve <mission.json> [--port <0-65535>] [--token <local-token>] [--project <dir>]');
+    startStudioServer({ missionFile, project, label: 'Studio Runtime' });
+  } catch (error) {
+    fail(error.message);
+  }
+}
+
 async function runRuntime() {
   const [action, missionFile, packageId] = positional;
   const project = option('--project', '.');
@@ -1274,16 +1301,7 @@ async function runRuntime() {
     }
     if (action === 'serve') {
       if (!missionFile) fail('Usage: vld runtime serve <mission.json> [--port <0-65535>] [--token <local-token>] [--project <dir>]');
-      const token = option('--token', null);
-      const identities = token ? { [token]: { role: 'operator', id: 'local-operator' } } : undefined;
-      const { server, tokens } = createRuntimeServer({ missionFile, projectDir: project, identities });
-      listenRuntimeServer(server, { host: '127.0.0.1', port: integerOption('--port', 0) })
-        .then((address) => {
-          const operatorToken = tokens.find((entry) => entry.actor.role === 'operator');
-          console.error(`VLD Runtime API · http://${address.host}:${address.port}/v1/runtime · loopback only`);
-          console.error(`Local operator token (shown once): ${operatorToken.token}`);
-        })
-        .catch((error) => fail(error.message));
+      startStudioServer({ missionFile, project, label: 'Runtime' });
       return;
     }
     fail('Usage: vld runtime init|status|allocate|heartbeat|transition|delivery|recover|serve <mission.json> [package]');
@@ -1356,6 +1374,9 @@ switch (command) {
     break;
   case 'runtime':
     runRuntime().catch((error) => fail(error.message));
+    break;
+  case 'studio':
+    runStudio();
     break;
   case 'mcp':
     runMcp();

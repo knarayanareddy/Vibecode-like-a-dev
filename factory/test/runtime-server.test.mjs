@@ -38,6 +38,19 @@ function runtimeFixture(t) {
   return { project, missionFile };
 }
 
+function get({ port, path = '/studio', origin = null }) {
+  return new Promise((resolve, reject) => {
+    const request = http.request({ host: '127.0.0.1', port, method: 'GET', path, headers: origin ? { origin } : {} }, (response) => {
+      let raw = '';
+      response.setEncoding('utf8');
+      response.on('data', (part) => { raw += part; });
+      response.on('end', () => resolve({ status: response.statusCode, headers: response.headers, body: raw }));
+    });
+    request.on('error', reject);
+    request.end();
+  });
+}
+
 function post({ port, token = null, body, origin = null }) {
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify(body);
@@ -94,6 +107,7 @@ test('loopback Runtime API requires a local token, rejects hostile origins and n
   assert.equal(status.body.ok, true);
   assert.equal(status.headers['access-control-allow-origin'], `http://127.0.0.1:${address.port}`);
   assert.equal(JSON.stringify(status.body).includes(fixture.project), false, 'API status does not reveal host project paths');
+  assert.equal(status.body.result.studio.actions.allocate, true, 'Studio receives advisory capabilities but Runtime stays authoritative');
 
   const allocated = await request('request-0004', 'allocate', { packageId: 'api-work', assignee: { role: 'implementer', id: 'agent-alpha' }, leaseMs: 10_000 });
   assert.equal(allocated.status, 200);
@@ -111,4 +125,24 @@ test('loopback Runtime API requires a local token, rejects hostile origins and n
   const stopped = await request('request-0007', 'shutdown', {});
   assert.equal(stopped.status, 200);
   await closed;
+});
+
+test('M6 serves a static loopback Studio shell with strict CSP and no Runtime token, project path or unsafe HTML sink', async (t) => {
+  const fixture = runtimeFixture(t);
+  const studioTokenProof = 'studio-fixture-token-12345';
+  const { server } = createRuntimeServer({ missionFile: fixture.missionFile, projectDir: fixture.project, identities: { [studioTokenProof]: { role: 'operator', id: 'local-operator' } } });
+  t.after(() => server.close());
+  const address = await listenRuntimeServer(server, { host: '127.0.0.1', port: 0 });
+  const page = await get({ port: address.port });
+  assert.equal(page.status, 200);
+  assert.match(page.headers['content-security-policy'], /default-src 'none'/);
+  assert.match(page.headers['content-security-policy'], /script-src 'nonce-/);
+  assert.equal(page.headers['referrer-policy'], 'no-referrer');
+  assert.equal(page.body.includes(studioTokenProof), false);
+  assert.equal(page.body.includes(fixture.project), false);
+  assert.equal(page.body.includes('innerHTML'), false);
+  assert.match(page.body, /textContent/);
+  const hostile = await get({ port: address.port, origin: 'https://attacker.invalid' });
+  assert.equal(hostile.status, 403);
+  assert.match(hostile.body, /RUNTIME_ORIGIN_FORBIDDEN/);
 });

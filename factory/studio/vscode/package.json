@@ -1,0 +1,19 @@
+{
+  "name": "vld-studio",
+  "displayName": "VLD Studio",
+  "description": "A local, Runtime-authoritative VLD Studio entry point.",
+  "version": "0.16.0",
+  "publisher": "vld-local",
+  "license": "MIT",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Other"],
+  "main": "./extension.cjs",
+  "activationEvents": ["onCommand:vld.studio.openDashboard", "onCommand:vld.studio.inspectRuntime"],
+  "contributes": {
+    "commands": [
+      { "command": "vld.studio.openDashboard", "title": "VLD: Open Local Studio Dashboard" },
+      { "command": "vld.studio.inspectRuntime", "title": "VLD: Inspect Local Runtime" }
+    ]
+  },
+  "scripts": { "test": "node --test test/*.test.cjs" }
+}
