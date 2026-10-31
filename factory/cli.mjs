@@ -26,6 +26,7 @@ import { addStore, copyStoreAsset, initStore, previewStoreRefresh, readStoreStat
 import { createWorkspace, recoverWorkspaces, removeWorkspace, workspaceStatus } from './lib/workspaces.mjs';
 import { allocateRuntimePackage, heartbeatRuntimeLease, initializeRuntime, recoverRuntime, runtimeStatus, transitionRuntimePackage } from './lib/runtime.mjs';
 import { runRuntimeAgent, runtimeAgentStatus } from './lib/runtime-agent.mjs';
+import { approveRuntimeDeliveryCandidate, queueRuntimeDeliveryCandidate, runtimeDeliveryStatus, submitRuntimeDeliveryCandidate, verifyRuntimeDeliveryCandidate } from './lib/runtime-delivery.mjs';
 import { createRuntimeServer, listenRuntimeServer } from './lib/runtime-server.mjs';
 import { buildPlan, loadPolicy } from './lib/planner.mjs';
 import { loadProfile, KINDS, STAGES, SCALES, TRAITS, RISK_FLAGS } from './lib/profile.mjs';
@@ -47,7 +48,7 @@ const option = (name, fallback) => {
 const VALUE_FLAGS = new Set([
   '-o', '--out', '--repo', '--name', '--idea', '--profile', '--packet',
   '--project', '--modules', '--evidence', '--file', '--ref', '--title', '--from-store', '--types', '--acknowledge', '--target',
-  '--assignee', '--lease-ms', '--run', '--lease-token', '--to', '--actor', '--expected-version', '--port', '--token', '--policy'
+  '--assignee', '--lease-ms', '--run', '--lease-token', '--to', '--actor', '--expected-version', '--port', '--token', '--policy', '--sha', '--adapter-run', '--candidate', '--reason'
 ]);
 const positional = rest.filter((item, index) => !item.startsWith('-') && !(index > 0 && VALUE_FLAGS.has(rest[index - 1])));
 
@@ -97,6 +98,12 @@ Usage
   vld runtime agent run <mission.json> <package> --policy <agent-policy.json> --lease-token <token> [--project <dir>] [--json]
   vld runtime agent status <mission.json> [--project <dir>] [--json]
                                      opt-in fake or one-declared-argv adapter; local processes are read-only without a sandbox
+  vld runtime delivery submit <mission.json> <package> --policy <delivery-policy.json> --lease-token <token> --sha <commit> [--adapter-run <id>]
+  vld runtime delivery verify <mission.json> <package> --policy <delivery-policy.json> [--project <dir>] [--json]
+  vld runtime delivery approve <mission.json> <package> --policy <delivery-policy.json> --candidate <id> --actor reviewer:<id> --reason <text>
+  vld runtime delivery queue <mission.json> <package> --policy <delivery-policy.json> --candidate <id> --actor release-approver:<id>
+  vld runtime delivery status <mission.json> [--project <dir>] [--json]
+                                     frozen candidate/packet verification, independent review and a local queue; no merge, push or forge access
   vld runtime serve <mission.json> [--port <0-65535>] [--token <local-token>] [--project <dir>]
                                      optional loopback-only host state, leases and fake-run receipts; never starts an agent
   vld mcp                            run the MCP server over stdio
@@ -1122,6 +1129,51 @@ async function runRuntime() {
   const project = option('--project', '.');
   const json = hasFlag('--json');
   try {
+    if (action === 'delivery') {
+      const [_, deliveryAction, deliveryMissionFile, deliveryPackageId] = positional;
+      if (deliveryAction === 'status') {
+        if (!deliveryMissionFile) fail('Usage: vld runtime delivery status <mission.json> [--project <dir>]');
+        const result = runtimeDeliveryStatus({ missionFile: deliveryMissionFile, projectDir: project });
+        if (json) console.log(JSON.stringify(result, null, 2));
+        else {
+          printRuntimeReport('delivery status', result);
+          for (const entry of result.delivery) {
+            const receipt = entry.candidate ?? entry.verification ?? entry.approval ?? entry.queue;
+            const type = entry.candidate ? 'candidate' : entry.verification ? 'verification' : entry.approval ? 'approval' : 'queue';
+            console.log(`  ${entry.packageId.padEnd(20)} ${type.padEnd(13)} ${receipt.id}`);
+          }
+        }
+        process.exit(result.ok ? 0 : 1);
+      }
+      if (!['submit', 'verify', 'approve', 'queue'].includes(deliveryAction) || !deliveryMissionFile || !deliveryPackageId) {
+        fail('Usage: vld runtime delivery submit|verify|approve|queue <mission.json> <package> --policy <delivery-policy.json>');
+      }
+      const policyFile = option('--policy', null);
+      if (!policyFile) fail('runtime delivery requires --policy <delivery-policy.json>');
+      let result;
+      if (deliveryAction === 'submit') {
+        const leaseToken = option('--lease-token', null);
+        const candidateSha = option('--sha', null);
+        if (!leaseToken || !candidateSha) fail('runtime delivery submit requires --lease-token and --sha');
+        result = submitRuntimeDeliveryCandidate({ missionFile: deliveryMissionFile, packageId: deliveryPackageId, policyFile, leaseToken, candidateSha, adapterRunId: option('--adapter-run', null), projectDir: project });
+      } else if (deliveryAction === 'verify') {
+        result = verifyRuntimeDeliveryCandidate({ missionFile: deliveryMissionFile, packageId: deliveryPackageId, policyFile, projectDir: project });
+      } else if (deliveryAction === 'approve') {
+        const actor = runtimeActor(option('--actor', null));
+        const candidateId = option('--candidate', null);
+        const reason = option('--reason', null);
+        if (!candidateId || !reason) fail('runtime delivery approve requires --candidate and --reason');
+        result = approveRuntimeDeliveryCandidate({ missionFile: deliveryMissionFile, packageId: deliveryPackageId, policyFile, candidateId, actor, reason, projectDir: project });
+      } else {
+        const actor = runtimeActor(option('--actor', null));
+        const candidateId = option('--candidate', null);
+        if (!candidateId) fail('runtime delivery queue requires --candidate');
+        result = queueRuntimeDeliveryCandidate({ missionFile: deliveryMissionFile, packageId: deliveryPackageId, policyFile, candidateId, actor, projectDir: project });
+      }
+      if (json) console.log(JSON.stringify({ ok: true, ...result }, null, 2));
+      else printRuntimeReport(`delivery ${deliveryAction}`, result.status);
+      return;
+    }
     if (action === 'agent') {
       const [_, agentAction, agentMissionFile, agentPackageId] = positional;
       if (agentAction === 'status') {
@@ -1234,7 +1286,7 @@ async function runRuntime() {
         .catch((error) => fail(error.message));
       return;
     }
-    fail('Usage: vld runtime init|status|allocate|heartbeat|transition|recover|serve <mission.json> [package]');
+    fail('Usage: vld runtime init|status|allocate|heartbeat|transition|delivery|recover|serve <mission.json> [package]');
   } catch (error) {
     fail(error.message);
   }

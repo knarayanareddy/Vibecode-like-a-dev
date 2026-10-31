@@ -212,6 +212,7 @@ vld workflow run discovery --execute
 | **Manual workspaces** | One Git worktree/branch for each frozen mission package | Repository-wide exclusive lock, sibling managed root, current-mission gate and recovery-aware cleanup; this is not an agent executor or merge-conflict guarantee. |
 | **Local Runtime state** | Durable lifecycle, leases and receipts for a frozen mission | Versioned ledger/snapshot, expected versions, idempotency and loopback-only API; it has no implicit process/model/network/credential authority. |
 | **Scoped adapter host** | Deterministic fake runs and one explicit read-only local argv | Separate closed policy, healthy M2 workspace + M3 lease gate, clean environment, output redaction and host-owned receipt; no shell, push, merge, candidate or sandbox-write claim. |
+| **Frozen delivery candidate** | Exact candidate tuple, detached packet integration, independent review and local queue | Runtime validates allocated branch/base ancestry and a live lease; a closed policy permits only in-process packet verification. It records bounded receipts and performs no project command, merge, push, PR, provider or credential action. |
 
 The result is one repository and one `vld` CLI, while the packet remains portable and small. Use the agent-facing modules where they help; use the compiler and generated gates as the authority. See [ADR-0002](docs/adr/0002-optional-platform-extensions.md) for the extension boundary and security model. For the researched, future VLD Platform path—Studio, mission runtime, agent scheduler, merge queue and signed catalog—see [the platform expansion study](docs/PLATFORM-EXPANSION-RESEARCH.md) and [implementation plan](docs/VLD-PLATFORM-IMPLEMENTATION-PLAN.md).
 
@@ -306,6 +307,30 @@ vld runtime agent status missions/report-export/mission.json --project .
 ```
 
 `local-process` has no shell, PATH lookup or inherited environment; it gets only a fresh non-secret locale allowlist and VLD-derived IDs. A process CWD is **not** a sandbox, so this release rejects write-capable local-process policies rather than claiming a coding agent is confined. Fake runs are the deterministic CI path; a future sandbox adapter must prove filesystem/process/network isolation before VLD can grant process writes. Neither adapter can submit a candidate, verify project checks, approve, push, merge, open a PR or change policy. See [ADR-0006](docs/adr/0006-scoped-agent-adapter-host.md).
+
+### Frozen delivery candidates — exact local review handoff, not a merge engine
+
+M5 adds an explicit Runtime-owned candidate/review surface after a successful M4 run. `submit` freezes the exact clean package-branch `HEAD`, allocation base, mission target, packet/policy digests and optional completed adapter receipt. `verify` creates a detached temporary integration worktree from the frozen target, integrates that exact SHA with fixed Git argv and runs only VLD's in-process packet verifier. The disposable worktree is removed before the receipt is committed. A different reviewer can approve only the same candidate/target/policy tuple; a release approver can then queue that tuple.
+
+```bash
+# The delivery policy is deliberately closed: no arbitrary project command and no merge/push/forge permission.
+cat > delivery-policy.json <<'EOF'
+{"schemaVersion":1,"id":"local-delivery-v1","verification":{"verifyPacket":true,"commands":[]},"review":{"independent":true},"queue":{"enabled":true},"merge":{"local":false,"push":false,"forge":false}}
+EOF
+
+# SHA must equal the healthy allocated worktree's current clean HEAD.
+vld runtime delivery submit missions/report-export/mission.json export-api \
+  --policy delivery-policy.json --lease-token "$LEASE_TOKEN" --sha "$CANDIDATE_SHA" --adapter-run "$AGENT_RUN_ID" --project .
+vld runtime delivery verify missions/report-export/mission.json export-api \
+  --policy delivery-policy.json --project .
+vld runtime delivery approve missions/report-export/mission.json export-api \
+  --policy delivery-policy.json --candidate "$CANDIDATE_ID" \
+  --actor reviewer:reviewer-beta --reason "Reviewed frozen packet and integration receipt" --project .
+vld runtime delivery queue missions/report-export/mission.json export-api \
+  --policy delivery-policy.json --candidate "$CANDIDATE_ID" --actor release-approver:release-gamma --project .
+```
+
+`queued` is only an auditable local handoff. This M5 foundation cannot execute a project check, resolve a conflict, create a merge commit, push a branch, create a PR, call GitHub, read credentials or use ambient `gh` login. If frozen packet/target authority drifts, the Runtime blocks additional mutations and retains the immutable receipt history; start a new reviewed mission/runtime rather than reinterpreting approval. See [ADR-0007](docs/adr/0007-frozen-candidates-and-no-merge-m5-foundation.md).
 
 ## What you get
 
@@ -650,6 +675,7 @@ Shipped in v0.11: versioned `vld mission init|validate|status`, which freezes a 
 Shipped in v0.12: `vld workspace create|status|recover|remove`, a manually operated, repository-serialized Git worktree allocator derived only from a current frozen mission. It uses a sibling managed root, atomic recovery-aware locking and exact acknowledged discard; it does not add model/process execution, push, merge or GitHub integration.
 Shipped in v0.13: optional `vld runtime` host state for a frozen mission: versioned JSONL receipts plus an atomically checked snapshot, leases, role/version/idempotency validation, expiry recovery and a bearer-protected loopback API.
 Shipped in v0.14: `vld runtime agent run|status`, with deterministic fake runs and a policy-declared, direct-argv read-only local-process adapter. The host requires an M2 workspace and M3 lease, never inherits parent credentials, redacts output/path data and retains host-owned receipts. It deliberately does not claim CWD confinement as a write sandbox, and has no candidate, verification, review, push, merge, PR or GitHub/ACP integration.
+Shipped in v0.15: `vld runtime delivery submit|verify|approve|queue|status`, an exact-SHA local candidate/review foundation. It validates allocated-branch/base ancestry, uses one temporary detached integration worktree and a closed in-process packet check, records digest-bound independent review/queue receipts, and intentionally has no project-command, merge, push, PR, forge or credential capability.
 
 1. **Published live-agent comparison runs** — use the optional protocol above across Claude Code, Codex and open-weight coding agents, preserving raw JSON logs and configuration notes; do not treat an export as a competing source of requirements.
 2. **`vld change --quick`** — for one-line changes that do not deserve a delta: an explicit, labelled path with no probe, for teams that accept the trade.

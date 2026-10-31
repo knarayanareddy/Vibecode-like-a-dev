@@ -575,6 +575,57 @@ export function runtimeWorkspaceAllocation({ missionFile, packageId, projectDir 
 }
 
 /**
+ * Create a short-lived detached integration worktree under the same repository
+ * lock as manual allocations. M5 calls this with a candidate SHA after validating
+ * that it belongs to the package branch. It never updates a branch/ref and always
+ * removes the integration worktree before returning.
+ */
+export function withRuntimeIntegrationWorkspace({ missionFile, packageId, candidateSha, projectDir = '.', callback } = {}) {
+  const repo = primaryWorkspaceRepository(projectDir);
+  const project = repo.root;
+  const current = missionCurrentOrThrow(missionFile, project);
+  if (!COMMIT.test(String(candidateSha ?? ''))) throw extensionError('integration candidate SHA must be a full commit', 'INVALID_CANDIDATE_SHA');
+  if (typeof callback !== 'function') throw extensionError('integration callback is required', 'INVALID_INTEGRATION_REQUEST');
+  const workPackage = current.mission.workPackages.find((entry) => entry.id === packageId);
+  if (!workPackage) throw extensionError(`mission "${current.mission.id}" has no work package "${packageId}"`, 'UNKNOWN_WORK_PACKAGE');
+  const root = path.join(path.dirname(repo.root), '.vld-integrations', `${path.basename(repo.root)}-${digest(repo.commonDir).slice(0, 12)}`);
+  if (isWithin(repo.root, root)) throw extensionError('integration root must be outside the project checkout', 'INVALID_WORKSPACE_ROOT');
+
+  return withWorkspaceLock(repo, () => {
+    mkdirWithoutSymlinks(root, 'integration root');
+    const directory = path.join(root, current.mission.id, packageId, `${candidateSha.slice(0, 12)}-${randomUUID()}`);
+    if (!isWithin(root, directory)) throw extensionError('integration worktree path escapes its managed root', 'INVALID_WORKSPACE_ROOT');
+    let created = false;
+    try {
+      git(repo.project, ['worktree', 'add', '--detach', directory, current.mission.target.commit], 'INTEGRATION_WORKTREE_FAILED');
+      created = true;
+      // --no-commit and --no-ff prepare the exact merge result for checks but
+      // cannot update any branch. A conflict is a typed result, not an agent job.
+      if (!gitSucceeds(directory, ['merge', '--no-commit', '--no-ff', candidateSha])) {
+        try { git(directory, ['merge', '--abort'], 'INTEGRATION_MERGE_ABORT_FAILED'); } catch {}
+        return { integrated: false, outcome: 'conflict' };
+      }
+      const integrationTree = git(directory, ['write-tree'], 'INTEGRATION_TREE_FAILED');
+      if (!COMMIT.test(integrationTree)) throw extensionError('integration did not produce a tree digest', 'INTEGRATION_TREE_FAILED');
+      return {
+        integrated: true,
+        targetSha: current.mission.target.commit,
+        candidateSha,
+        integrationTree,
+        result: callback({ worktree: directory, targetSha: current.mission.target.commit, candidateSha, integrationTree, mission: current.mission })
+      };
+    } finally {
+      if (created) {
+        try { git(directory, ['merge', '--abort'], 'INTEGRATION_MERGE_ABORT_FAILED'); } catch {}
+        // Leaving an untracked integration worktree would defeat serialized
+        // recovery, so removal failure is deliberately surfaced to the caller.
+        git(repo.project, ['worktree', 'remove', '--force', directory], 'INTEGRATION_WORKTREE_CLEANUP_FAILED');
+      }
+    }
+  });
+}
+
+/**
  * Reconcile a stale lock and interrupted removal. It intentionally never deletes
  * an unowned worktree or a remaining branch; recovery favours preserving work.
  */

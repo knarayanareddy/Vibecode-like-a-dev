@@ -1,9 +1,9 @@
 # VLD Platform implementation plan
 
-**Status:** Active implementation plan. Phases 1–3 and the safe M4 adapter-host foundation are implemented in VLD 0.14.0: mission authority, manual worktree safety, optional local Runtime state, deterministic fake runs, and a constrained read-only direct-argv local-process adapter. A write-capable sandbox adapter, ACP transport, candidate verifier, merge manager, Studio, GitHub integration and signed catalog are still unimplemented.
+**Status:** Active implementation plan. Phases 1–3, the safe M4 adapter-host foundation and the closed M5 candidate/review foundation are implemented in VLD 0.15.0: mission authority, manual worktree safety, optional local Runtime state, deterministic fake runs, a constrained read-only direct-argv local-process adapter, exact candidate receipt identity, detached packet integration and independent local review/queue receipts. A write-capable sandbox adapter, ACP transport, project command verifier, merge manager, Studio, GitHub integration and signed catalog are still unimplemented.
 
 **Companion research:** [PLATFORM-EXPANSION-RESEARCH.md](PLATFORM-EXPANSION-RESEARCH.md)
-**Current baseline:** VLD 0.14.0, deterministic Core with packets, gates, evidence, typed workflows, locked modules/stores, agent handoffs, MCP, bounded exports, versioned mission/workspace foundations, a recovery-aware local Runtime ledger/API, and an opt-in M4 adapter host with no Core execution dependency.
+**Current baseline:** VLD 0.15.0, deterministic Core with packets, gates, evidence, typed workflows, locked modules/stores, agent handoffs, MCP, bounded exports, versioned mission/workspace foundations, a recovery-aware local Runtime ledger/API, an opt-in M4 adapter host and an M5 no-merge local candidate/review host with no Core execution dependency.
 
 
 ## Implementation progress
@@ -13,7 +13,8 @@
 - [x] **M2 manual worktree safety foundation:** `workspace create|status|recover|remove` allocates only a current verified mission package at its frozen commit, uses an atomic common-Git lock and sibling managed root, validates a repository-bound ledger, reports drift and preserves work during recovery. It has real-Git, symlink/state/lock/concurrency, public-CLI and packed-install coverage. [ADR-0004](adr/0004-safe-manual-worktree-allocation.md) fixes its narrow authority boundary.
 - [x] **M3 local Runtime host:** `runtime init|status|allocate|heartbeat|transition|recover|serve` owns versioned fake-run state, policy digest, leases, expected versions, receipts and a bearer-protected loopback API. It has policy/role/lease/recovery/API/public-CLI tests and no execution authority. [ADR-0005](adr/0005-local-runtime-host-and-fake-run-state.md) defines the trust boundary.
 - [x] **M4 adapter-host foundation:** `runtime agent run|status` has a deterministic fake adapter and a strictly policy-declared direct-argv local process adapter. It verifies an M2 workspace plus M3 lease, owns transitions/receipts, excludes parent credentials and retains only redacted output. [ADR-0006](adr/0006-scoped-agent-adapter-host.md) records why unsandboxed local processes are read-only.
-- [ ] **M4 write sandbox / ACP onward:** a write-capable sandbox adapter, ACP transport, candidate verification/review/merge lanes, Studio, GitHub integration and catalog remain intentionally unimplemented until their preceding phase gates below are completed.
+- [x] **M5 candidate/review foundation:** `runtime delivery submit|verify|approve|queue|status` freezes exact branch/base/target/packet/policy identities, uses a Runtime-locked detached integration worktree for only an in-process packet check, and writes independent review/queue receipts. It has no project-command, merge, push, PR, forge or credential authority. [ADR-0007](adr/0007-frozen-candidates-and-no-merge-m5-foundation.md) records the boundary.
+- [ ] **Sandbox / ACP / merge onward:** a write-capable sandbox adapter, ACP transport, project verifier, merge lane manager, Studio, GitHub integration and catalog remain intentionally unimplemented until their preceding phase gates below are completed.
 
 ## 1. Objective and success definition
 
@@ -433,44 +434,44 @@ Turn a candidate commit into a frozen, independently reviewed and revalidated me
 
 ### 8.2 Candidate and receipt contract
 
-- [ ] Freeze `{missionId, packageId, candidateSha, baseSha, targetRef, targetSha, packetDigest, policyDigest, adapterRunId, generatedAt}` when an agent submits work.
-- [ ] Reject candidate SHA that is not reachable from the package's allocated branch/worktree according to policy.
-- [ ] Define declared verification commands as policy/packet-derived structured argv, not agent-supplied shell strings.
-- [ ] Store check results with command identity, exit code, output digest/redacted summary, environment class and candidate/target SHA.
-- [ ] Bind review approval to candidate SHA, target SHA, policy digest and reviewer identity; invalidate it on any material change.
-- [ ] Emit a final merge receipt with local merge commit or forge PR/merge identifier, target result SHA and linked evidence references.
+- [x] Freeze `{missionId, packageId, candidateSha, baseSha, targetRef, targetSha, packetDigest, policyDigest, adapterRunId, generatedAt}` through a Runtime-owned candidate receipt (M5 foundation).
+- [x] Reject candidate SHA that is not the clean allocated-worktree branch HEAD, is not descended from its frozen base, or is not reachable from the allocated branch (M5 foundation).
+- [x] Define a closed policy-derived verification surface: M5 permits only an in-process VLD packet check and an empty command list; no agent-supplied shell string or project executable exists (M5 foundation).
+- [x] Store the built-in check identity, bounded output digest/redacted summary and candidate/target SHA (M5 foundation; command exit/environment fields await a sandboxed project-check adapter).
+- [x] Bind review approval to candidate SHA, target SHA, policy digest and reviewer identity; Runtime's current-mission guard fail-closes further mutation when packet/target authority changes (M5 foundation).
+- [ ] Emit a final merge receipt with local merge commit or forge PR/merge identifier, target result SHA and linked evidence references (deferred: no merge authority in this release).
 
 ### 8.3 Merge queue checklist
 
-- [ ] Create a temporary integration worktree from the frozen target SHA under Runtime control.
-- [ ] Integrate the exact candidate commit using a selected safe strategy; record conflict/error result rather than asking an agent to silently resolve it.
-- [ ] Run VLD packet checkers/gates and project-declared checks in the integration worktree.
-- [ ] Transition to `in_review` only after required checks complete; transition to `approved` only through role/policy validation.
-- [ ] Queue approved candidates in a deterministic order with explicit dependency/order policy.
-- [ ] Re-read target SHA immediately before merge. If changed, discard prior integration result, return to verifying and create a new candidate tuple.
-- [ ] Local Git adapter may create a merge commit only when explicit policy permits. Default branch push must be opt-in.
-- [ ] GitHub adapter creates/updates a PR, reads permitted status/review facts and requests merge only when both VLD policy and GitHub authorization/branch protection permit it.
-- [ ] Keep provider credentials in OS keychain/explicit secret reference; never use an accidental global `gh` session as an implicit product credential.
-- [ ] Make queue cancellation/retry/manual takeover idempotent and receipted.
+- [x] Create a temporary detached integration worktree from the frozen target SHA under Runtime control and the repository-wide workspace lock (M5 foundation).
+- [x] Integrate the exact candidate commit using fixed Git argv; record a conflict result rather than asking an agent to silently resolve it (M5 foundation).
+- [x] Run the VLD packet checker in the integration worktree; project-declared checks remain deferred until a sandboxed verifier exists.
+- [x] Transition to `in_review` only after the required built-in check completes; transition to `approved` only through independent reviewer role validation (M5 foundation).
+- [x] Queue one approved immutable candidate tuple through release-approver role validation (M5 foundation; multi-candidate ordering is deferred).
+- [ ] Re-read target SHA immediately before merge. If changed, discard prior integration result, return to verifying and create a new candidate tuple (deferred: M5 has no merge).
+- [ ] Local Git adapter may create a merge commit only when explicit policy permits. Default branch push must be opt-in (deferred: M5 has no merge/push).
+- [ ] GitHub adapter creates/updates a PR, reads permitted status/review facts and requests merge only when both VLD policy and GitHub authorization/branch protection permit it (deferred).
+- [x] Keep provider credentials out of M5 entirely: no provider or ambient `gh` credential capability exists in this release.
+- [ ] Make queue cancellation/retry/manual takeover idempotent and receipted (M5 receipt writes use Runtime's atomic pending-transaction recovery, but no cancellation/takeover surface exists yet).
 
 ### 8.4 Extensive test checklist
 
 **Local integration worktree**
 
-- [ ] Verify a clean candidate integrates and all VLD/project fixture checks run in the integration workspace, not the primary/work-package workspace.
-- [ ] Verify one failing gate/check blocks transition and preserves diagnostic digest/summary.
-- [ ] Verify merge conflict blocks automatically; no agent is asked to resolve it without a new explicit allocation.
-- [ ] Verify candidate SHA mismatch, rewritten branch history and wrong base SHA are refused.
-- [ ] Advance target after verification; assert approval is invalidated, a new integration candidate is required and old receipt remains immutable.
-- [ ] Queue two candidates that touch disjoint/overlapping areas; assert deterministic ordering and target revalidation after the first merge.
-- [ ] Simulate crash before/after integration branch creation, check execution, merge and receipt write; assert recovery is idempotent and no double merge occurs.
+- [x] Verify a clean candidate integrates and the VLD packet check runs in the disposable integration workspace, not the primary/work-package workspace (M5 foundation test).
+- [x] Verify a failing integrated packet-digest check blocks transition and preserves a bounded diagnostic digest/summary (M5 foundation test).
+- [ ] Verify merge conflict blocks automatically; no agent is asked to resolve it without a new explicit allocation (conflict fixture deferred).
+- [x] Verify candidate SHA mismatch is refused; rewritten-history/wrong-base fixtures remain to add.
+- [ ] Advance target after verification; assert approval is invalidated, a new integration candidate is required and old receipt remains immutable (Runtime currently fail-closes on stale mission authority; explicit invalidation fixture deferred).
+- [ ] Queue two candidates that touch disjoint/overlapping areas; assert deterministic ordering and target revalidation after the first merge (deferred: no merge queue ordering yet).
+- [x] Runtime receipt writes use the existing pending-transaction recovery protocol; integration cleanup is `finally`-based. Crash fixtures around integration/merge remain to add.
 
 **Approval and authorization**
 
-- [ ] Reject implementation actor approving its own candidate under independent-review policy.
-- [ ] Test allowed explicitly low-risk exception only with a human approval receipt and visible status.
-- [ ] Reject direct agent adapter merge request regardless of candidate status.
-- [ ] Test revoked/expired approval, altered evidence and altered packet/policy digest rejection.
+- [x] Reject implementation identity approving its own candidate under independent-review policy (M5 foundation test).
+- [ ] Test allowed explicitly low-risk exception only with a human approval receipt and visible status (not supported by the closed policy).
+- [x] Reject direct agent adapter merge request regardless of candidate status: no adapter merge API/capability exists (M5 foundation).
+- [ ] Test revoked/expired approval, altered evidence and altered packet/policy digest rejection (deferred with richer verifier/review policy).
 
 **GitHub provider contract**
 
