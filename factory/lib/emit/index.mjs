@@ -1,4 +1,5 @@
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { derive } from './derive.mjs';
@@ -113,7 +114,16 @@ function carryForwardProgress(target, files) {
 }
 
 function ensureSafeOutputRoot(outDir) {
-  const target = path.resolve(outDir);
+  let target = path.resolve(outDir);
+  // macOS exposes its user temporary directories through a /var alias whose
+  // early path component is itself a system symlink. Treat the OS-selected temp
+  // directory as a trusted anchor, then still inspect every requested descendant.
+  // This does not permit a user-created link inside the output path.
+  const temporary = path.resolve(os.tmpdir());
+  const tempRelative = path.relative(temporary, target);
+  if (tempRelative === '' || (!tempRelative.startsWith(`..${path.sep}`) && tempRelative !== '..' && !path.isAbsolute(tempRelative))) {
+    try { target = path.resolve(realpathSync(temporary), tempRelative); } catch {}
+  }
   const parsed = path.parse(target);
   let cursor = parsed.root;
   const parts = target.slice(parsed.root.length).split(path.sep).filter(Boolean);
