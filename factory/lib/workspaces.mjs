@@ -8,7 +8,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
@@ -41,10 +41,20 @@ function samePath(left, right) {
     : normalizedLeft === normalizedRight;
 }
 
-/** Compare existing paths by filesystem identity to absorb Windows 8.3/case and macOS alias spelling. */
+/**
+ * Compare existing paths by filesystem identity to absorb Windows 8.3/case and
+ * macOS alias spelling. Node's realpath spelling can itself vary on Windows,
+ * so use the directory's device/file identity as a final, non-textual check.
+ */
 function sameFilesystemPath(left, right) {
   try {
-    return samePath(realpathSync(left), realpathSync(right));
+    if (samePath(realpathSync(left), realpathSync(right))) return true;
+    const leftStats = statSync(left);
+    const rightStats = statSync(right);
+    // Do not treat platforms reporting two zero sentinel values as identical.
+    return leftStats.isDirectory() && rightStats.isDirectory()
+      && (leftStats.dev !== 0 || leftStats.ino !== 0)
+      && leftStats.dev === rightStats.dev && leftStats.ino === rightStats.ino;
   } catch {
     return samePath(left, right);
   }
@@ -185,7 +195,7 @@ function primaryWorkspaceRepository(projectDir) {
   const repo = repository(projectDir);
   const primary = listWorktrees(repo)[0];
   if (!primary || primary.bare || !primary.path) throw extensionError('workspace commands require a primary Git working checkout', 'NOT_A_GIT_REPOSITORY');
-  const gitDirMatchesCommon = samePath(repo.gitDir, repo.commonDir);
+  const gitDirMatchesCommon = sameFilesystemPath(repo.gitDir, repo.commonDir);
   // Git's worktree-list path can use a different Windows spelling from Node's
   // filesystem APIs. The checked Git identities already prove root + primary:
   // an empty prefix rejects subdirectories, and common == git-dir rejects
@@ -458,8 +468,8 @@ function isRealDirectoryTree(root, candidate) {
 function registeredLinkedWorktree(allocationPath, commonDir) {
   try {
     const checkout = repository(allocationPath);
-    const commonDirMatches = samePath(checkout.commonDir, commonDir);
-    const separateGitDir = !samePath(checkout.gitDir, checkout.commonDir);
+    const commonDirMatches = sameFilesystemPath(checkout.commonDir, commonDir);
+    const separateGitDir = !sameFilesystemPath(checkout.gitDir, checkout.commonDir);
     if (!commonDirMatches || !separateGitDir) {
       return { worktree: null, detail: `Git metadata common-directory match: ${commonDirMatches}; separate linked Git directory: ${separateGitDir}` };
     }
