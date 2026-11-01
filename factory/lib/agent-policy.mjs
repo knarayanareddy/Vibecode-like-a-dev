@@ -206,6 +206,10 @@ export function resolveLocalProcessCommand(policy) {
   let stats;
   try { stats = lstatSync(resolved); } catch { throw extensionError('local-process executable is unavailable', 'INVALID_AGENT_EXECUTABLE'); }
   if (stats.isSymbolicLink() || !stats.isFile()) throw extensionError('local-process executable is not a regular file', 'INVALID_AGENT_EXECUTABLE');
-  if ((stats.mode & 0o111) === 0) throw extensionError('local-process executable is not executable', 'INVALID_AGENT_EXECUTABLE');
+  // Windows does not expose POSIX execute bits. Limit the portability exception
+  // to direct binary formats that execFile can launch without cmd.exe; scripts
+  // and command interpreters remain disallowed by the fixed-argv boundary.
+  const directWindowsBinary = process.platform === 'win32' && /\.(?:exe|com)$/i.test(resolved);
+  if (!directWindowsBinary && (stats.mode & 0o111) === 0) throw extensionError('local-process executable is not executable', 'INVALID_AGENT_EXECUTABLE');
   return { executable: resolved, args: [...policy.command.args] };
 }

@@ -69,7 +69,10 @@ function git(args) {
   catch (error) { throw extensionError(`git ${args[0]} failed: ${errorText(error)}`, 'GIT_CATALOG_FAILED'); }
 }
 function cloneCatalog(repository, ref, destination) {
-  const args = ['clone', '--no-tags', '--depth', '1'];
+  // Catalog digests bind exact Git blob bytes. Ignore a user's checkout-only
+  // line-ending conversion so a Windows cache cannot silently change signed
+  // JSON/Markdown content after clone.
+  const args = ['-c', 'core.autocrlf=false', '-c', 'core.eol=lf', 'clone', '--no-tags', '--depth', '1'];
   if (ref) args.push('--branch', ref);
   args.push('--', repository, destination);
   git(args);
