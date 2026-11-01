@@ -1,6 +1,6 @@
 # Workspace, Filesystem Safety, and Usability Implementation Plan
 
-**Status:** Awaiting hosted CI
+**Status:** Complete
 **Scope:** Workspace lock reliability, generated-output filesystem safety, symlink-safe enforcement scans, live-benchmark provenance validity, determinism documentation, and installed-CLI onboarding.
 
 ## Goals and non-goals
@@ -117,12 +117,12 @@
 - [x] `npm pack --dry-run`
 - [x] `git diff --check`
 - [x] Isolated ACP v1 installation/test, if root test workflow requires it.
-- [ ] Hosted CI: Linux core/integration/package/ACP/evaluation/stress and macOS/Windows portable test suite.
+- [x] Hosted CI: Linux core/integration/package/ACP/evaluation/stress and macOS/Windows portable test suite.
 
 ## Completion checklist
 
 - [x] Implementation and regression tests are committed.
 - [x] Generated packet/template outputs are synchronized where required.
 - [x] Local validation matrix passes.
-- [ ] Hosted CI passes on all required jobs.
+- [x] Hosted CI passes on all required jobs.
 - [x] Temporary diagnostics are not retained.
