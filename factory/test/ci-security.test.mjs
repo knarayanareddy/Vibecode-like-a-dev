@@ -38,7 +38,7 @@ test('CI separates deterministic evaluations/stress work and validates the porta
   assert.match(ci, /^  stress:/m);
   assert.match(ci, /^  portable-smoke:/m);
   assert.match(ci, /os: \[macos-latest, windows-latest\]/);
-  assert.match(ci, /name: Full portable test suite[\s\S]*?run: npm test -- --test-reporter=dot/);
+  assert.match(ci, /name: Full portable test suite[\s\S]*?shell: bash[\s\S]*?run: NODE_OPTIONS=--test-reporter=dot npm test/);
   assert.match(ci, /deterministic outcome calibration/);
   assert.doesNotMatch(ci, /actions\/[\w-]+@v\d/);
 });

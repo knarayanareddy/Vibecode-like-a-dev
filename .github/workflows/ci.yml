@@ -318,9 +318,10 @@ jobs:
       # The dependency-free Node CLI and its portable test suite must work under
       # each supported runner shell. Linux retains the shell-heavy pack journey.
       - name: Full portable test suite
-        # Keep failure output compact enough to remain visible in the hosted log
-        # while still invoking the identical npm test script on both shells.
-        run: npm test -- --test-reporter=dot
+        # Node's dot reporter keeps failures visible in hosted logs while this
+        # still invokes the identical npm test script on both OS runners.
+        shell: bash
+        run: NODE_OPTIONS=--test-reporter=dot npm test
 
   # Keep this ID stable for branch protection. It only succeeds once every
   # complete-coverage job above has completed successfully.
