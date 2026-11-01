@@ -115,13 +115,13 @@ function repository(projectDir) {
   // its /tmp alias. Compare canonical existing paths so Git's primary worktree
   // identity remains portable without treating CWD as an authority boundary.
   const project = realpathSync(ensureProjectDir(projectDir));
-  let root;
   let commonRaw;
   let gitDirRaw;
+  let worktreePrefix;
   try {
-    root = git(project, ['rev-parse', '--show-toplevel'], 'NOT_A_GIT_REPOSITORY');
     commonRaw = git(project, ['rev-parse', '--git-common-dir'], 'NOT_A_GIT_REPOSITORY');
     gitDirRaw = git(project, ['rev-parse', '--git-dir'], 'NOT_A_GIT_REPOSITORY');
+    worktreePrefix = git(project, ['rev-parse', '--show-prefix'], 'NOT_A_GIT_REPOSITORY');
   } catch (error) {
     if (error.code === 'NOT_A_GIT_REPOSITORY') throw extensionError('runtime commands require a Git working repository', 'NOT_A_GIT_REPOSITORY');
     throw error;
@@ -132,17 +132,14 @@ function repository(projectDir) {
   const gitDirCandidate = path.resolve(project, gitDirRaw);
   if (!existsSync(gitDirCandidate) || !lstatSync(gitDirCandidate).isDirectory()) throw extensionError('Git directory is unavailable', 'NOT_A_GIT_REPOSITORY');
   const gitDir = realpathSync(gitDirCandidate);
-  const rootPath = realpathSync(path.resolve(root));
-  // In a linked worktree, --git-dir is .git/worktrees/<id>, not the common
-  // directory. This identity check avoids textual /tmp, drive-letter and case
-  // differences while retaining the primary-checkout-only rule.
-  const rootMatchesProject = samePath(project, rootPath);
-  const gitDirMatchesCommon = samePath(gitDir, commonDir);
-  if (!rootMatchesProject || !gitDirMatchesCommon) {
-    const detail = `root identity ${rootMatchesProject ? 'matches' : 'differs'}; Git-directory identity ${gitDirMatchesCommon ? 'matches' : 'differs'}`;
-    throw extensionError(`runtime commands must run from the primary Git checkout root, not a subdirectory or linked worktree (${detail})`, 'RUNTIME_PRIMARY_CHECKOUT_REQUIRED');
+  // `--show-toplevel` can use a different Windows path spelling from Node's
+  // filesystem APIs. An empty Git prefix proves the supplied directory is this
+  // worktree's root; matching common/git directories proves it is primary, not
+  // a linked worktree.
+  if (worktreePrefix !== '' || !samePath(gitDir, commonDir)) {
+    throw extensionError('runtime commands must run from the primary Git checkout root, not a subdirectory or linked worktree', 'RUNTIME_PRIMARY_CHECKOUT_REQUIRED');
   }
-  return { project, root: rootPath, commonDir };
+  return { project, root: project, commonDir };
 }
 
 function runtimeBase(repo) {

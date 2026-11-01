@@ -74,13 +74,13 @@ function repository(projectDir) {
   // its /tmp alias. Compare canonical existing paths so Git's primary worktree
   // identity remains portable without treating CWD as an authority boundary.
   const project = realpathSync(ensureProjectDir(projectDir));
-  let root;
   let commonRaw;
   let gitDirRaw;
+  let worktreePrefix;
   try {
-    root = git(project, ['rev-parse', '--show-toplevel'], 'NOT_A_GIT_REPOSITORY');
     commonRaw = git(project, ['rev-parse', '--git-common-dir'], 'NOT_A_GIT_REPOSITORY');
     gitDirRaw = git(project, ['rev-parse', '--git-dir'], 'NOT_A_GIT_REPOSITORY');
+    worktreePrefix = git(project, ['rev-parse', '--show-prefix'], 'NOT_A_GIT_REPOSITORY');
   } catch (error) {
     if (error.code === 'NOT_A_GIT_REPOSITORY') throw extensionError('workspace commands require a Git working repository', 'NOT_A_GIT_REPOSITORY');
     throw error;
@@ -91,7 +91,7 @@ function repository(projectDir) {
   const gitDirCandidate = path.resolve(project, gitDirRaw);
   if (!existsSync(gitDirCandidate) || !lstatSync(gitDirCandidate).isDirectory()) throw extensionError('Git directory is unavailable', 'NOT_A_GIT_REPOSITORY');
   const gitDir = realpathSync(gitDirCandidate);
-  return { project, root: realpathSync(path.resolve(root)), commonDir, gitDir };
+  return { project, root: project, commonDir, gitDir, worktreePrefix };
 }
 
 function workspaceRoot(repo) {
@@ -176,12 +176,10 @@ function primaryWorkspaceRepository(projectDir) {
   const repo = repository(projectDir);
   const primary = listWorktrees(repo)[0];
   if (!primary || primary.bare || !primary.path) throw extensionError('workspace commands require a primary Git working checkout', 'NOT_A_GIT_REPOSITORY');
-  const rootMatchesProject = samePath(repo.project, repo.root);
   const gitDirMatchesCommon = samePath(repo.gitDir, repo.commonDir);
   const listedPrimaryMatchesRoot = samePath(repo.root, primary.path);
-  if (!rootMatchesProject || !gitDirMatchesCommon || !listedPrimaryMatchesRoot) {
-    const detail = `root identity ${rootMatchesProject ? 'matches' : 'differs'}; Git-directory identity ${gitDirMatchesCommon ? 'matches' : 'differs'}; worktree identity ${listedPrimaryMatchesRoot ? 'matches' : 'differs'}`;
-    throw extensionError(`workspace commands must run from the primary Git checkout root, not a subdirectory or linked worktree (${detail})`, 'WORKSPACE_PRIMARY_CHECKOUT_REQUIRED');
+  if (repo.worktreePrefix !== '' || !gitDirMatchesCommon || !listedPrimaryMatchesRoot) {
+    throw extensionError('workspace commands must run from the primary Git checkout root, not a subdirectory or linked worktree', 'WORKSPACE_PRIMARY_CHECKOUT_REQUIRED');
   }
   return repo;
 }
