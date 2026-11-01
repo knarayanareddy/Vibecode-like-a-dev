@@ -177,8 +177,11 @@ function primaryWorkspaceRepository(projectDir) {
   const primary = listWorktrees(repo)[0];
   if (!primary || primary.bare || !primary.path) throw extensionError('workspace commands require a primary Git working checkout', 'NOT_A_GIT_REPOSITORY');
   const gitDirMatchesCommon = samePath(repo.gitDir, repo.commonDir);
-  const listedPrimaryMatchesRoot = samePath(repo.root, primary.path);
-  if (repo.worktreePrefix !== '' || !gitDirMatchesCommon || !listedPrimaryMatchesRoot) {
+  // Git's worktree-list path can use a different Windows spelling from Node's
+  // filesystem APIs. The checked Git identities already prove root + primary:
+  // an empty prefix rejects subdirectories, and common == git-dir rejects
+  // linked worktrees. Do not reintroduce a lossy textual path comparison here.
+  if (repo.worktreePrefix !== '' || !gitDirMatchesCommon) {
     throw extensionError('workspace commands must run from the primary Git checkout root, not a subdirectory or linked worktree', 'WORKSPACE_PRIMARY_CHECKOUT_REQUIRED');
   }
   return repo;
