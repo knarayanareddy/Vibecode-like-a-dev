@@ -26,6 +26,7 @@ import { addCatalog, catalogStatus, copyCatalogPayload, previewCatalogRefresh, r
 import { addStore, copyStoreAsset, initStore, previewStoreRefresh, readStoreState, refreshStore, storeStatus } from './lib/stores.mjs';
 import { createWorkspace, recoverWorkspaces, removeWorkspace, workspaceStatus } from './lib/workspaces.mjs';
 import { allocateRuntimePackage, heartbeatRuntimeLease, initializeRuntime, recoverRuntime, runtimeStatus, transitionRuntimePackage } from './lib/runtime.mjs';
+import { exportRuntimeForgePlan, prepareRuntimeForgePlan, writeRuntimeForgePlan } from './lib/runtime-forge.mjs';
 import { runRuntimeAgent, runtimeAgentStatus } from './lib/runtime-agent.mjs';
 import { approveRuntimeDeliveryCandidate, queueRuntimeDeliveryCandidate, runtimeDeliveryStatus, submitRuntimeDeliveryCandidate, verifyRuntimeDeliveryCandidate } from './lib/runtime-delivery.mjs';
 import { createRuntimeServer, listenRuntimeServer } from './lib/runtime-server.mjs';
@@ -49,7 +50,7 @@ const option = (name, fallback) => {
 const VALUE_FLAGS = new Set([
   '-o', '--out', '--repo', '--name', '--idea', '--profile', '--packet',
   '--project', '--modules', '--evidence', '--file', '--ref', '--title', '--from-store', '--types', '--acknowledge', '--target',
-  '--assignee', '--lease-ms', '--run', '--lease-token', '--to', '--actor', '--expected-version', '--port', '--token', '--policy', '--sha', '--adapter-run', '--candidate', '--reason'
+  '--assignee', '--lease-ms', '--run', '--lease-token', '--to', '--actor', '--expected-version', '--port', '--token', '--policy', '--sha', '--adapter-run', '--candidate', '--reason', '--repository', '--head-ref', '--base-ref', '--checks'
 ]);
 const positional = rest.filter((item, index) => !item.startsWith('-') && !(index > 0 && VALUE_FLAGS.has(rest[index - 1])));
 
@@ -108,6 +109,8 @@ Usage
   vld runtime delivery queue <mission.json> <package> --policy <delivery-policy.json> --candidate <id> --actor release-approver:<id>
   vld runtime delivery status <mission.json> [--project <dir>] [--json]
                                      frozen candidate/packet verification, independent review and a local queue; no merge, push or forge access
+  vld runtime forge plan-export <mission.json> <package> --candidate <id> --actor release-approver:<id> --repository <owner/repo> --head-ref <branch> [--base-ref <branch>] [--checks <name,...>] [--title <text>] [--out <file>] [--dry-run] [--json]
+                                     derive a durable, offline GitHub v1 plan; never reads credentials, invokes gh, pushes, changes a PR, or requests merge
   vld runtime serve <mission.json> [--port <0-65535>] [--token <local-token>] [--project <dir>]
                                      loopback-only Runtime API plus the local Studio dashboard; never starts an agent
   vld studio serve <mission.json> [--port <0-65535>] [--token <local-token>] [--project <dir>]
@@ -1239,8 +1242,8 @@ async function runRuntime() {
         else {
           printRuntimeReport('delivery status', result);
           for (const entry of result.delivery) {
-            const receipt = entry.candidate ?? entry.verification ?? entry.approval ?? entry.queue;
-            const type = entry.candidate ? 'candidate' : entry.verification ? 'verification' : entry.approval ? 'approval' : 'queue';
+            const receipt = entry.candidate ?? entry.verification ?? entry.approval ?? entry.queue ?? entry.forge;
+            const type = entry.candidate ? 'candidate' : entry.verification ? 'verification' : entry.approval ? 'approval' : entry.queue ? 'queue' : 'forge-plan';
             console.log(`  ${entry.packageId.padEnd(20)} ${type.padEnd(13)} ${receipt.id}`);
           }
         }
@@ -1273,6 +1276,49 @@ async function runRuntime() {
       }
       if (json) console.log(JSON.stringify({ ok: true, ...result }, null, 2));
       else printRuntimeReport(`delivery ${deliveryAction}`, result.status);
+      return;
+    }
+    if (action === 'forge') {
+      const [_, forgeAction, forgeMissionFile, forgePackageId] = positional;
+      if (forgeAction !== 'plan-export' || !forgeMissionFile || !forgePackageId) {
+        fail('Usage: vld runtime forge plan-export <mission.json> <package> --candidate <id> --actor release-approver:<id> --repository <owner/repo> --head-ref <branch>');
+      }
+      const actor = runtimeActor(option('--actor', null));
+      const candidateId = option('--candidate', null);
+      const repository = option('--repository', null);
+      const headRef = option('--head-ref', null);
+      if (!candidateId || !repository || !headRef) fail('runtime forge plan-export requires --candidate, --repository and --head-ref');
+      const request = {
+        missionFile: forgeMissionFile,
+        packageId: forgePackageId,
+        candidateId,
+        repository,
+        headRef,
+        baseRef: option('--base-ref', null),
+        title: option('--title', undefined),
+        requiredChecks: option('--checks', ''),
+        projectDir: project
+      };
+      if (hasFlag('--dry-run')) {
+        const prepared = prepareRuntimeForgePlan(request);
+        const result = { ok: true, dryRun: true, plan: prepared.plan, proposedForgeReceipt: prepared.forge };
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+      const result = exportRuntimeForgePlan({ ...request, actor });
+      const outFile = option('--out', null);
+      const output = outFile ? writeRuntimeForgePlan({ projectDir: project, outFile, plan: result.plan }) : null;
+      if (json) {
+        console.log(JSON.stringify({ ok: true, ...result, ...(output ? { output } : {}) }, null, 2));
+      } else if (!output) {
+        // stdout is the reviewable plan itself when no local review file was requested.
+        console.log(JSON.stringify(result.plan, null, 2));
+      } else {
+        printRuntimeReport('forge plan export', result.status);
+        console.log(`  receipt   ${result.forge.id}`);
+        console.log(`  plan      ${output.file} (${output.digest})`);
+        console.log('  safe      offline only; no credential lookup, gh, network, push, PR update, or merge request\n');
+      }
       return;
     }
     if (action === 'agent') {

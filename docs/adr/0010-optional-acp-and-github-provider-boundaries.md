@@ -1,7 +1,7 @@
 # ADR-0010: Optional ACP v1 and GitHub provider boundaries
 
 - **Status:** Accepted
-- **Date:** 2026-10-31
+- **Date:** 2026-11-01
 - **Deciders:** VLD maintainers
 
 ## Context
@@ -15,7 +15,8 @@ branch protection.
 M4's local adapters are intentionally constrained, and M5 has frozen candidate,
 verification, independent approval and queue receipts but no push/PR/merge
 capability. A provider must consume those identities, not create or reinterpret
-them.
+them. A local Runtime handoff needs a durable fact—not unvalidated client
+metadata—before a human can carry a reviewed plan to a provider.
 
 ## Decision
 
@@ -46,6 +47,25 @@ provider credential, raw ACP prompt/transcript, webhook receiver, token, or
 forge authority. Fixture-only tests inject peers/HTTP responses; any live peer
 or GitHub run is manual and uses a disposable repository/account.
 
+M8.1 adds a narrow **data-only** Core schema for GitHub v1 plans and a typed
+Runtime `forge-plan` event. It does not import the provider HTTP package. A
+receipt is accepted only from a release approver after Runtime replays one
+queued package's exact candidate, passed verification, independent approval and
+queue receipts. It records all receipt IDs/digests, candidate/target SHA,
+packet/policy digests, and the digest-checked plan. The receipt rejects unknown
+fields, merge-enabled plans, changed tuple authority, credential-like text and
+host paths. Receipt replays are deterministic and original evidence remains
+immutable.
+
+`vld runtime forge plan-export` builds that plan locally from current Runtime
+evidence and optionally writes a new explicit review file. It has no credential,
+`gh`, environment-authentication, HTTP, push, PR, merge, poll or webhook code;
+the generated plan is always `allowMergeRequest: false`. `--dry-run` makes no
+receipt/file. The output path is neither retained by Runtime nor allowed to
+modify `.vld`, overwrite an existing file, escape the project, or traverse an
+existing symlink. This is an auditable offline handoff, not a Runtime forge
+mutation endpoint or a claim that the provider has performed an action.
+
 ## Consequences
 
 - VLD can exercise portable ACP/GitHub protocol and identity contracts without
@@ -53,9 +73,10 @@ or GitHub run is manual and uses a disposable repository/account.
 - An ACP peer must be explicitly installed and selected. It remains subject to
   M4 duration/output/cancellation/receipt handling and cannot directly submit,
   approve, queue, merge or alter policy.
-- A GitHub plan is reviewable and tamper-evident, but M8 does not add a Runtime
-  CLI command, credential configuration, automatic push, webhook, autonomous
-  polling or hidden PR/merge action.
-- A later typed Runtime forge endpoint needs a new ADR for credential brokerage,
-  target revalidation, durable forge receipts, idempotency, ambiguity recovery,
-  human confirmation and project/organization authorization.
+- A GitHub plan is reviewable and tamper-evident. M8.1 adds only a local
+  receipt/CLI export with an intentionally merge-disabled plan; it adds no
+  credential configuration, automatic push, webhook, autonomous polling or
+  hidden PR/merge action.
+- A later typed Runtime forge **mutation** endpoint still needs a new ADR for
+  credential brokerage, target revalidation immediately before a remote action,
+  ambiguity recovery, human confirmation and project/organization authorization.

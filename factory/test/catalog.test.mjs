@@ -33,7 +33,7 @@ function rootFixture(directory, signingKey, { version = 1, previousRootDigest = 
   const value = signWith ? signed(root, signWith.privateKey) : root;
   const file = path.join(directory, `root-v${version}.json`); writeJson(file, value); return { root: value, file };
 }
-function makeCatalog(directory, signingKey, { catalogId = 'team-catalog', coreCompatibility = '^0.18.0', payloadType = 'guidance', payload = '# Signed guidance\n\nKeep this inert and review the provenance.\n', tamperIndex = false } = {}) {
+function makeCatalog(directory, signingKey, { catalogId = 'team-catalog', coreCompatibility = '^0.19.0', payloadType = 'guidance', payload = '# Signed guidance\n\nKeep this inert and review the provenance.\n', tamperIndex = false } = {}) {
   const source = path.join(directory, 'catalog-source'); const packageDir = path.join(source, 'packages', 'review-content'); mkdirSync(packageDir, { recursive: true });
   const payloadPath = payloadType === 'guidance' ? 'guidance.md' : `${payloadType}.json`; const payloadId = payloadType === 'guidance' ? 'review-guidance' : 'review-workflow';
   const payloadFile = path.join(packageDir, payloadPath); writeFileSync(payloadFile, payload);

@@ -20,6 +20,7 @@ import {
   stableJson
 } from './extension-utils.mjs';
 import { missionStatus, readMission } from './missions.mjs';
+import { assertGitHubPullRequestPlan } from './forge-plan.mjs';
 import {
   assertCanAllocate,
   assertCanHeartbeat,
@@ -38,7 +39,7 @@ const LOCK_VERSION = 1;
 const MAX_RECEIPTS = 200;
 const COMMIT = /^[a-f0-9]{40}$/;
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9][A-Za-z0-9._-]{7,120}$/;
-const EVENT_TYPES = new Set(['initialized', 'allocated', 'heartbeat', 'transition', 'ready', 'lease-expired', 'agent-run', 'candidate', 'verification', 'approval', 'queue']);
+const EVENT_TYPES = new Set(['initialized', 'allocated', 'heartbeat', 'transition', 'ready', 'lease-expired', 'agent-run', 'candidate', 'verification', 'approval', 'queue', 'forge-plan']);
 
 function errorDetail(error) {
   return String(error?.stderr || error?.message || error || '').trim();
@@ -342,6 +343,22 @@ function validateQueueReceipt(queue) {
   return queue;
 }
 
+// Forge receipts never store a credential, local path, client config or provider response.
+const FORGE_SENSITIVE_TEXT = /(?:github_pat_|gh[pousr]_[A-Za-z0-9_]{8,}|(?:token|secret|password|authorization|api[_-]?key)\s*(?:=|:)\s*[^\s,;]+)/i;
+const FORGE_HOST_PATH = /(?:^|[\s'"])(?:\/(?:home|users|var|tmp|etc)\/|[A-Za-z]:\\)/i;
+
+/** A durable, data-only export fact that binds every independently-issued delivery receipt. */
+function validateForgePlanReceipt(forge) {
+  if (!forge || typeof forge !== 'object' || Array.isArray(forge)) throw extensionError('runtime forge receipt must be an object', 'INVALID_RUNTIME_LEDGER');
+  const allowed = new Set(['id', 'candidateId', 'candidateDigest', 'candidateSha', 'targetSha', 'packetDigest', 'policyDigest', 'verificationId', 'verificationDigest', 'approvalId', 'approvalDigest', 'queueId', 'queueDigest', 'exportedAt', 'plan']);
+  for (const key of Object.keys(forge)) if (!allowed.has(key)) throw extensionError(`runtime forge receipt.${key} is not allowed`, 'INVALID_RUNTIME_LEDGER');
+  if (!ID_PATTERN.test(String(forge.id ?? '')) || !ID_PATTERN.test(String(forge.candidateId ?? '')) || !validDigest(forge.candidateDigest) || !validCommit(forge.candidateSha) || !validCommit(forge.targetSha) || !validDigest(forge.packetDigest) || !validDigest(forge.policyDigest) || !ID_PATTERN.test(String(forge.verificationId ?? '')) || !validDigest(forge.verificationDigest) || !ID_PATTERN.test(String(forge.approvalId ?? '')) || !validDigest(forge.approvalDigest) || !ID_PATTERN.test(String(forge.queueId ?? '')) || !validDigest(forge.queueDigest) || !validTime(forge.exportedAt)) throw extensionError('runtime forge receipt has invalid authority metadata', 'INVALID_RUNTIME_LEDGER');
+  try { assertGitHubPullRequestPlan(forge.plan); } catch (error) { throw extensionError(error.message, 'INVALID_RUNTIME_LEDGER'); }
+  if (forge.plan.allowMergeRequest !== false || forge.plan.candidateId !== forge.candidateId || forge.plan.headSha !== forge.candidateSha || forge.plan.candidateSha !== forge.candidateSha || forge.plan.targetSha !== forge.targetSha || forge.plan.packetDigest !== forge.packetDigest || forge.plan.policyDigest !== forge.policyDigest) throw extensionError('runtime forge receipt plan does not bind its safe queued tuple', 'INVALID_RUNTIME_LEDGER');
+  if (FORGE_SENSITIVE_TEXT.test(`${forge.plan.title}\n${forge.plan.body}`) || FORGE_HOST_PATH.test(`${forge.plan.title}\n${forge.plan.body}`)) throw extensionError('runtime forge receipt must not contain credential-like text or host paths', 'INVALID_RUNTIME_LEDGER');
+  return forge;
+}
+
 function publicDeliveryReceipt(value) {
   return JSON.parse(JSON.stringify(value));
 }
@@ -381,6 +398,11 @@ function validateEvent(event) {
   }
   if (event.type === 'queue') {
     validateQueueReceipt(event.queue);
+    return;
+  }
+  if (event.type === 'forge-plan') {
+    if (event.actor.role !== 'release-approver') throw extensionError('runtime forge receipt requires a release approver', 'INVALID_RUNTIME_LEDGER');
+    validateForgePlanReceipt(event.forge);
     return;
   }
   if (event.type === 'allocated') {
@@ -460,6 +482,19 @@ function applyEvent(state, event) {
       throw extensionError('runtime queue receipt does not match an approved candidate', 'INVALID_RUNTIME_LEDGER');
     }
     if (next.receipts.some((receipt) => receipt.queue?.id === event.queue.id)) throw extensionError('runtime queue receipt repeats', 'INVALID_RUNTIME_LEDGER');
+  } else if (event.type === 'forge-plan') {
+    const candidate = next.receipts.find((receipt) => receipt.candidate?.id === event.forge.candidateId)?.candidate;
+    const verification = next.receipts.find((receipt) => receipt.verification?.candidateId === event.forge.candidateId)?.verification;
+    const approval = next.receipts.find((receipt) => receipt.approval?.candidateId === event.forge.candidateId)?.approval;
+    const queue = next.receipts.find((receipt) => receipt.queue?.candidateId === event.forge.candidateId)?.queue;
+    const exactTuple = candidate && verification && approval && queue
+      && verification.outcome === 'passed'
+      && digest(candidate) === event.forge.candidateDigest && candidate.candidateSha === event.forge.candidateSha && candidate.targetSha === event.forge.targetSha && candidate.packetDigest === event.forge.packetDigest && candidate.policyDigest === event.forge.policyDigest
+      && approval.id === event.forge.approvalId && approval.candidateSha === event.forge.candidateSha && approval.targetSha === event.forge.targetSha && approval.policyDigest === event.forge.policyDigest
+      && queue.id === event.forge.queueId && queue.candidateSha === event.forge.candidateSha && queue.targetSha === event.forge.targetSha && queue.policyDigest === event.forge.policyDigest
+      && verification.id === event.forge.verificationId && digest(verification) === event.forge.verificationDigest && digest(approval) === event.forge.approvalDigest && digest(queue) === event.forge.queueDigest;
+    if (workPackage.state !== 'queued' || !exactTuple) throw extensionError('runtime forge receipt does not match a passed, independently approved queued tuple', 'INVALID_RUNTIME_LEDGER');
+    if (next.receipts.some((receipt) => receipt.forge?.id === event.forge.id)) throw extensionError('runtime forge receipt repeats', 'INVALID_RUNTIME_LEDGER');
   } else if (event.type === 'allocated') {
     assertCanAllocate(event.actor);
     if (workPackage.state !== 'ready' || workPackage.run || workPackage.lease) throw extensionError('runtime allocation event is not valid for package state', 'INVALID_RUNTIME_LEDGER');
@@ -498,7 +533,8 @@ function applyEvent(state, event) {
     ...(event.type === 'candidate' ? { runId: event.runId, candidate: publicDeliveryReceipt(event.candidate) } : {}),
     ...(event.type === 'verification' ? { verification: publicDeliveryReceipt(event.verification) } : {}),
     ...(event.type === 'approval' ? { approval: publicDeliveryReceipt(event.approval) } : {}),
-    ...(event.type === 'queue' ? { queue: publicDeliveryReceipt(event.queue) } : {})
+    ...(event.type === 'queue' ? { queue: publicDeliveryReceipt(event.queue) } : {}),
+    ...(event.type === 'forge-plan' ? { forge: publicDeliveryReceipt(event.forge) } : {})
   }].slice(-MAX_RECEIPTS);
   next.sequence = event.sequence;
   return next;
@@ -649,14 +685,15 @@ function reportRuntime(context, state, { warnings = [], recovered = null } = {})
       runId: receipt.runId,
       ...publicAgentRun(receipt.agentRun)
     })),
-    delivery: state.receipts.filter((receipt) => ['candidate', 'verification', 'approval', 'queue'].includes(receipt.type)).map((receipt) => ({
+    delivery: state.receipts.filter((receipt) => ['candidate', 'verification', 'approval', 'queue', 'forge-plan'].includes(receipt.type)).map((receipt) => ({
       sequence: receipt.sequence,
       packageId: receipt.packageId,
       ...(receipt.runId ? { runId: receipt.runId } : {}),
       ...(receipt.candidate ? { candidate: publicDeliveryReceipt(receipt.candidate) } : {}),
       ...(receipt.verification ? { verification: publicDeliveryReceipt(receipt.verification) } : {}),
       ...(receipt.approval ? { approval: publicDeliveryReceipt(receipt.approval) } : {}),
-      ...(receipt.queue ? { queue: publicDeliveryReceipt(receipt.queue) } : {})
+      ...(receipt.queue ? { queue: publicDeliveryReceipt(receipt.queue) } : {}),
+      ...(receipt.forge ? { forge: publicDeliveryReceipt(receipt.forge) } : {})
     })),
     warnings,
     ...(recovered ? { recovered } : {})
@@ -751,6 +788,37 @@ export function runtimeStatus({ missionFile, projectDir = '.', now } = {}) {
   const expired = state.packages.filter((entry) => entry.lease && new Date(entry.lease.expiresAt).getTime() <= new Date(timestamp).getTime()).map((entry) => entry.id);
   if (expired.length) warnings.push(`${expired.length} lease(s) are expired; run vld runtime recover`);
   return reportRuntime(context, state, { warnings });
+}
+
+/**
+ * Read the exact durable tuple that may be bound into a data-only forge plan.
+ * The caller receives no Runtime paths, credential material or provider facts.
+ */
+export function runtimeForgeEvidence({ missionFile, packageId, candidateId, projectDir = '.', policy = defaultRuntimePolicy() } = {}) {
+  const context = runtimeContext({ missionFile, projectDir, requireCurrent: true });
+  if (!ID_PATTERN.test(String(packageId ?? '')) || !ID_PATTERN.test(String(candidateId ?? ''))) throw extensionError('forge evidence package/candidate id is invalid', 'INVALID_RUNTIME_FORGE_RECEIPT');
+  return withRuntimeLock(context.paths, () => {
+    const { events, state } = readLedger(context.paths);
+    assertCurrentRuntime(context, state, policy);
+    const workPackage = state.packages.find((entry) => entry.id === packageId);
+    if (!workPackage) throw extensionError(`runtime mission has no work package "${packageId}"`, 'UNKNOWN_WORK_PACKAGE');
+    if (workPackage.state !== 'queued') throw extensionError('forge plan export requires a queued package', 'RUNTIME_FORGE_STATE');
+    const candidateEvent = events.find((event) => event.type === 'candidate' && event.packageId === packageId && event.candidate?.id === candidateId);
+    const candidate = candidateEvent?.candidate;
+    const verification = events.find((event) => event.type === 'verification' && event.packageId === packageId && event.verification?.candidateId === candidateId)?.verification;
+    const approval = events.find((event) => event.type === 'approval' && event.packageId === packageId && event.approval?.candidateId === candidateId)?.approval;
+    const queue = events.find((event) => event.type === 'queue' && event.packageId === packageId && event.queue?.candidateId === candidateId)?.queue;
+    if (!candidate || !verification || verification.outcome !== 'passed' || !approval || !queue) throw extensionError('forge plan requires one passed verification, independent approval and queue receipt', 'RUNTIME_FORGE_TUPLE_INVALID');
+    if (candidate.candidateSha !== verification.candidateSha || candidate.targetSha !== verification.targetSha || candidate.policyDigest !== verification.policyDigest || candidate.candidateSha !== approval.candidateSha || candidate.targetSha !== approval.targetSha || candidate.policyDigest !== approval.policyDigest || candidate.candidateSha !== queue.candidateSha || candidate.targetSha !== queue.targetSha || candidate.policyDigest !== queue.policyDigest) throw extensionError('forge plan tuple authority does not match', 'RUNTIME_FORGE_TUPLE_INVALID');
+    return {
+      mission: { id: context.mission.id, targetRef: context.mission.target.ref, targetSha: context.mission.target.commit, packetDigest: context.mission.packet.digest },
+      package: publicPackage(workPackage),
+      candidate: publicDeliveryReceipt(candidate),
+      verification: publicDeliveryReceipt(verification),
+      approval: publicDeliveryReceipt(approval),
+      queue: publicDeliveryReceipt(queue)
+    };
+  });
 }
 
 /** Allocate one ready package and return its one-time lease token. */
@@ -1040,6 +1108,47 @@ export function queueRuntimeCandidate({ missionFile, packageId, queue, actor, pr
     applyEvent(queueState, transition);
     const committed = appendEvents(context.paths, events, [queueEvent, transition]);
     return { changed: true, status: reportRuntime(context, committed.state), queue: publicDeliveryReceipt(queue), package: publicPackage(committed.state.packages.find((entry) => entry.id === packageId)) };
+  });
+}
+
+/**
+ * Persist a safe, immutable GitHub plan after replaying its exact queued tuple.
+ * This is a local ledger fact only: no credential, network request, Git action,
+ * PR operation or merge request is made here.
+ */
+export function recordRuntimeForgePlan({ missionFile, packageId, forge, actor, projectDir = '.', policy = defaultRuntimePolicy(), now } = {}) {
+  const context = runtimeContext({ missionFile, projectDir, requireCurrent: true });
+  const requestedActor = assertRuntimeActor(actor);
+  if (requestedActor.role !== 'release-approver') throw extensionError('forge plan export requires a release approver', 'RUNTIME_ACTOR_FORBIDDEN');
+  try { validateForgePlanReceipt(forge); } catch (error) { throw extensionError(error.message, 'INVALID_RUNTIME_FORGE_RECEIPT'); }
+  const at = nowIso(now);
+  return withRuntimeLock(context.paths, () => {
+    const { events, state } = readLedger(context.paths);
+    assertCurrentRuntime(context, state, policy);
+    const workPackage = state.packages.find((entry) => entry.id === packageId);
+    if (!workPackage) throw extensionError(`runtime mission has no work package "${packageId}"`, 'UNKNOWN_WORK_PACKAGE');
+    const prior = events.find((event) => event.type === 'forge-plan' && event.forge?.id === forge.id);
+    if (prior) {
+      const { exportedAt: _priorExportedAt, ...priorAuthority } = prior.forge;
+      const { exportedAt: _requestedExportedAt, ...requestedAuthority } = forge;
+      if (prior.packageId !== packageId || digest(priorAuthority) !== digest(requestedAuthority)) throw extensionError('forge receipt id was reused for different data', 'RUNTIME_IDEMPOTENCY_CONFLICT');
+      // A deterministic plan re-export gets the original durable receipt/time.
+      // The fresh local timestamp is intentionally not an authority change.
+      return { changed: false, replayedSequence: prior.sequence, status: reportRuntime(context, state), forge: publicDeliveryReceipt(prior.forge) };
+    }
+    if (workPackage.state !== 'queued') throw extensionError('forge plan export requires a queued package', 'RUNTIME_FORGE_STATE');
+    const event = {
+      schemaVersion: EVENT_VERSION,
+      sequence: state.sequence + 1,
+      at,
+      type: 'forge-plan',
+      actor: requestedActor,
+      packageId,
+      forge: publicDeliveryReceipt(forge)
+    };
+    applyEvent(state, event);
+    const committed = appendEvents(context.paths, events, [event]);
+    return { changed: true, status: reportRuntime(context, committed.state), forge: publicDeliveryReceipt(forge), package: publicPackage(committed.state.packages.find((entry) => entry.id === packageId)) };
   });
 }
 

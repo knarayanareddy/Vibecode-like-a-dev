@@ -82,7 +82,7 @@ export async function runAcpV1Adapter({ spec, policy, signal = null, onEvent = n
       const initialized = await connection.agent.request(methods.agent.initialize, {
         protocolVersion: 1,
         clientCapabilities: {},
-        clientInfo: { name: 'VLD', version: '0.18.0' }
+        clientInfo: { name: 'VLD', version: '0.19.0' }
       });
       negotiateAcpV1(initialized, { requireReconnect: policy.capabilities.reconnect === true });
       const session = await connection.agent.buildSession(spec.workspace).start(); sessionId = session.sessionId;

@@ -215,7 +215,7 @@ vld workflow run discovery --execute
 | **Frozen delivery candidate** | Exact candidate tuple, detached packet integration, independent review and local queue | Runtime validates allocated branch/base ancestry and a live lease; a closed policy permits only in-process packet verification. It records bounded receipts and performs no project command, merge, push, PR, provider or credential action. |
 | **Local Studio** | Browser dashboard and VS Code command entry over the loopback Runtime API | Per-response nonce CSP, manual in-memory bearer token and text-only rendering; Studio has no Git, agent, shell, workspace-file, merge or forge authority. |
 | **Signed content catalog** | Curated, Git-fetched but Ed25519-verified inert content packages | An explicit local trust root verifies threshold-signed canonical index/package metadata, expiry, identity, compatibility and payload digests before cache/lock/copy; v1 never executes or enables content. |
-| **Optional ACP/GitHub adapters** | Stable ACP v1 peer bridge and exact-SHA GitHub PR contract | Separate opt-in packages; no Core dependency, credential discovery, auto-enable, push, webhook or branch-protection replacement. |
+| **Optional ACP/GitHub adapters** | Stable ACP v1 peer bridge, exact-SHA GitHub PR contract, and offline Runtime plan export | Provider HTTP code stays optional; Core shares only a data-only plan schema and never discovers credentials, auto-enables adapters, pushes, runs webhooks, or replaces branch protection. |
 
 The result is one repository and one `vld` CLI, while the packet remains portable and small. Use the agent-facing modules where they help; use the compiler and generated gates as the authority. See [ADR-0002](docs/adr/0002-optional-platform-extensions.md) for the extension boundary and security model. For the researched, future VLD Platform path—Studio, mission runtime, agent scheduler, merge queue and signed catalog—see [the platform expansion study](docs/PLATFORM-EXPANSION-RESEARCH.md) and [implementation plan](docs/VLD-PLATFORM-IMPLEMENTATION-PLAN.md).
 
@@ -370,7 +370,7 @@ vld catalog copy team-catalog review-content review-guidance \
 
 ### Optional ACP v1 and GitHub adapters — protocol peers, not new authority
 
-M8 adds two explicit integration boundaries under `factory/integrations`. They are not installed, imported or invoked by Core unless an operator deliberately selects them. The ACP package pins the stable `@agentclientprotocol/sdk` root entry point and rejects experimental/v2 use. Its host advertises no client filesystem, terminal, MCP, authentication, elicitation or credential capability; it converts only bounded ACP session metadata to a host receipt. An ACP peer remains read-only in the same limited sense as `local-process`: setting a CWD is **not** filesystem or network containment.
+M8 adds two explicit integration boundaries under `factory/integrations`. The provider HTTP/ACP packages are not installed, imported or invoked by Core unless an operator deliberately selects them; Core shares only a data-only, dependency-free GitHub-plan schema and never gains provider access. The ACP package pins the stable `@agentclientprotocol/sdk` root entry point and rejects experimental/v2 use. Its host advertises no client filesystem, terminal, MCP, authentication, elicitation or credential capability; it converts only bounded ACP session metadata to a host receipt. An ACP peer remains read-only in the same limited sense as `local-process`: setting a CWD is **not** filesystem or network containment.
 
 ```bash
 # Optional ACP dependency; this is never required for normal vld use or CI.
@@ -382,6 +382,20 @@ vld runtime agent run missions/report-export/mission.json export-api \
 ```
 
 The GitHub package is a caller-injected REST client rather than a CLI credential store: it requires an in-memory token and an immutable plan built from an exact VLD candidate, independent approval and queued tuple. It can create/update a PR, inspect the same head SHA/base/check/review facts, and only request an exact-SHA merge when the reviewed plan enables it. It never reads ambient `gh`/environment credentials, pushes branches, runs a webhook server or substitutes for GitHub branch protection. Live use remains a manual disposable-account/repository exercise; normal CI uses recorded fixture responses only. See [ADR-0010](docs/adr/0010-optional-acp-and-github-provider-boundaries.md).
+
+#### Runtime forge plan export — durable evidence, offline handoff
+
+M8.1 adds a typed `forge-plan` Runtime ledger event and a deliberately safe export command. It can run **only** for an already queued candidate whose frozen candidate, passed verification, independent approval, queue receipt, target SHA, packet digest and policy digest still match. The event stores those receipt IDs and digests plus one digest-checked GitHub v1 plan; malformed, stale, mismatched, credential-like or host-path-bearing receipts fail closed. Repeating the exact authority tuple returns the original receipt rather than creating mutable metadata.
+
+```bash
+vld runtime forge plan-export missions/report-export/mission.json export-api \
+  --candidate candidate-... --actor release-approver:release-operator \
+  --repository example-org/report-export --head-ref vld/export-api \
+  --checks packet-check,lint --out docs/review/export-api-github-plan.json \
+  --project . --json
+```
+
+The command writes (or, without `--out`, prints) a deterministic reviewable plan with `allowMergeRequest: false`; `--dry-run` creates neither a Runtime receipt nor a file. It does not read environment or `gh` authentication, discover/store a credential, contact GitHub, push, create/update a PR, request merge, poll, accept webhooks, or transition anything remotely. The explicit local file is created without overwriting existing files or traversing symlinked directories, and its path is intentionally not stored in Runtime. A successful local receipt is evidence of an offline handoff—not evidence that any forge action occurred. GitHub authorization and branch protection remain final enforcement points. See [ADR-0010](docs/adr/0010-optional-acp-and-github-provider-boundaries.md).
 
 ## What you get
 
