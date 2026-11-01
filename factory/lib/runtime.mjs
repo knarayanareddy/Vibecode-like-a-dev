@@ -136,8 +136,11 @@ function repository(projectDir) {
   // In a linked worktree, --git-dir is .git/worktrees/<id>, not the common
   // directory. This identity check avoids textual /tmp, drive-letter and case
   // differences while retaining the primary-checkout-only rule.
-  if (!samePath(project, rootPath) || !samePath(gitDir, commonDir)) {
-    throw extensionError('runtime commands must run from the primary Git checkout root, not a subdirectory or linked worktree', 'RUNTIME_PRIMARY_CHECKOUT_REQUIRED');
+  const rootMatchesProject = samePath(project, rootPath);
+  const gitDirMatchesCommon = samePath(gitDir, commonDir);
+  if (!rootMatchesProject || !gitDirMatchesCommon) {
+    const detail = `root identity ${rootMatchesProject ? 'matches' : 'differs'}; Git-directory identity ${gitDirMatchesCommon ? 'matches' : 'differs'}`;
+    throw extensionError(`runtime commands must run from the primary Git checkout root, not a subdirectory or linked worktree (${detail})`, 'RUNTIME_PRIMARY_CHECKOUT_REQUIRED');
   }
   return { project, root: rootPath, commonDir };
 }

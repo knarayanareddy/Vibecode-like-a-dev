@@ -176,8 +176,12 @@ function primaryWorkspaceRepository(projectDir) {
   const repo = repository(projectDir);
   const primary = listWorktrees(repo)[0];
   if (!primary || primary.bare || !primary.path) throw extensionError('workspace commands require a primary Git working checkout', 'NOT_A_GIT_REPOSITORY');
-  if (!samePath(repo.project, repo.root) || !samePath(repo.gitDir, repo.commonDir) || !samePath(repo.root, primary.path)) {
-    throw extensionError('workspace commands must run from the primary Git checkout root, not a subdirectory or linked worktree', 'WORKSPACE_PRIMARY_CHECKOUT_REQUIRED');
+  const rootMatchesProject = samePath(repo.project, repo.root);
+  const gitDirMatchesCommon = samePath(repo.gitDir, repo.commonDir);
+  const listedPrimaryMatchesRoot = samePath(repo.root, primary.path);
+  if (!rootMatchesProject || !gitDirMatchesCommon || !listedPrimaryMatchesRoot) {
+    const detail = `root identity ${rootMatchesProject ? 'matches' : 'differs'}; Git-directory identity ${gitDirMatchesCommon ? 'matches' : 'differs'}; worktree identity ${listedPrimaryMatchesRoot ? 'matches' : 'differs'}`;
+    throw extensionError(`workspace commands must run from the primary Git checkout root, not a subdirectory or linked worktree (${detail})`, 'WORKSPACE_PRIMARY_CHECKOUT_REQUIRED');
   }
   return repo;
 }
