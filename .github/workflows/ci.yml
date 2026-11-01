@@ -321,7 +321,17 @@ jobs:
         # Node's dot reporter keeps failures visible in hosted logs while this
         # still invokes the identical npm test script on both OS runners.
         shell: bash
-        run: NODE_OPTIONS=--test-reporter=dot npm test
+        run: |
+          set +e
+          NODE_OPTIONS=--test-reporter=dot npm test > portable-test.log 2>&1
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            tail -n 160 portable-test.log
+            encoded=$(tail -n 160 portable-test.log | base64 | tr -d '\n')
+            echo "::error title=Portable npm test failure (base64 tail)::$encoded"
+            exit "$status"
+          fi
+          cat portable-test.log
 
   # Keep this ID stable for branch protection. It only succeeds once every
   # complete-coverage job above has completed successfully.
