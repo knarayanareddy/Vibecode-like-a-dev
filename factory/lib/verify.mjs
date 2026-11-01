@@ -11,7 +11,7 @@
  * warning, a finished requirement without proof is an error.
  */
 
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, lstatSync } from 'node:fs';
 import path from 'node:path';
 import { earsError } from './ears.mjs';
 import { loadIndex } from './indexer.mjs';
@@ -49,10 +49,12 @@ function walk(dir, root, out = []) {
     if (full === root) continue;
     let stats;
     try {
-      stats = statSync(full);
+      stats = lstatSync(full);
     } catch {
       continue;
     }
+    // Never follow repository links: scans must neither escape their root nor loop.
+    if (stats.isSymbolicLink()) continue;
     if (stats.isDirectory()) walk(full, root, out);
     else if (SOURCE_FILE.test(entry)) out.push(full);
   }

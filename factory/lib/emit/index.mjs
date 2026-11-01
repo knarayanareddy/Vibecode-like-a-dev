@@ -1,8 +1,9 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { derive } from './derive.mjs';
 import { enforcementFiles } from '../enforcement.mjs';
+import { ensureSafeManagedDirectory, extensionError, safeManagedFile } from '../extension-utils.mjs';
 import {
   agentsMd,
   agentHandoff,
@@ -71,7 +72,7 @@ export function renderPacket(plan) {
  * else is the product of policy.
  */
 function carryForwardProgress(target, files) {
-  const specPath = path.join(target, 'spec.json');
+  const specPath = safeManagedFile(target, 'spec.json', 'packet progress manifest');
   if (!existsSync(specPath)) return { carried: 0, removed: [] };
 
   let previous;
@@ -111,9 +112,37 @@ function carryForwardProgress(target, files) {
   return { carried: carried.length, carriedDetail: carried, removed };
 }
 
+function ensureSafeOutputRoot(outDir) {
+  const target = path.resolve(outDir);
+  const parsed = path.parse(target);
+  let cursor = parsed.root;
+  const parts = target.slice(parsed.root.length).split(path.sep).filter(Boolean);
+  for (let index = 0; index < parts.length; index += 1) {
+    cursor = path.join(cursor, parts[index]);
+    let stats = null;
+    try { stats = lstatSync(cursor); } catch (error) { if (error?.code !== 'ENOENT') throw error; }
+    if (stats) {
+      if (stats.isSymbolicLink()) throw extensionError('packet output may not traverse a symbolic link', 'UNSAFE_PACKET_OUTPUT');
+      if (!stats.isDirectory()) {
+        if (index === parts.length - 1) {
+          const error = new Error(`${target} exists and is not a directory. Pass a directory path, or remove the file.`);
+          error.code = 'OUTPUT_NOT_DIRECTORY';
+          throw error;
+        }
+        throw extensionError('packet output has a non-directory parent', 'UNSAFE_PACKET_OUTPUT');
+      }
+      continue;
+    }
+    try { mkdirSync(cursor); } catch (error) { if (error?.code !== 'EEXIST') throw error; }
+    const created = lstatSync(cursor);
+    if (created.isSymbolicLink() || !created.isDirectory()) throw extensionError('packet output was replaced by an unsafe filesystem node', 'UNSAFE_PACKET_OUTPUT');
+  }
+  return target;
+}
+
 export function emitPacket(plan, outDir, { force = false } = {}) {
   const { files, derived } = renderPacket(plan);
-  const target = path.resolve(outDir);
+  const target = ensureSafeOutputRoot(outDir);
 
   if (existsSync(target) && !force) {
     const contents = readdirSyncSafe(target);
@@ -126,24 +155,14 @@ export function emitPacket(plan, outDir, { force = false } = {}) {
     }
   }
 
-  try {
-    mkdirSync(target, { recursive: true });
-  } catch (error) {
-    // `-o some/file.txt` is a user mistake, not a crash: say which path is wrong.
-    if (error.code === 'EEXIST') {
-      const notADirectory = new Error(`${target} exists and is not a directory. Pass a directory path, or remove the file.`);
-      notADirectory.code = 'OUTPUT_NOT_DIRECTORY';
-      throw notADirectory;
-    }
-    throw error;
-  }
   const progress = carryForwardProgress(target, files);
 
   const written = [];
   let totalLines = 0;
   for (const [name, content] of files) {
-    const filePath = path.join(target, name);
-    mkdirSync(path.dirname(filePath), { recursive: true });
+    const parent = path.dirname(name);
+    ensureSafeManagedDirectory(target, parent === '.' ? '' : parent, 'packet output directory');
+    const filePath = safeManagedFile(target, name, 'packet output file');
     writeFileSync(filePath, content, 'utf8');
     const lines = content.split('\n').length;
     totalLines += lines;

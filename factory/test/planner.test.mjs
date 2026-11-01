@@ -209,12 +209,14 @@ test('a requirement keeps its id when the catalog grows around it', () => {
 });
 
 // @req REQ-005
-test('planning is deterministic apart from the timestamp', () => {
+test('planning is exactly deterministic with no generated timestamp', () => {
   const a = buildPlan(payout, { index });
   const b = buildPlan(payout, { index });
   assert.deepEqual(a.primitives.map((p) => p.id), b.primitives.map((p) => p.id));
   assert.deepEqual(a.requirements.map((r) => r.id), b.requirements.map((r) => r.id));
   assert.deepEqual(a.gates.map((g) => g.id), b.gates.map((g) => g.id));
+  assert.deepEqual(a, b, 'the whole plan is clock-free, not merely its selected IDs');
+  assert.doesNotMatch(JSON.stringify(a), /generatedAt|\d{4}-\d{2}-\d{2}T\d{2}:/i);
 });
 
 test('requirement ids are stable and criteria are enumerated', () => {

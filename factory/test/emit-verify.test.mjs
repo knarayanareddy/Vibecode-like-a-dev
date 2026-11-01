@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -13,7 +13,7 @@ import { emitPacket } from '../lib/emit/index.mjs';
 import { buildIndex } from '../lib/indexer.mjs';
 import { buildPlan } from '../lib/planner.mjs';
 import { normalizeProfile } from '../lib/profile.mjs';
-import { verifyPacket } from '../lib/verify.mjs';
+import { scanAnchors, verifyPacket } from '../lib/verify.mjs';
 
 const index = buildIndex();
 
@@ -72,7 +72,30 @@ test('the packet is byte-identical across compiles, so review diffs mean somethi
   for (const [name, content] of first.files) {
     assert.equal(content, second.files.get(name), `${name} is not reproducible`);
   }
-  assert.ok(!/\d{4}-\d{2}-\d{2}T\d{2}:/.test(first.files.get('spec.json')), 'spec.json carries no timestamp');
+  for (const [name, content] of first.files) {
+    assert.doesNotMatch(content, /generatedAt|\d{4}-\d{2}-\d{2}T\d{2}:/i, `${name} must not serialize a generated timestamp`);
+  }
+});
+
+test('packet emission rejects symlinked output roots and generated descendants', (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'vld-emit-links-'));
+  const outside = mkdtempSync(path.join(os.tmpdir(), 'vld-emit-outside-'));
+  t.after(() => { rmSync(root, { recursive: true, force: true }); rmSync(outside, { recursive: true, force: true }); });
+  const plan = buildPlan(makeProject('safe-emission'), { index });
+
+  const linkedRoot = path.join(root, 'linked-packet');
+  symlinkSync(outside, linkedRoot, 'dir');
+  assert.throws(() => emitPacket(plan, linkedRoot), (error) => error.code === 'UNSAFE_PACKET_OUTPUT');
+  assert.equal(readdirSync(outside).length, 0);
+
+  const output = path.join(root, 'packet');
+  emitPacket(plan, output);
+  const externalEnforcement = path.join(outside, 'enforcement');
+  mkdirSync(externalEnforcement);
+  rmSync(path.join(output, 'enforcement'), { recursive: true });
+  symlinkSync(externalEnforcement, path.join(output, 'enforcement'), 'dir');
+  assert.throws(() => emitPacket(plan, output, { force: true }), (error) => error.code === 'UNSAFE_MANAGED_PATH');
+  assert.equal(readdirSync(externalEnforcement).length, 0, 'no regenerated enforcement file escapes through the link');
 });
 
 test('compile refuses to overwrite an existing packet without --force', (t) => {
@@ -298,6 +321,20 @@ test('anchors.exclude removes a path from the scan', (t) => {
   assert.equal(verifyPacket(project.outDir, { repo }).ok, true);
 });
 
+test('anchor scanning skips symlinked sources and directory loops', (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'vld-anchor-links-'));
+  const outside = mkdtempSync(path.join(os.tmpdir(), 'vld-anchor-outside-'));
+  t.after(() => { rmSync(root, { recursive: true, force: true }); rmSync(outside, { recursive: true, force: true }); });
+  const strayMarker = ['@', 'req '].join('');
+  writeFileSync(path.join(outside, 'external.test.ts'), `// ${strayMarker}REQ-999\n`);
+  symlinkSync(path.join(outside, 'external.test.ts'), path.join(root, 'linked.test.ts'));
+  symlinkSync(root, path.join(root, 'loop'), 'dir');
+
+  const scan = scanAnchors(root);
+  assert.equal(scan.anchors.has('REQ-999'), false, 'an external linked source is not repository evidence');
+  assert.equal(scan.scanned, 0, 'the directory loop is not traversed');
+});
+
 test('an anchor outside a test file does not count as proof', (t) => {
   const project = compileTemp(makeProject('non-test-anchor'));
   t.after(project.cleanup);
@@ -391,6 +428,22 @@ test('the shipped checker and the factory verifier reach the same verdict', (t) 
   writeFileSync(path.join(repo, 'tests', 'stray.test.ts'), `// ${strayMarker}REQ-999\ntest('stray', () => {});\n`);
   assert.equal(verifyPacket(project.outDir, { repo, strict: true }).ok, false);
   assert.equal(runShippedChecker(project.outDir, repo, true).code, 1);
+});
+
+test('the shipped spec checker skips symlinked sources and directory loops', (t) => {
+  const project = compileTemp(makeProject('shipped-checker-links'));
+  t.after(project.cleanup);
+  const repo = path.join(project.root, 'repo');
+  const outside = path.join(project.root, 'outside');
+  mkdirSync(repo); mkdirSync(outside);
+  const strayMarker = ['@', 'req '].join('');
+  writeFileSync(path.join(outside, 'external.test.ts'), `// ${strayMarker}REQ-999\n`);
+  symlinkSync(path.join(outside, 'external.test.ts'), path.join(repo, 'linked.test.ts'));
+  symlinkSync(repo, path.join(repo, 'loop'), 'dir');
+
+  const result = runShippedChecker(project.outDir, repo);
+  assert.equal(result.code, 0, result.stdout);
+  assert.doesNotMatch(result.stdout, /REQ-999/);
 });
 
 test('a packet without a browser interface does not ask for a browser test', (t) => {

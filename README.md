@@ -4,6 +4,24 @@
 
 Not a prompt. Not a checklist. A packet with requirements, acceptance criteria, gates, architecture decisions, and a script that **fails the build when the spec and the code stop agreeing**.
 
+## Quick start
+
+VLD requires **Node.js 22 or newer** (`node --version`). Choose the npm package for normal use, or a source checkout when contributing.
+
+```bash
+# Use the supported package directly from GitHub without a manual checkout.
+npx --yes github:knarayanareddy/Vibecode-like-a-dev init my-app
+npx --yes github:knarayanareddy/Vibecode-like-a-dev plan my-app/profile.json
+npx --yes github:knarayanareddy/Vibecode-like-a-dev compile my-app/profile.json -o specs
+
+# Or install that package once, then use its `vld` command.
+npm install --global github:knarayanareddy/Vibecode-like-a-dev
+vld adopt .
+vld compile profile.json -o specs
+```
+
+For development from source, clone the repository and invoke the checked-out CLI directly:
+
 ```bash
 git clone https://github.com/knarayanareddy/Vibecode-like-a-dev
 cd Vibecode-like-a-dev

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -58,4 +58,36 @@ test('Claude Code adapter writes commands in its own target without creating an 
   assert.match(command, /^---/);
   assert.match(command, /never self-approves a release/);
   assert.equal(existsSync(path.join(project, '.agents')), false, 'a Claude adapter does not leave unrelated tool files');
+});
+
+
+test('agent installation rejects symlinked handoff and state destinations without writing outside the project', (t) => {
+  const project = mkdtempSync(path.join(os.tmpdir(), 'vld-agent-links-'));
+  const outside = mkdtempSync(path.join(os.tmpdir(), 'vld-agent-outside-'));
+  t.after(() => { rmSync(project, { recursive: true, force: true }); rmSync(outside, { recursive: true, force: true }); });
+
+  symlinkSync(outside, path.join(project, '.agents'), 'dir');
+  assert.throws(
+    () => installAgent({ id: 'codex', projectDir: project }),
+    (error) => error.code === 'UNSAFE_MANAGED_PATH'
+  );
+  assert.equal(existsSync(path.join(outside, 'skills', 'vld-discovery', 'SKILL.md')), false);
+
+  rmSync(path.join(project, '.agents'));
+  rmSync(path.join(project, '.vld'), { recursive: true, force: true });
+  symlinkSync(outside, path.join(project, '.vld'), 'dir');
+  assert.throws(
+    () => installAgent({ id: 'codex', projectDir: project }),
+    (error) => error.code === 'UNSAFE_MANAGED_PATH'
+  );
+  assert.equal(existsSync(path.join(outside, 'agents', 'codex.json')), false);
+
+  rmSync(path.join(project, '.vld'), { recursive: true, force: true });
+  mkdirSync(path.join(project, '.vld', 'agents'), { recursive: true });
+  symlinkSync(path.join(outside, 'state.json'), path.join(project, '.vld', 'agents', 'codex.json'));
+  assert.throws(
+    () => installAgent({ id: 'codex', projectDir: project }),
+    (error) => error.code === 'UNSAFE_MANAGED_PATH'
+  );
+  assert.equal(existsSync(path.join(outside, 'state.json')), false);
 });
