@@ -102,7 +102,7 @@ Usage
   vld runtime transition <mission.json> <package> --to <state> --actor <role:id> --expected-version <n> [--lease-token <token>]
   vld runtime agent run <mission.json> <package> --policy <agent-policy.json> --lease-token <token> [--project <dir>] [--json]
   vld runtime agent status <mission.json> [--project <dir>] [--json]
-                                     opt-in fake or one-declared-argv adapter; local processes are read-only without a sandbox
+                                     opt-in fake or one-declared-argv adapter; local processes are unconfined (no VLD write authority)
   vld runtime delivery submit <mission.json> <package> --policy <delivery-policy.json> --lease-token <token> --sha <commit> [--adapter-run <id>]
   vld runtime delivery verify <mission.json> <package> --policy <delivery-policy.json> [--project <dir>] [--json]
   vld runtime delivery approve <mission.json> <package> --policy <delivery-policy.json> --candidate <id> --actor reviewer:<id> --reason <text>

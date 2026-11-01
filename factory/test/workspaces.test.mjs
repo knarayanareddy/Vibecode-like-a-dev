@@ -8,7 +8,7 @@
 
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -92,7 +92,7 @@ test('workspace creation uses a sibling managed root, is idempotent, and isolate
   assert.match(first.allocation.branch, /^vld\/parallel-export\/export-api$/);
   assert.equal(first.allocation.baseCommit, fixture.mission.target.commit);
   assert.ok(existsSync(first.allocation.worktree));
-  assert.ok(first.allocation.worktree.startsWith(path.join(fixture.container, '.vld-worktrees')));
+  assert.ok(first.allocation.worktree.startsWith(path.join(realpathSync(fixture.container), '.vld-worktrees')));
   assert.equal(first.allocation.worktree.startsWith(fixture.project), false, 'worktree is never created inside the project checkout');
   assert.equal(workspaceEntries(fixture.project).length, 2, 'primary checkout plus one allocation');
 

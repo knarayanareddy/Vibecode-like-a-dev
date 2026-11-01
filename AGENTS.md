@@ -23,7 +23,7 @@ node factory/cli.mjs bundle list|apply <id> --profile <profile.json>
 node factory/cli.mjs agent install codex|claude-code|github-copilot
 node factory/cli.mjs workflow list|lint|run|status|complete
 node factory/cli.mjs mcp                # MCP server over stdio (8 tools)
-npm test                                # 183 tests: integrity, planning, adoption, deltas, artifacts, stores, modules, workflows, MCP, enforcement
+npm test                                # complete Node test suite (count intentionally not maintained)
 npm run check                           # index freshness + tests + verify the example packet
 ```
 

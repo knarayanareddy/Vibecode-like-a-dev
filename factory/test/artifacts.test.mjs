@@ -20,7 +20,7 @@ function compile(project) {
 test('artifact templates require modules, preserve deterministic paths and fail strict validation until authored', (t)=>{
  const project=mkdtempSync(path.join(os.tmpdir(),'vld-artifact-'));t.after(()=>rmSync(project,{recursive:true,force:true}));
  writeFileSync(path.join(project,'profile.json'),JSON.stringify(profile)); enableModules({projectDir:project,ids:'qa'});
- const created=initArtifact({kind:'qa-plan',projectDir:project}); assert.match(created.file,/docs\/qa-plan\.md$/);
+ const created=initArtifact({kind:'qa-plan',projectDir:project}); assert.match(created.file,/docs[\\/]qa-plan\.md$/);
  const loose=validateArtifact({kind:'qa-plan',projectDir:project}); assert.equal(loose.ok,false,'QA needs a packet even while authoring'); assert.match(loose.warnings.join('\n'),/placeholder/);
  const strict=validateArtifact({kind:'qa-plan',projectDir:project,strict:true}); assert.equal(strict.strictOk,false);
  assert.throws(()=>initArtifact({kind:'architecture-decision',projectDir:project}),/needs a kebab-case decision id/);

@@ -47,7 +47,7 @@ function readPrimitiveBody(id) {
   try {
     const raw = readFileSync(path.join(ROOT, primitive.path), 'utf8');
     // Strip frontmatter: the caller already has the metadata from search.
-    body = raw.replace(/^---\n[\s\S]*?\n---\n/, '');
+    body = raw.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
   } catch {
     body = null;
   }

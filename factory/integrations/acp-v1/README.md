@@ -12,10 +12,13 @@ npm install --prefix factory/integrations/acp-v1
 ```
 
 A project policy must explicitly select `"adapter": "acp-v1"`. It has the same
-host boundary as M4 `local-process`: direct absolute argv only; `read-only`;
-`writeWorkspace: false`; `sandbox: false`; network, credentials, push and merge
-denied. Its fresh environment contains only VLD IDs/digests and the existing
-non-secret locale allowlist.
+host boundary as M4 `local-process`: direct absolute argv only and no VLD
+workspace-write authority (`read-only`; `writeWorkspace: false`; `sandbox: false`).
+Network, credentials, push and merge are denied as VLD capabilities and its fresh
+environment contains only VLD IDs/digests plus the non-secret locale allowlist.
+These declarations are not filesystem, network or credential containment for the
+same-user ACP peer; it remains an unconfined host process until a sandbox adapter
+proves OS-enforced isolation.
 
 The bridge advertises no ACP client filesystem, terminal, MCP, authentication,
 elicitation or credential capabilities. It records only bounded event metadata

@@ -37,7 +37,7 @@ test('Git-backed stores pin a validated snapshot and detect cached asset drift w
   const template = readStoreAsset({ projectDir: project, storeId: 'team-playbook', assetId: 'product-brief-template', kind: 'artifact-template' });
   assert.equal(template.asset.artifact, 'product-brief');
   const copied = copyStoreAsset({ projectDir: project, storeId: 'team-playbook', assetId: 'review-notes' });
-  assert.match(copied.output, /docs\/shared\/team-playbook\/review-notes\.md$/);
+  assert.match(copied.output, /docs[\\/]shared[\\/]team-playbook[\\/]review-notes\.md$/);
   assert.match(readFileSync(copied.output, 'utf8'), /requirement links/);
   assert.throws(() => copyStoreAsset({ projectDir: project, storeId: 'team-playbook', assetId: 'review-notes', out: '../escape.md' }), /inside the project/);
   assert.throws(() => addStore({ projectDir: project, id: 'team-playbook', repository: `file://${source}` }), /already locked/);

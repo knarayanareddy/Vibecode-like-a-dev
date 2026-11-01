@@ -8,7 +8,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
@@ -31,6 +31,33 @@ const MAX_RECEIPTS = 100;
 function isWithin(root, candidate) {
   const relative = path.relative(root, candidate);
   return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
+}
+
+function samePath(left, right) {
+  const normalizedLeft = path.resolve(left);
+  const normalizedRight = path.resolve(right);
+  return process.platform === 'win32'
+    ? normalizedLeft.toLocaleLowerCase('en-US') === normalizedRight.toLocaleLowerCase('en-US')
+    : normalizedLeft === normalizedRight;
+}
+
+/**
+ * Compare existing paths by filesystem identity to absorb Windows 8.3/case and
+ * macOS alias spelling. Node's realpath spelling can itself vary on Windows,
+ * so use the directory's device/file identity as a final, non-textual check.
+ */
+function sameFilesystemPath(left, right) {
+  try {
+    if (samePath(realpathSync(left), realpathSync(right))) return true;
+    const leftStats = statSync(left);
+    const rightStats = statSync(right);
+    // Do not treat platforms reporting two zero sentinel values as identical.
+    return leftStats.isDirectory() && rightStats.isDirectory()
+      && (leftStats.dev !== 0 || leftStats.ino !== 0)
+      && leftStats.dev === rightStats.dev && leftStats.ino === rightStats.ino;
+  } catch {
+    return samePath(left, right);
+  }
 }
 
 function displayRelative(root, target) {
@@ -62,19 +89,28 @@ function gitSucceeds(project, args) {
 }
 
 function repository(projectDir) {
-  const project = ensureProjectDir(projectDir);
-  let root;
+  // macOS may spell a real temporary directory under /private while callers use
+  // its /tmp alias. Compare canonical existing paths so Git's primary worktree
+  // identity remains portable without treating CWD as an authority boundary.
+  const project = realpathSync(ensureProjectDir(projectDir));
   let commonRaw;
+  let gitDirRaw;
+  let worktreePrefix;
   try {
-    root = git(project, ['rev-parse', '--show-toplevel'], 'NOT_A_GIT_REPOSITORY');
     commonRaw = git(project, ['rev-parse', '--git-common-dir'], 'NOT_A_GIT_REPOSITORY');
+    gitDirRaw = git(project, ['rev-parse', '--git-dir'], 'NOT_A_GIT_REPOSITORY');
+    worktreePrefix = git(project, ['rev-parse', '--show-prefix'], 'NOT_A_GIT_REPOSITORY');
   } catch (error) {
     if (error.code === 'NOT_A_GIT_REPOSITORY') throw extensionError('workspace commands require a Git working repository', 'NOT_A_GIT_REPOSITORY');
     throw error;
   }
-  const commonDir = path.resolve(project, commonRaw);
-  if (!existsSync(commonDir) || !lstatSync(commonDir).isDirectory()) throw extensionError('Git common directory is unavailable', 'NOT_A_GIT_REPOSITORY');
-  return { project, root: path.resolve(root), commonDir };
+  const commonCandidate = path.resolve(project, commonRaw);
+  if (!existsSync(commonCandidate) || !lstatSync(commonCandidate).isDirectory()) throw extensionError('Git common directory is unavailable', 'NOT_A_GIT_REPOSITORY');
+  const commonDir = realpathSync(commonCandidate);
+  const gitDirCandidate = path.resolve(project, gitDirRaw);
+  if (!existsSync(gitDirCandidate) || !lstatSync(gitDirCandidate).isDirectory()) throw extensionError('Git directory is unavailable', 'NOT_A_GIT_REPOSITORY');
+  const gitDir = realpathSync(gitDirCandidate);
+  return { project, root: project, commonDir, gitDir, worktreePrefix };
 }
 
 function workspaceRoot(repo) {
@@ -159,7 +195,12 @@ function primaryWorkspaceRepository(projectDir) {
   const repo = repository(projectDir);
   const primary = listWorktrees(repo)[0];
   if (!primary || primary.bare || !primary.path) throw extensionError('workspace commands require a primary Git working checkout', 'NOT_A_GIT_REPOSITORY');
-  if (repo.project !== repo.root || repo.root !== primary.path) {
+  const gitDirMatchesCommon = sameFilesystemPath(repo.gitDir, repo.commonDir);
+  // Git's worktree-list path can use a different Windows spelling from Node's
+  // filesystem APIs. The checked Git identities already prove root + primary:
+  // an empty prefix rejects subdirectories, and common == git-dir rejects
+  // linked worktrees. Do not reintroduce a lossy textual path comparison here.
+  if (repo.worktreePrefix !== '' || !gitDirMatchesCommon) {
     throw extensionError('workspace commands must run from the primary Git checkout root, not a subdirectory or linked worktree', 'WORKSPACE_PRIMARY_CHECKOUT_REQUIRED');
   }
   return repo;
@@ -258,21 +299,33 @@ function clearStaleLock(repo) {
   return { owner, directory: inspected.directory };
 }
 
+function lockExistsError(repo) {
+  const inspected = inspectWorkspaceLock(repo.project);
+  if (inspected.kind !== 'file') throw extensionError(`workspace lock has an unsafe filesystem type: ${inspected.kind}`, 'INVALID_WORKSPACE_LOCK');
+  const reason = inspected.active ? `pid ${inspected.owner.pid} is active` : 'a stale lock requires `vld workspace recover`';
+  throw extensionError(`workspace repository is locked: ${reason}`, inspected.active ? 'WORKSPACE_LOCKED' : 'STALE_WORKSPACE_LOCK');
+}
+
 function acquireWorkspaceLock(repo, { allowRecovery = false } = {}) {
   const directory = lockPath(repo);
   if (!allowRecovery) assertNoWorkspaceRecovery(repo);
+  // Windows can follow a dangling symbolic link with an exclusive file create.
+  // Refuse every existing node before the create and validate the node again
+  // afterwards, so a lock path can never grant a mutation through a symlink.
+  const existing = inspectWorkspaceLock(repo.project);
+  if (existing.exists) lockExistsError(repo);
   const owner = { schemaVersion: 1, pid: process.pid, token: randomUUID() };
   try {
     writeFileSync(directory, `${JSON.stringify(owner)}\n`, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
   } catch (error) {
-    if (error?.code === 'EEXIST') {
-      const inspected = inspectWorkspaceLock(repo.project);
-      if (inspected.kind !== 'file') throw extensionError(`workspace lock has an unsafe filesystem type: ${inspected.kind}`, 'INVALID_WORKSPACE_LOCK');
-      const reason = inspected.active ? `pid ${inspected.owner.pid} is active` : 'a stale lock requires `vld workspace recover`';
-      throw extensionError(`workspace repository is locked: ${reason}`, inspected.active ? 'WORKSPACE_LOCKED' : 'STALE_WORKSPACE_LOCK');
-    }
+    if (error?.code === 'EEXIST') lockExistsError(repo);
     throw error;
   }
+  let stats;
+  try { stats = lstatSync(directory); } catch { throw extensionError('workspace lock disappeared during acquisition', 'INVALID_WORKSPACE_LOCK'); }
+  if (stats.isSymbolicLink() || !stats.isFile()) throw extensionError('workspace lock has an unsafe filesystem type after acquisition', 'INVALID_WORKSPACE_LOCK');
+  const stored = readWorkspaceLockOwner(directory);
+  if (stored.token !== owner.token) throw extensionError('workspace lock owner changed during acquisition', 'INVALID_WORKSPACE_LOCK');
   if (!allowRecovery) {
     try { assertNoWorkspaceRecovery(repo); } catch (error) { releaseWorkspaceLock(repo, owner); throw error; }
   }
@@ -418,12 +471,39 @@ function isRealDirectoryTree(root, candidate) {
   }
 }
 
-function healthForAllocation(allocation, worktrees, root) {
+/**
+ * Verify a linked checkout through Git's own metadata when its porcelain output
+ * uses a path spelling Node cannot compare on Windows. A matching common Git
+ * directory plus a distinct per-worktree Git directory proves this is a
+ * registered linked worktree for this repository; it is not a loose copy.
+ */
+function registeredLinkedWorktree(allocationPath, commonDir) {
+  try {
+    const checkout = repository(allocationPath);
+    const commonDirMatches = sameFilesystemPath(checkout.commonDir, commonDir);
+    const separateGitDir = !sameFilesystemPath(checkout.gitDir, checkout.commonDir);
+    if (!commonDirMatches || !separateGitDir) {
+      return { worktree: null, detail: `Git metadata common-directory match: ${commonDirMatches}; separate linked Git directory: ${separateGitDir}` };
+    }
+    let branch = null;
+    try { branch = git(allocationPath, ['symbolic-ref', '-q', 'HEAD']); } catch {}
+    return { worktree: { path: allocationPath, branch, head: git(allocationPath, ['rev-parse', 'HEAD']) }, detail: null };
+  } catch (error) {
+    return { worktree: null, detail: `Git metadata inspection failed (${typeof error?.code === 'string' ? error.code : 'unknown error'})` };
+  }
+}
+
+function healthForAllocation(allocation, worktrees, root, commonDir) {
   if (!allocation || typeof allocation.worktree !== 'string') return { state: 'drifted', detail: 'registered allocation has an invalid worktree path' };
   const allocationPath = path.resolve(allocation.worktree);
-  const worktree = worktrees.find((entry) => entry.path === allocationPath);
-  if (!worktree || !existsSync(allocationPath)) return { state: 'missing', detail: 'registered worktree is absent' };
+  if (!existsSync(allocationPath)) return { state: 'missing', detail: 'registered worktree is absent' };
   if (!isRealDirectoryTree(root, allocationPath)) return { state: 'drifted', detail: 'registered worktree contains a symbolic link or is not a real directory' };
+  // Prefer porcelain for normal paths, but do not let its non-canonical Windows
+  // spelling turn a newly registered worktree into a false missing result.
+  const listed = worktrees.find((entry) => sameFilesystemPath(entry.path, allocationPath));
+  const metadata = listed ? null : registeredLinkedWorktree(allocationPath, commonDir);
+  const worktree = listed ?? metadata.worktree;
+  if (!worktree) return { state: 'missing', detail: `registered worktree is absent; porcelain path match: false; ${metadata.detail}` };
   if (worktree.branch !== `refs/heads/${allocation.branch}`) return { state: 'drifted', detail: `expected branch refs/heads/${allocation.branch}, found ${worktree.branch ?? 'detached HEAD'}` };
   if (worktree.head && !COMMIT.test(worktree.head)) return { state: 'drifted', detail: 'worktree has an invalid HEAD' };
   return { state: 'healthy', detail: null };
@@ -494,7 +574,7 @@ export function createWorkspace({ missionFile, packageId, projectDir = '.' } = {
     const missionDigest = digest(mission);
     const existing = state.allocations.find((entry) => entry.missionDigest === missionDigest && entry.packageId === packageId);
     if (existing) {
-      const health = healthForAllocation(existing, worktrees, workspaceRoot(repo));
+      const health = healthForAllocation(existing, worktrees, workspaceRoot(repo), repo.commonDir);
       if (existing.status === 'allocated' && health.state === 'healthy') return { changed: false, allocation: existing, warnings: [] };
       throw extensionError(`work package "${packageId}" has ${existing.status === 'removing' ? 'a pending removal' : `an unhealthy workspace (${health.detail})`}; run vld workspace recover before allocating it again`, 'WORKSPACE_RECOVERY_REQUIRED');
     }
@@ -506,14 +586,16 @@ export function createWorkspace({ missionFile, packageId, projectDir = '.' } = {
       if (overlap) warnings.push(`resource claim "${overlap}" overlaps allocated package "${allocation.packageId}"; worktree isolation does not prevent a later merge conflict`);
     }
     if (branchExists(repo, workspace.branch)) throw extensionError(`workspace branch "${workspace.branch}" already exists; run recover or choose a new mission/package id`, 'WORKSPACE_BRANCH_EXISTS');
-    if (existsSync(workspace.directory) || worktrees.some((entry) => entry.path === workspace.directory)) {
+    if (existsSync(workspace.directory) || worktrees.some((entry) => sameFilesystemPath(entry.path, workspace.directory))) {
       throw extensionError(`workspace path already exists: ${workspace.directory}`, 'WORKSPACE_PATH_EXISTS');
     }
 
     mkdirWithoutSymlinks(path.dirname(workspace.directory), 'managed workspace root');
     let created = false;
     try {
-      git(repo.project, ['worktree', 'add', '-b', workspace.branch, workspace.directory, mission.target.commit]);
+      // Packet/catalog digests bind exact bytes. Suppress a caller's checkout-only
+      // line-ending conversion while materializing a verified worktree.
+      git(repo.project, ['-c', 'core.autocrlf=false', '-c', 'core.eol=lf', 'worktree', 'add', '-b', workspace.branch, workspace.directory, mission.target.commit]);
       created = true;
       const allocation = {
         // Deliberately unique per allocation lifetime: a stale discard acknowledgement
@@ -530,7 +612,7 @@ export function createWorkspace({ missionFile, packageId, projectDir = '.' } = {
         resourceClaims: [...(workPackage.resourceClaims?.paths ?? [])],
         status: 'allocated'
       };
-      const healthy = healthForAllocation(allocation, listWorktrees(repo), workspaceRoot(repo));
+      const healthy = healthForAllocation(allocation, listWorktrees(repo), workspaceRoot(repo), repo.commonDir);
       if (healthy.state !== 'healthy') throw extensionError(`new workspace did not verify: ${healthy.detail}`, 'WORKSPACE_CREATE_FAILED');
       writeWorkspaceState(repo, { ...state, allocations: [...state.allocations, allocation] });
       return { changed: true, allocation, warnings };
@@ -563,12 +645,12 @@ export function workspaceStatus({ missionFile, projectDir = '.' } = {}) {
   const workPackages = Array.isArray(loadedMission.mission?.workPackages) ? loadedMission.mission.workPackages : [];
   const packageStatus = workPackages.map((workPackage) => {
     const allocation = allocations.find((entry) => entry?.packageId === workPackage?.id) ?? null;
-    return { id: workPackage?.id ?? '(invalid package)', allocation, status: allocation ? healthForAllocation(allocation, worktrees, workspaceRoot(repo)) : { state: 'unallocated', detail: null } };
+    return { id: workPackage?.id ?? '(invalid package)', allocation, status: allocation ? healthForAllocation(allocation, worktrees, workspaceRoot(repo), repo.commonDir) : { state: 'unallocated', detail: null } };
   });
   for (const entry of packageStatus) if (entry.status.state !== 'healthy' && entry.status.state !== 'unallocated') warnings.push(`work package "${entry.id}" is ${entry.status.state}: ${entry.status.detail}`);
   const root = workspaceRoot(repo);
-  const known = new Set((loadedState.state?.allocations ?? []).filter((entry) => typeof entry?.worktree === 'string').map((entry) => path.resolve(entry.worktree)));
-  const unmanaged = worktrees.filter((entry) => isWithin(root, entry.path) && !known.has(entry.path)).map((entry) => entry.path);
+  const known = (loadedState.state?.allocations ?? []).filter((entry) => typeof entry?.worktree === 'string').map((entry) => entry.worktree);
+  const unmanaged = worktrees.filter((entry) => isWithin(root, entry.path) && !known.some((registered) => sameFilesystemPath(registered, entry.path))).map((entry) => entry.path);
   if (unmanaged.length) warnings.push(`${unmanaged.length} managed-root worktree(s) are not recorded in workspace state`);
   const missionCurrent = missionReport.ok;
   return {
@@ -597,7 +679,7 @@ export function runtimeWorkspaceAllocation({ missionFile, packageId, projectDir 
   if (loaded.errors.length) throw extensionError(`workspace state is invalid:\n${loaded.errors.map((error) => `- ${error}`).join('\n')}`, 'INVALID_WORKSPACE_STATE');
   const allocation = loaded.state.allocations.find((entry) => entry.missionDigest === digest(current.mission) && entry.packageId === packageId);
   if (!allocation || allocation.status !== 'allocated') throw extensionError(`work package "${packageId}" has no allocated workspace`, 'WORKSPACE_NOT_FOUND');
-  const health = healthForAllocation(allocation, listWorktrees(repo), workspaceRoot(repo));
+  const health = healthForAllocation(allocation, listWorktrees(repo), workspaceRoot(repo), repo.commonDir);
   if (health.state !== 'healthy') throw extensionError(`workspace is ${health.state}: ${health.detail}; run vld workspace recover`, 'WORKSPACE_RECOVERY_REQUIRED');
   return {
     id: allocation.id,
@@ -635,7 +717,7 @@ export function withRuntimeIntegrationWorkspace({ missionFile, packageId, candid
     if (!isWithin(root, directory)) throw extensionError('integration worktree path escapes its managed root', 'INVALID_WORKSPACE_ROOT');
     let created = false;
     try {
-      git(repo.project, ['worktree', 'add', '--detach', directory, current.mission.target.commit], 'INTEGRATION_WORKTREE_FAILED');
+      git(repo.project, ['-c', 'core.autocrlf=false', '-c', 'core.eol=lf', 'worktree', 'add', '--detach', directory, current.mission.target.commit], 'INTEGRATION_WORKTREE_FAILED');
       created = true;
       // --no-commit and --no-ff prepare the exact merge result for checks but
       // cannot update any branch. A conflict is a typed result, not an agent job.
@@ -693,7 +775,7 @@ export function recoverWorkspaces({ missionFile, projectDir = '.' } = {}) {
         remaining.push(allocation);
         continue;
       }
-      const health = healthForAllocation(allocation, worktrees, workspaceRoot(repo));
+      const health = healthForAllocation(allocation, worktrees, workspaceRoot(repo), repo.commonDir);
       if (health.state === 'healthy') {
         const restored = { ...allocation, status: 'allocated' };
         delete restored.removal;
@@ -734,7 +816,7 @@ export function removeWorkspace({ missionFile, packageId, projectDir = '.', disc
     const allocation = state.allocations.find((entry) => entry.missionDigest === missionDigest && entry.packageId === packageId);
     if (!allocation) throw extensionError(`work package "${packageId}" has no allocated workspace`, 'WORKSPACE_NOT_FOUND');
     if (allocation.status !== 'allocated') throw extensionError(`work package "${packageId}" has a pending removal; run vld workspace recover`, 'WORKSPACE_RECOVERY_REQUIRED');
-    const health = healthForAllocation(allocation, listWorktrees(repo), workspaceRoot(repo));
+    const health = healthForAllocation(allocation, listWorktrees(repo), workspaceRoot(repo), repo.commonDir);
     if (health.state !== 'healthy') throw extensionError(`workspace is ${health.state}: ${health.detail}; run vld workspace recover`, 'WORKSPACE_RECOVERY_REQUIRED');
     const dirty = git(allocation.worktree, ['status', '--porcelain']);
     const tip = branchCommit(repo, allocation.branch);

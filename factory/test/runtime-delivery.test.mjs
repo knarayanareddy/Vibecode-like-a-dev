@@ -45,6 +45,9 @@ function fixture(t) {
   git(project, ['init', '-q']);
   git(project, ['config', 'user.email', 'delivery@example.invalid']);
   git(project, ['config', 'user.name', 'Delivery Test']);
+  // Proves managed worktree creation keeps signed packet bytes canonical even
+  // when the repository requests Windows-style checkout conversion.
+  git(project, ['config', 'core.autocrlf', 'true']);
   git(project, ['add', 'specs']);
   git(project, ['commit', '-qm', 'packet']);
   const requirements = JSON.parse(readFileSync(path.join(project, 'specs', 'spec.json'), 'utf8')).requirements.map((entry) => entry.id);
@@ -65,7 +68,13 @@ function fixture(t) {
 async function changesReady(value) {
   const agent = await runRuntimeAgent({ missionFile: value.missionFile, packageId: 'delivery-work', policyFile: 'agent-policy.json', leaseToken: value.allocated.leaseToken, projectDir: value.project });
   assert.equal(agent.ok, true);
-  const workspace = git(value.project, ['worktree', 'list', '--porcelain']).split('\n').find((line) => line.startsWith('worktree ') && line !== `worktree ${value.project}`)?.slice('worktree '.length);
+  // Git porcelain lists the primary checkout first. Do not compare its Windows
+  // path spelling with Node's filesystem spelling to locate the linked checkout.
+  const worktrees = git(value.project, ['worktree', 'list', '--porcelain']).split('\n')
+    .filter((line) => line.startsWith('worktree '))
+    .map((line) => line.slice('worktree '.length));
+  const workspace = worktrees[1];
+  assert.equal(typeof workspace, 'string', 'fixture creates exactly one linked worktree');
   return { agent, workspace };
 }
 

@@ -9,7 +9,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import {
   digest,
@@ -62,6 +62,14 @@ function isWithin(root, candidate) {
   return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
 }
 
+function samePath(left, right) {
+  const normalizedLeft = path.resolve(left);
+  const normalizedRight = path.resolve(right);
+  return process.platform === 'win32'
+    ? normalizedLeft.toLocaleLowerCase('en-US') === normalizedRight.toLocaleLowerCase('en-US')
+    : normalizedLeft === normalizedRight;
+}
+
 function safeDirectory(directory, label) {
   if (!existsSync(directory)) return;
   const stats = lstatSync(directory);
@@ -103,25 +111,35 @@ function writeJsonAtomic(file, value) {
 }
 
 function repository(projectDir) {
-  const project = ensureProjectDir(projectDir);
-  let root;
+  // macOS may spell a real temporary directory under /private while callers use
+  // its /tmp alias. Compare canonical existing paths so Git's primary worktree
+  // identity remains portable without treating CWD as an authority boundary.
+  const project = realpathSync(ensureProjectDir(projectDir));
   let commonRaw;
+  let gitDirRaw;
+  let worktreePrefix;
   try {
-    root = git(project, ['rev-parse', '--show-toplevel'], 'NOT_A_GIT_REPOSITORY');
     commonRaw = git(project, ['rev-parse', '--git-common-dir'], 'NOT_A_GIT_REPOSITORY');
+    gitDirRaw = git(project, ['rev-parse', '--git-dir'], 'NOT_A_GIT_REPOSITORY');
+    worktreePrefix = git(project, ['rev-parse', '--show-prefix'], 'NOT_A_GIT_REPOSITORY');
   } catch (error) {
     if (error.code === 'NOT_A_GIT_REPOSITORY') throw extensionError('runtime commands require a Git working repository', 'NOT_A_GIT_REPOSITORY');
     throw error;
   }
-  const commonDir = path.resolve(project, commonRaw);
-  if (!existsSync(commonDir) || !lstatSync(commonDir).isDirectory()) throw extensionError('Git common directory is unavailable', 'NOT_A_GIT_REPOSITORY');
-  const primaryRaw = git(project, ['worktree', 'list', '--porcelain']);
-  const first = primaryRaw.split('\n').find((line) => line.startsWith('worktree '));
-  const primary = first ? path.resolve(first.slice('worktree '.length)) : null;
-  if (!primary || path.resolve(project) !== path.resolve(root) || path.resolve(root) !== primary) {
+  const commonCandidate = path.resolve(project, commonRaw);
+  if (!existsSync(commonCandidate) || !lstatSync(commonCandidate).isDirectory()) throw extensionError('Git common directory is unavailable', 'NOT_A_GIT_REPOSITORY');
+  const commonDir = realpathSync(commonCandidate);
+  const gitDirCandidate = path.resolve(project, gitDirRaw);
+  if (!existsSync(gitDirCandidate) || !lstatSync(gitDirCandidate).isDirectory()) throw extensionError('Git directory is unavailable', 'NOT_A_GIT_REPOSITORY');
+  const gitDir = realpathSync(gitDirCandidate);
+  // `--show-toplevel` can use a different Windows path spelling from Node's
+  // filesystem APIs. An empty Git prefix proves the supplied directory is this
+  // worktree's root; matching common/git directories proves it is primary, not
+  // a linked worktree.
+  if (worktreePrefix !== '' || !samePath(gitDir, commonDir)) {
     throw extensionError('runtime commands must run from the primary Git checkout root, not a subdirectory or linked worktree', 'RUNTIME_PRIMARY_CHECKOUT_REQUIRED');
   }
-  return { project: path.resolve(project), root: path.resolve(root), commonDir };
+  return { project, root: project, commonDir };
 }
 
 function runtimeBase(repo) {

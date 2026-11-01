@@ -1,0 +1,79 @@
+name: live-agent benchmark
+
+# This workflow is intentionally manual: it can consume paid provider APIs and
+# produces empirical evidence for one exact model/configuration, never a PR gate.
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: Live provider runner
+        required: true
+        type: choice
+        options: [openai, anthropic]
+      model:
+        description: Exact provider model identifier
+        required: true
+        type: string
+      tasks:
+        description: Task ID/category filter; begin with a bounded pilot
+        required: true
+        default: brownfield
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    name: ${{ inputs.provider }} / ${{ inputs.model }} / ${{ inputs.tasks }}
+    # Repository administrators must configure this environment with required
+    # reviewers and the matching provider secret before dispatching a run.
+    environment: live-agent-benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      - name: Record immutable run provenance
+        env:
+          BENCHMARK_PROVIDER: ${{ inputs.provider }}
+          BENCHMARK_MODEL: ${{ inputs.model }}
+          BENCHMARK_TASKS: ${{ inputs.tasks }}
+          BENCHMARK_COMMIT: ${{ github.sha }}
+          BENCHMARK_RUN_ID: ${{ github.run_id }}
+          BENCHMARK_RUN_ATTEMPT: ${{ github.run_attempt }}
+          BENCHMARK_RUNNER_OS: ${{ runner.os }}
+        run: |
+          mkdir -p artifacts
+          node -e 'const fs=require("node:fs"); fs.writeFileSync("artifacts/provenance.json", JSON.stringify({schemaVersion:1, provider:process.env.BENCHMARK_PROVIDER, model:process.env.BENCHMARK_MODEL, tasks:process.env.BENCHMARK_TASKS, commit:process.env.BENCHMARK_COMMIT, runId:process.env.BENCHMARK_RUN_ID, runAttempt:process.env.BENCHMARK_RUN_ATTEMPT, runnerOs:process.env.BENCHMARK_RUNNER_OS, runnerImageOs:process.env.ImageOS ?? null, runnerImageVersion:process.env.ImageVersion ?? null, node:process.version, generatedAt:new Date().toISOString()}, null, 2)+"\\n");'
+
+      - name: Run approved live-agent benchmark
+        env:
+          BENCHMARK_PROVIDER: ${{ inputs.provider }}
+          BENCHMARK_MODEL: ${{ inputs.model }}
+          BENCHMARK_TASKS: ${{ inputs.tasks }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
+        run: |
+          case "$BENCHMARK_PROVIDER" in openai|anthropic) ;; *) echo "invalid provider" >&2; exit 2 ;; esac
+          test -n "$BENCHMARK_MODEL"
+          test -n "$BENCHMARK_TASKS"
+          node scripts/eval-outcome.mjs \
+            --runner "$BENCHMARK_PROVIDER" \
+            --model "$BENCHMARK_MODEL" \
+            --tasks "$BENCHMARK_TASKS" \
+            --out artifacts/outcome-report.json
+
+      - name: Retain report and provenance
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: live-agent-benchmark-${{ github.run_id }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 90

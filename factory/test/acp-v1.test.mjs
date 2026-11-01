@@ -31,14 +31,14 @@ test('M8 ACP v1 accepts only stable v1 anonymous peer negotiation and emits no r
   assert.throws(() => normalizeAcpV1Stop({ stopReason: 'out-of-order' }), (error) => error.code === 'ACP_V1_PROTOCOL_INVALID');
 });
 
-test('M8 ACP policy remains a read-only direct-argv optional boundary and Core does not import the SDK', async () => {
+test('M8 ACP policy remains an unconfined direct-argv optional boundary with no VLD workspace-write authority and Core does not import the SDK', async () => {
   const policy = defaultFakeAgentPolicy();
   policy.id = 'acp-read-only'; policy.adapter = 'acp-v1'; policy.mode = 'read-only'; policy.capabilities = { ...policy.capabilities, writeWorkspace: false, runDeclaredCommands: true, sandbox: false, reconnect: true }; policy.command = { script: null, executable: '/opt/fixture/acp-peer', args: ['--stdio'] };
   assert.equal(validateAgentPolicy(policy).ok, true);
   const unavailablePolicy = JSON.parse(JSON.stringify(policy));
   assert.equal(adapterCapabilities('acp-v1').reconnect, true);
   policy.capabilities.writeWorkspace = true;
-  assert.match(validateAgentPolicy(policy).errors.join('\n'), /read-only/);
+  assert.match(validateAgentPolicy(policy).errors.join('\n'), /unconfined host process/);
 
   const adapter = readFileSync(path.join(ROOT, 'factory', 'lib', 'agent-adapters.mjs'), 'utf8');
   const bridge = readFileSync(path.join(ROOT, 'factory', 'integrations', 'acp-v1', 'index.mjs'), 'utf8');
