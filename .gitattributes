@@ -1,0 +1,4 @@
+# VLD signs and hashes packet/catalog bytes. Keep every text checkout canonical so
+# the CLI, generated specifications and offline verification behave identically
+# on Linux, macOS and Windows even when a user enables core.autocrlf.
+* text=auto eol=lf

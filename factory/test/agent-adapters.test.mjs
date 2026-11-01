@@ -76,7 +76,8 @@ test('local-process timeout/cancel terminate an isolated process group and malfo
   writeFileSync(fixture, `process.on('SIGTERM', () => {}); setInterval(() => console.log('tick'), 20);`);
   const result = await executeAgentAdapter({ spec: spec(workspace), policy: localPolicy(fixture, 'sleep', 100) });
   assert.equal(result.outcome, 'timed-out');
-  assert.ok(result.outputBytes > 0);
+  // A Windows child can be terminated during process start-up before its first
+  // timer callback; timeout correctness must not depend on incidental output.
 
   const controller = new AbortController();
   const cancelTimer = setTimeout(() => controller.abort(), 40);
