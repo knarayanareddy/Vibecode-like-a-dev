@@ -16,6 +16,16 @@ function actionReferences(workflow) {
   return [...workflow.matchAll(/^\s*-?\s*uses:\s*([^\s#]+)(?:\s+#.*)?$/gm)].map((match) => match[1]);
 }
 
+// Keep a portability failure concise: Node otherwise prints the complete workflow
+// as an assertion "actual" value, which obscures the useful runner diagnostic.
+function mustMatch(value, pattern, message) {
+  assert.ok(pattern.test(value), message ?? `expected ${pattern} to match`);
+}
+
+function mustNotMatch(value, pattern, message) {
+  assert.ok(!pattern.test(value), message ?? `expected ${pattern} not to match`);
+}
+
 test('CI pins every third-party action, has read-only permissions and keeps one aggregate required check', () => {
   const ci = read('.github', 'workflows', 'ci.yml');
   const live = read('.github', 'workflows', 'live-agent-benchmark.yml');
@@ -25,38 +35,38 @@ test('CI pins every third-party action, has read-only permissions and keeps one 
     const [, revision] = ref.split('@');
     assert.match(revision, FULL_SHA, `${ref} must use a full immutable revision`);
   }
-  assert.match(ci, /^permissions:\n  contents: read$/m);
-  assert.match(live, /^permissions:\n  contents: read$/m);
-  assert.match(ci, /^  check:\n    name: check\n    if: \$\{\{ always\(\) \}\}\n    needs: \[core, integration, packed-distribution, acp-v1-bridge, evaluations, stress, portable-smoke\]/m);
+  mustMatch(ci, /^permissions:\n  contents: read$/m);
+  mustMatch(live, /^permissions:\n  contents: read$/m);
+  mustMatch(ci, /^  check:\n    name: check\n    if: \$\{\{ always\(\) \}\}\n    needs: \[core, integration, packed-distribution, acp-v1-bridge, evaluations, stress, portable-smoke\]/m);
   assert.match(read('.github', 'dependabot.yml'), /package-ecosystem: github-actions/);
 });
 
 test('CI separates deterministic evaluations/stress work and validates the portable Node suite', () => {
   const ci = read('.github', 'workflows', 'ci.yml');
-  assert.match(ci, /^  integration:/m);
-  assert.match(ci, /^  packed-distribution:/m);
-  assert.match(ci, /^  evaluations:/m);
-  assert.match(ci, /^  stress:/m);
-  assert.match(ci, /^  portable-smoke:/m);
-  assert.match(ci, /os: \[macos-latest, windows-latest\]/);
-  assert.match(ci, /name: Full portable test suite[\s\S]*?NODE_OPTIONS=--test-reporter=dot npm test > portable-test\.log[\s\S]*?Portable npm test failure/);
-  assert.match(ci, /deterministic outcome calibration/);
-  assert.doesNotMatch(ci, /actions\/[\w-]+@v\d/);
+  mustMatch(ci, /^  integration:/m);
+  mustMatch(ci, /^  packed-distribution:/m);
+  mustMatch(ci, /^  evaluations:/m);
+  mustMatch(ci, /^  stress:/m);
+  mustMatch(ci, /^  portable-smoke:/m);
+  mustMatch(ci, /os: \[macos-latest, windows-latest\]/);
+  mustMatch(ci, /name: Full portable test suite[\s\S]*?NODE_OPTIONS=--test-reporter=dot npm test > portable-test\.log[\s\S]*?Portable npm test failure/);
+  mustMatch(ci, /deterministic outcome calibration/);
+  mustNotMatch(ci, /actions\/[\w-]+@v\d/);
 });
 
 test('live outcome evidence is manually dispatched, approval-environment gated and artifacted', () => {
   const live = read('.github', 'workflows', 'live-agent-benchmark.yml');
-  assert.match(live, /workflow_dispatch:/);
-  assert.doesNotMatch(live, /^  pull_request:|^  push:/m);
-  assert.match(live, /environment: live-agent-benchmark/);
-  assert.match(live, /options: \[openai, anthropic\]/);
-  assert.match(live, /--out artifacts\/outcome-report\.json/);
-  assert.match(live, /case "\$BENCHMARK_PROVIDER" in openai\|anthropic/);
-  assert.match(live, /--model "\$BENCHMARK_MODEL"/);
-  assert.doesNotMatch(live, /--model "\$\{\{ inputs\.model \}\}"/);
-  assert.match(live, /actions\/upload-artifact@[a-f0-9]{40}/);
-  assert.match(live, /provenance\.json/);
-  assert.match(live, /retention-days: 90/);
+  mustMatch(live, /workflow_dispatch:/);
+  mustNotMatch(live, /^  pull_request:|^  push:/m);
+  mustMatch(live, /environment: live-agent-benchmark/);
+  mustMatch(live, /options: \[openai, anthropic\]/);
+  mustMatch(live, /--out artifacts\/outcome-report\.json/);
+  mustMatch(live, /case "\$BENCHMARK_PROVIDER" in openai\|anthropic/);
+  mustMatch(live, /--model "\$BENCHMARK_MODEL"/);
+  mustNotMatch(live, /--model "\$\{\{ inputs\.model \}\}"/);
+  mustMatch(live, /actions\/upload-artifact@[a-f0-9]{40}/);
+  mustMatch(live, /provenance\.json/);
+  mustMatch(live, /retention-days: 90/);
 });
 
 test('public CLI calls local processes unconfined rather than claiming a read-only sandbox', () => {
