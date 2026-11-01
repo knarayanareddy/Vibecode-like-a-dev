@@ -62,6 +62,14 @@ function isWithin(root, candidate) {
   return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
 }
 
+function samePath(left, right) {
+  const normalizedLeft = path.resolve(left);
+  const normalizedRight = path.resolve(right);
+  return process.platform === 'win32'
+    ? normalizedLeft.toLocaleLowerCase('en-US') === normalizedRight.toLocaleLowerCase('en-US')
+    : normalizedLeft === normalizedRight;
+}
+
 function safeDirectory(directory, label) {
   if (!existsSync(directory)) return;
   const stats = lstatSync(directory);
@@ -109,9 +117,11 @@ function repository(projectDir) {
   const project = realpathSync(ensureProjectDir(projectDir));
   let root;
   let commonRaw;
+  let gitDirRaw;
   try {
     root = git(project, ['rev-parse', '--show-toplevel'], 'NOT_A_GIT_REPOSITORY');
     commonRaw = git(project, ['rev-parse', '--git-common-dir'], 'NOT_A_GIT_REPOSITORY');
+    gitDirRaw = git(project, ['rev-parse', '--git-dir'], 'NOT_A_GIT_REPOSITORY');
   } catch (error) {
     if (error.code === 'NOT_A_GIT_REPOSITORY') throw extensionError('runtime commands require a Git working repository', 'NOT_A_GIT_REPOSITORY');
     throw error;
@@ -119,11 +129,14 @@ function repository(projectDir) {
   const commonCandidate = path.resolve(project, commonRaw);
   if (!existsSync(commonCandidate) || !lstatSync(commonCandidate).isDirectory()) throw extensionError('Git common directory is unavailable', 'NOT_A_GIT_REPOSITORY');
   const commonDir = realpathSync(commonCandidate);
-  const primaryRaw = git(project, ['worktree', 'list', '--porcelain']);
-  const first = primaryRaw.split('\n').find((line) => line.startsWith('worktree '));
+  const gitDirCandidate = path.resolve(project, gitDirRaw);
+  if (!existsSync(gitDirCandidate) || !lstatSync(gitDirCandidate).isDirectory()) throw extensionError('Git directory is unavailable', 'NOT_A_GIT_REPOSITORY');
+  const gitDir = realpathSync(gitDirCandidate);
   const rootPath = realpathSync(path.resolve(root));
-  const primary = first ? realpathSync(path.resolve(first.slice('worktree '.length))) : null;
-  if (!primary || project !== rootPath || rootPath !== primary) {
+  // In a linked worktree, --git-dir is .git/worktrees/<id>, not the common
+  // directory. This identity check avoids textual /tmp, drive-letter and case
+  // differences while retaining the primary-checkout-only rule.
+  if (!samePath(project, rootPath) || !samePath(gitDir, commonDir)) {
     throw extensionError('runtime commands must run from the primary Git checkout root, not a subdirectory or linked worktree', 'RUNTIME_PRIMARY_CHECKOUT_REQUIRED');
   }
   return { project, root: rootPath, commonDir };

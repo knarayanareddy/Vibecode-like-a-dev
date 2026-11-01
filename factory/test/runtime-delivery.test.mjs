@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -65,7 +65,11 @@ function fixture(t) {
 async function changesReady(value) {
   const agent = await runRuntimeAgent({ missionFile: value.missionFile, packageId: 'delivery-work', policyFile: 'agent-policy.json', leaseToken: value.allocated.leaseToken, projectDir: value.project });
   assert.equal(agent.ok, true);
-  const workspace = git(value.project, ['worktree', 'list', '--porcelain']).split('\n').find((line) => line.startsWith('worktree ') && line !== `worktree ${value.project}`)?.slice('worktree '.length);
+  const primary = realpathSync(value.project);
+  const workspace = git(value.project, ['worktree', 'list', '--porcelain']).split('\n')
+    .filter((line) => line.startsWith('worktree '))
+    .map((line) => line.slice('worktree '.length))
+    .find((entry) => realpathSync(entry) !== primary);
   return { agent, workspace };
 }
 

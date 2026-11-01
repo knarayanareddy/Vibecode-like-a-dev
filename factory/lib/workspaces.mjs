@@ -33,6 +33,14 @@ function isWithin(root, candidate) {
   return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
 }
 
+function samePath(left, right) {
+  const normalizedLeft = path.resolve(left);
+  const normalizedRight = path.resolve(right);
+  return process.platform === 'win32'
+    ? normalizedLeft.toLocaleLowerCase('en-US') === normalizedRight.toLocaleLowerCase('en-US')
+    : normalizedLeft === normalizedRight;
+}
+
 function displayRelative(root, target) {
   return path.relative(root, target).split(path.sep).join('/');
 }
@@ -68,9 +76,11 @@ function repository(projectDir) {
   const project = realpathSync(ensureProjectDir(projectDir));
   let root;
   let commonRaw;
+  let gitDirRaw;
   try {
     root = git(project, ['rev-parse', '--show-toplevel'], 'NOT_A_GIT_REPOSITORY');
     commonRaw = git(project, ['rev-parse', '--git-common-dir'], 'NOT_A_GIT_REPOSITORY');
+    gitDirRaw = git(project, ['rev-parse', '--git-dir'], 'NOT_A_GIT_REPOSITORY');
   } catch (error) {
     if (error.code === 'NOT_A_GIT_REPOSITORY') throw extensionError('workspace commands require a Git working repository', 'NOT_A_GIT_REPOSITORY');
     throw error;
@@ -78,7 +88,10 @@ function repository(projectDir) {
   const commonCandidate = path.resolve(project, commonRaw);
   if (!existsSync(commonCandidate) || !lstatSync(commonCandidate).isDirectory()) throw extensionError('Git common directory is unavailable', 'NOT_A_GIT_REPOSITORY');
   const commonDir = realpathSync(commonCandidate);
-  return { project, root: realpathSync(path.resolve(root)), commonDir };
+  const gitDirCandidate = path.resolve(project, gitDirRaw);
+  if (!existsSync(gitDirCandidate) || !lstatSync(gitDirCandidate).isDirectory()) throw extensionError('Git directory is unavailable', 'NOT_A_GIT_REPOSITORY');
+  const gitDir = realpathSync(gitDirCandidate);
+  return { project, root: realpathSync(path.resolve(root)), commonDir, gitDir };
 }
 
 function workspaceRoot(repo) {
@@ -163,7 +176,7 @@ function primaryWorkspaceRepository(projectDir) {
   const repo = repository(projectDir);
   const primary = listWorktrees(repo)[0];
   if (!primary || primary.bare || !primary.path) throw extensionError('workspace commands require a primary Git working checkout', 'NOT_A_GIT_REPOSITORY');
-  if (repo.project !== repo.root || repo.root !== primary.path) {
+  if (!samePath(repo.project, repo.root) || !samePath(repo.gitDir, repo.commonDir) || !samePath(repo.root, primary.path)) {
     throw extensionError('workspace commands must run from the primary Git checkout root, not a subdirectory or linked worktree', 'WORKSPACE_PRIMARY_CHECKOUT_REQUIRED');
   }
   return repo;
