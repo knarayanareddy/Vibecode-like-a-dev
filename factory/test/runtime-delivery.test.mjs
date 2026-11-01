@@ -10,7 +10,10 @@ import { fileURLToPath } from 'node:url';
 import { createMission } from '../lib/missions.mjs';
 import { defaultDeliveryPolicy, validateDeliveryPolicy } from '../lib/delivery-policy.mjs';
 import { approveRuntimeDeliveryCandidate, queueRuntimeDeliveryCandidate, runtimeDeliveryStatus, submitRuntimeDeliveryCandidate, verifyRuntimeDeliveryCandidate } from '../lib/runtime-delivery.mjs';
-import { allocateRuntimePackage, initializeRuntime, runtimeDebugPaths } from '../lib/runtime.mjs';
+import { allocateRuntimePackage, initializeRuntime, recordRuntimeForgePlan, runtimeDebugPaths, runtimeStatus } from '../lib/runtime.mjs';
+import { exportRuntimeForgePlan, prepareRuntimeForgePlan, writeRuntimeForgePlan } from '../lib/runtime-forge.mjs';
+import { digest } from '../lib/extension-utils.mjs';
+import { requestGitHubMerge } from '../integrations/github-v1/index.mjs';
 import { runRuntimeAgent } from '../lib/runtime-agent.mjs';
 import { createWorkspace } from '../lib/workspaces.mjs';
 
@@ -66,7 +69,7 @@ async function changesReady(value) {
   return { agent, workspace };
 }
 
-test('M5 freezes the allocated branch head, verifies it in a removed detached worktree, then binds independent approval and a queue receipt', async (t) => {
+test('M5 delivery foundation and M8.1 forge export bind only a verified approved queued tuple', async (t) => {
   const value = fixture(t);
   const { agent, workspace } = await changesReady(value);
   const candidateSha = git(workspace, ['rev-parse', 'HEAD']);
@@ -95,6 +98,97 @@ test('M5 freezes the allocated branch head, verifies it in a removed detached wo
   const cli = JSON.parse(execFileSync(process.execPath, [CLI, 'runtime', 'delivery', 'status', value.missionFile, '--project', value.project, '--json'], { encoding: 'utf8' }));
   assert.equal(cli.delivery.length, 4, 'public CLI exposes only Runtime-derived delivery receipts');
   assert.equal(JSON.stringify(cli).includes(value.allocated.leaseToken), false);
+
+  const forgeRequest = {
+    missionFile: value.missionFile,
+    packageId: 'delivery-work',
+    candidateId: submitted.candidate.id,
+    repository: 'example/vld-runtime',
+    headRef: 'vld/delivery-work',
+    requiredChecks: ['lint', 'packet-check'],
+    projectDir: value.project,
+    now: '2026-11-01T00:00:00.000Z'
+  };
+  const prepared = prepareRuntimeForgePlan(forgeRequest);
+  assert.equal(prepared.plan.allowMergeRequest, false, 'offline export plans can never authorize merge requests');
+  assert.equal(prepared.plan.headSha, submitted.candidate.candidateSha);
+  assert.equal(prepared.forge.queueId, queued.queue.id);
+  assert.equal(prepared.forge.verificationDigest.length, 64);
+  assert.equal(prepared.plan.requiredChecks.join(','), 'lint,packet-check');
+
+  const dryRun = JSON.parse(execFileSync(process.execPath, [CLI, 'runtime', 'forge', 'plan-export', value.missionFile, 'delivery-work', '--project', value.project, '--candidate', submitted.candidate.id, '--actor', 'release-approver:release-gamma', '--repository', 'example/vld-runtime', '--head-ref', 'vld/delivery-work', '--checks', 'packet-check,lint', '--dry-run', '--json'], { encoding: 'utf8' }));
+  assert.equal(dryRun.dryRun, true);
+  assert.equal(runtimeDeliveryStatus({ missionFile: value.missionFile, projectDir: value.project }).delivery.length, 4, 'dry run writes neither a receipt nor an output file');
+
+  const unsignedPlan = { ...prepared.plan };
+  delete unsignedPlan.digest;
+  const credentialPlan = { ...unsignedPlan, body: 'authorization: fictional-value', digest: digest({ ...unsignedPlan, body: 'authorization: fictional-value' }) };
+  await assert.rejects(
+    async () => recordRuntimeForgePlan({ missionFile: value.missionFile, packageId: 'delivery-work', projectDir: value.project, actor: { role: 'release-approver', id: 'release-gamma' }, forge: { ...prepared.forge, plan: credentialPlan } }),
+    (error) => error.code === 'INVALID_RUNTIME_FORGE_RECEIPT'
+  );
+  await assert.rejects(
+    async () => recordRuntimeForgePlan({ missionFile: value.missionFile, packageId: 'delivery-work', projectDir: value.project, actor: { role: 'release-approver', id: 'release-gamma' }, forge: { ...prepared.forge, candidateSha: '0'.repeat(40) } }),
+    (error) => error.code === 'INVALID_RUNTIME_FORGE_RECEIPT'
+  );
+  const hostPathPlan = { ...unsignedPlan, title: `/tmp/${prepared.candidateId}`, digest: digest({ ...unsignedPlan, title: `/tmp/${prepared.candidateId}` }) };
+  await assert.rejects(
+    async () => recordRuntimeForgePlan({ missionFile: value.missionFile, packageId: 'delivery-work', projectDir: value.project, actor: { role: 'release-approver', id: 'release-gamma' }, forge: { ...prepared.forge, plan: hostPathPlan } }),
+    (error) => error.code === 'INVALID_RUNTIME_FORGE_RECEIPT'
+  );
+  await assert.rejects(
+    async () => recordRuntimeForgePlan({ missionFile: value.missionFile, packageId: 'delivery-work', projectDir: value.project, actor: { role: 'reviewer', id: 'reviewer-beta' }, forge: prepared.forge }),
+    (error) => error.code === 'RUNTIME_ACTOR_FORBIDDEN'
+  );
+
+  const exported = exportRuntimeForgePlan({ ...forgeRequest, actor: { role: 'release-approver', id: 'release-gamma' } });
+  assert.equal(exported.changed, true);
+  assert.equal(exported.forge.id, prepared.forge.id);
+  const replay = exportRuntimeForgePlan({ ...forgeRequest, now: '2026-11-02T00:00:00.000Z', actor: { role: 'release-approver', id: 'release-gamma' } });
+  assert.equal(replay.changed, false, 'the same evidence and plan replays the original durable receipt');
+  assert.equal(replay.forge.exportedAt, exported.forge.exportedAt);
+  let providerCalls = 0;
+  await assert.rejects(
+    async () => requestGitHubMerge({ client: { request() { providerCalls += 1; } }, plan: exported.plan, pullNumber: 7 }),
+    (error) => error.code === 'GITHUB_MERGE_NOT_ALLOWED'
+  );
+  assert.equal(providerCalls, 0, 'a safe exported plan cannot initiate a provider request');
+  await assert.rejects(
+    async () => writeRuntimeForgePlan({ projectDir: value.project, outFile: '.vld/forge.json', plan: exported.plan }),
+    (error) => error.code === 'INVALID_RUNTIME_FORGE_PATH'
+  );
+
+  const cliPlan = JSON.parse(execFileSync(process.execPath, [CLI, 'runtime', 'forge', 'plan-export', value.missionFile, 'delivery-work', '--project', value.project, '--candidate', submitted.candidate.id, '--actor', 'release-approver:release-gamma', '--repository', 'example/vld-runtime', '--head-ref', 'vld/delivery-work', '--checks', 'packet-check,lint', '--out', 'review/forge-plan.json', '--json'], { encoding: 'utf8' }));
+  assert.equal(cliPlan.changed, false, 'CLI plan export uses the replay-validated receipt');
+  assert.equal(cliPlan.output.file, 'review/forge-plan.json');
+  const writtenPlan = JSON.parse(readFileSync(path.join(value.project, 'review', 'forge-plan.json'), 'utf8'));
+  assert.deepEqual(writtenPlan, exported.plan, 'CLI writes the exact reviewed immutable plan');
+  assert.equal(JSON.stringify(cliPlan).includes(value.project), false, 'public output never contains project paths');
+
+  const forgeStatus = runtimeDeliveryStatus({ missionFile: value.missionFile, projectDir: value.project });
+  assert.equal(forgeStatus.delivery.length, 5);
+  assert.equal(forgeStatus.delivery.at(-1).forge.plan.digest, exported.plan.digest);
+  const forgeLedger = readFileSync(runtimeDebugPaths({ missionFile: value.missionFile, projectDir: value.project }).events, 'utf8');
+  assert.equal(forgeLedger.includes(value.project), false, 'forge ledger has no project path');
+  assert.equal(forgeLedger.includes('fictional-value'), false, 'forge ledger rejects credential-like material');
+  assert.equal(forgeLedger.includes('gh auth'), false);
+
+  writeFileSync(path.join(value.project, 'authority-change.txt'), 'target moved\n');
+  git(value.project, ['add', 'authority-change.txt']);
+  git(value.project, ['commit', '-qm', 'move frozen target']);
+  await assert.rejects(
+    async () => prepareRuntimeForgePlan(forgeRequest),
+    (error) => error.code === 'STALE_MISSION'
+  );
+
+  const eventsPath = runtimeDebugPaths({ missionFile: value.missionFile, projectDir: value.project }).events;
+  const tampered = readFileSync(eventsPath, 'utf8').trimEnd().split('\n').map((line) => JSON.parse(line));
+  tampered.at(-1).forge.plan.title = 'tampered approved plan';
+  writeFileSync(eventsPath, `${tampered.map((event) => JSON.stringify(event)).join('\n')}\n`);
+  await assert.rejects(
+    async () => runtimeStatus({ missionFile: value.missionFile, projectDir: value.project }),
+    (error) => error.code === 'INVALID_RUNTIME_LEDGER'
+  );
 });
 
 test('M5 blocks a candidate when its integrated packet digest differs and retains only a bounded check receipt', async (t) => {

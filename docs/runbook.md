@@ -67,6 +67,16 @@ verification/review path. Revoke or rotate the caller's GitHub credential throug
 GitHub—not VLD—because VLD never stores it. GitHub branch protection and
 organization authorization remain external enforcement points.
 
+`vld runtime forge plan-export` is not a GitHub operation: it creates a local,
+merge-disabled plan and a durable Runtime receipt only. If an exported plan is
+wrong, missing, or its output file was not written, do not hand-edit
+`.vld/runtime` or reinterpret an existing receipt. Inspect `vld runtime delivery
+status`, retain the plan digest/receipt ID for audit, and either write a new review
+file from the same replayed plan or start a new reviewed mission after authority
+changes. A stale-mission or tuple mismatch is a stop signal, not a reason to use
+ambient `gh` authentication. The command never reads credentials or contacts a
+forge, so credential rotation and any real PR/merge incident remain GitHub-side.
+
 ## What this document does not cover
 
 Nothing runs as a service, so there is no availability incident to run down. If that
