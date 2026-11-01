@@ -485,6 +485,7 @@ Turn a candidate commit into a frozen, independently reviewed and revalidated me
 - [x] Reject responses missing expected branch/SHA/PR identity and reject a tampered immutable forge-plan digest (M8 foundation test).
 - [x] Normalize no-token/rate-limit/network/malformed/ambiguous-merge failures without ambient auth or remote calls in CI (M8 foundation test); webhook replay fixture remains to add.
 - [x] Test Runtime forge-plan receipt validation/replay against valid exact tuples, altered plan digests/tuple fields, stale mission authority, credential/path rejection and a CLI-written review plan; prove the safe plan cannot invoke a merge request (M8.1 test).
+- [x] Run a public complex-profile information-flow fixture from all supported traits/risk flags and overlays through bundle/module/agent-handoff setup, compile/verify/exports/artifact initialization, mission/workspace/Runtime delivery and merge-disabled forge-plan export. Assert packet digest and immutable candidate/verification/approval/queue/forge identities are preserved end to end without network or credentials (M8.1 test).
 - [ ] Use an optional manually triggered ephemeral GitHub repository test with least-privilege test credentials; never run it in ordinary CI.
 - [x] Preserve GitHub branch protection as an external enforcement point: the optional client only requests the exact-SHA merge after plan gates and never pushes/claims authorization (M8 foundation/ADR).
 
