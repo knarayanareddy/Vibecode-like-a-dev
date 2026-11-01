@@ -458,12 +458,16 @@ function isRealDirectoryTree(root, candidate) {
 function registeredLinkedWorktree(allocationPath, commonDir) {
   try {
     const checkout = repository(allocationPath);
-    if (!samePath(checkout.commonDir, commonDir) || samePath(checkout.gitDir, checkout.commonDir)) return null;
+    const commonDirMatches = samePath(checkout.commonDir, commonDir);
+    const separateGitDir = !samePath(checkout.gitDir, checkout.commonDir);
+    if (!commonDirMatches || !separateGitDir) {
+      return { worktree: null, detail: `Git metadata common-directory match: ${commonDirMatches}; separate linked Git directory: ${separateGitDir}` };
+    }
     let branch = null;
     try { branch = git(allocationPath, ['symbolic-ref', '-q', 'HEAD']); } catch {}
-    return { path: allocationPath, branch, head: git(allocationPath, ['rev-parse', 'HEAD']) };
-  } catch {
-    return null;
+    return { worktree: { path: allocationPath, branch, head: git(allocationPath, ['rev-parse', 'HEAD']) }, detail: null };
+  } catch (error) {
+    return { worktree: null, detail: `Git metadata inspection failed (${typeof error?.code === 'string' ? error.code : 'unknown error'})` };
   }
 }
 
@@ -474,9 +478,10 @@ function healthForAllocation(allocation, worktrees, root, commonDir) {
   if (!isRealDirectoryTree(root, allocationPath)) return { state: 'drifted', detail: 'registered worktree contains a symbolic link or is not a real directory' };
   // Prefer porcelain for normal paths, but do not let its non-canonical Windows
   // spelling turn a newly registered worktree into a false missing result.
-  const worktree = worktrees.find((entry) => sameFilesystemPath(entry.path, allocationPath))
-    ?? registeredLinkedWorktree(allocationPath, commonDir);
-  if (!worktree) return { state: 'missing', detail: 'registered worktree is absent' };
+  const listed = worktrees.find((entry) => sameFilesystemPath(entry.path, allocationPath));
+  const metadata = listed ? null : registeredLinkedWorktree(allocationPath, commonDir);
+  const worktree = listed ?? metadata.worktree;
+  if (!worktree) return { state: 'missing', detail: `registered worktree is absent; porcelain path match: false; ${metadata.detail}` };
   if (worktree.branch !== `refs/heads/${allocation.branch}`) return { state: 'drifted', detail: `expected branch refs/heads/${allocation.branch}, found ${worktree.branch ?? 'detached HEAD'}` };
   if (worktree.head && !COMMIT.test(worktree.head)) return { state: 'drifted', detail: 'worktree has an invalid HEAD' };
   return { state: 'healthy', detail: null };
