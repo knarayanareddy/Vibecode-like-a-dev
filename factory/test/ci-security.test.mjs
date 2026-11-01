@@ -8,7 +8,8 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const read = (...parts) => readFileSync(path.join(ROOT, ...parts), 'utf8');
+// Git may check workflow files out with CRLF on Windows; policy matching is line-ending agnostic.
+const read = (...parts) => readFileSync(path.join(ROOT, ...parts), 'utf8').replace(/\r\n/g, '\n');
 const FULL_SHA = /^[a-f0-9]{40}$/;
 
 function actionReferences(workflow) {
