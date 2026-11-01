@@ -8,7 +8,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
@@ -62,7 +62,10 @@ function gitSucceeds(project, args) {
 }
 
 function repository(projectDir) {
-  const project = ensureProjectDir(projectDir);
+  // macOS may spell a real temporary directory under /private while callers use
+  // its /tmp alias. Compare canonical existing paths so Git's primary worktree
+  // identity remains portable without treating CWD as an authority boundary.
+  const project = realpathSync(ensureProjectDir(projectDir));
   let root;
   let commonRaw;
   try {
@@ -72,9 +75,10 @@ function repository(projectDir) {
     if (error.code === 'NOT_A_GIT_REPOSITORY') throw extensionError('workspace commands require a Git working repository', 'NOT_A_GIT_REPOSITORY');
     throw error;
   }
-  const commonDir = path.resolve(project, commonRaw);
-  if (!existsSync(commonDir) || !lstatSync(commonDir).isDirectory()) throw extensionError('Git common directory is unavailable', 'NOT_A_GIT_REPOSITORY');
-  return { project, root: path.resolve(root), commonDir };
+  const commonCandidate = path.resolve(project, commonRaw);
+  if (!existsSync(commonCandidate) || !lstatSync(commonCandidate).isDirectory()) throw extensionError('Git common directory is unavailable', 'NOT_A_GIT_REPOSITORY');
+  const commonDir = realpathSync(commonCandidate);
+  return { project, root: realpathSync(path.resolve(root)), commonDir };
 }
 
 function workspaceRoot(repo) {

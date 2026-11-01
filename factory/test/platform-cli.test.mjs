@@ -213,7 +213,7 @@ test('public store journey pins a file-backed Git snapshot and reports clean fai
   const assets = await cli(['store', 'assets', 'team-playbook', '--project', consumer, '--json']);
   assert.equal(assets.code, 0, assets.stderr); assert.equal(JSON.parse(assets.stdout).stores[0].assets[0].id, 'review-guidance');
   const copied = await cli(['store', 'copy', 'team-playbook', 'review-guidance', '--project', consumer, '--json']);
-  assert.equal(copied.code, 0, copied.stderr); assert.match(JSON.parse(copied.stdout).output, /docs\/shared\/team-playbook\/review-guidance\.md$/);
+  assert.equal(copied.code, 0, copied.stderr); assert.match(JSON.parse(copied.stdout).output, /docs[\\/]shared[\\/]team-playbook[\\/]review-guidance\.md$/);
 
   writeFileSync(path.join(source, 'review.md'), '# Review\n\nReview changed evidence before release.\n');
   execFileSync('git', ['add', '.'], { cwd: source }); execFileSync('git', ['commit', '-q', '-m', 'refresh candidate'], { cwd: source });
