@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -68,11 +68,13 @@ function fixture(t) {
 async function changesReady(value) {
   const agent = await runRuntimeAgent({ missionFile: value.missionFile, packageId: 'delivery-work', policyFile: 'agent-policy.json', leaseToken: value.allocated.leaseToken, projectDir: value.project });
   assert.equal(agent.ok, true);
-  const primary = realpathSync(value.project);
-  const workspace = git(value.project, ['worktree', 'list', '--porcelain']).split('\n')
+  // Git porcelain lists the primary checkout first. Do not compare its Windows
+  // path spelling with Node's filesystem spelling to locate the linked checkout.
+  const worktrees = git(value.project, ['worktree', 'list', '--porcelain']).split('\n')
     .filter((line) => line.startsWith('worktree '))
-    .map((line) => line.slice('worktree '.length))
-    .find((entry) => realpathSync(entry) !== primary);
+    .map((line) => line.slice('worktree '.length));
+  const workspace = worktrees[1];
+  assert.equal(typeof workspace, 'string', 'fixture creates exactly one linked worktree');
   return { agent, workspace };
 }
 

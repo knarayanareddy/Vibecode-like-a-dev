@@ -299,21 +299,33 @@ function clearStaleLock(repo) {
   return { owner, directory: inspected.directory };
 }
 
+function lockExistsError(repo) {
+  const inspected = inspectWorkspaceLock(repo.project);
+  if (inspected.kind !== 'file') throw extensionError(`workspace lock has an unsafe filesystem type: ${inspected.kind}`, 'INVALID_WORKSPACE_LOCK');
+  const reason = inspected.active ? `pid ${inspected.owner.pid} is active` : 'a stale lock requires `vld workspace recover`';
+  throw extensionError(`workspace repository is locked: ${reason}`, inspected.active ? 'WORKSPACE_LOCKED' : 'STALE_WORKSPACE_LOCK');
+}
+
 function acquireWorkspaceLock(repo, { allowRecovery = false } = {}) {
   const directory = lockPath(repo);
   if (!allowRecovery) assertNoWorkspaceRecovery(repo);
+  // Windows can follow a dangling symbolic link with an exclusive file create.
+  // Refuse every existing node before the create and validate the node again
+  // afterwards, so a lock path can never grant a mutation through a symlink.
+  const existing = inspectWorkspaceLock(repo.project);
+  if (existing.exists) lockExistsError(repo);
   const owner = { schemaVersion: 1, pid: process.pid, token: randomUUID() };
   try {
     writeFileSync(directory, `${JSON.stringify(owner)}\n`, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
   } catch (error) {
-    if (error?.code === 'EEXIST') {
-      const inspected = inspectWorkspaceLock(repo.project);
-      if (inspected.kind !== 'file') throw extensionError(`workspace lock has an unsafe filesystem type: ${inspected.kind}`, 'INVALID_WORKSPACE_LOCK');
-      const reason = inspected.active ? `pid ${inspected.owner.pid} is active` : 'a stale lock requires `vld workspace recover`';
-      throw extensionError(`workspace repository is locked: ${reason}`, inspected.active ? 'WORKSPACE_LOCKED' : 'STALE_WORKSPACE_LOCK');
-    }
+    if (error?.code === 'EEXIST') lockExistsError(repo);
     throw error;
   }
+  let stats;
+  try { stats = lstatSync(directory); } catch { throw extensionError('workspace lock disappeared during acquisition', 'INVALID_WORKSPACE_LOCK'); }
+  if (stats.isSymbolicLink() || !stats.isFile()) throw extensionError('workspace lock has an unsafe filesystem type after acquisition', 'INVALID_WORKSPACE_LOCK');
+  const stored = readWorkspaceLockOwner(directory);
+  if (stored.token !== owner.token) throw extensionError('workspace lock owner changed during acquisition', 'INVALID_WORKSPACE_LOCK');
   if (!allowRecovery) {
     try { assertNoWorkspaceRecovery(repo); } catch (error) { releaseWorkspaceLock(repo, owner); throw error; }
   }
