@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -99,4 +100,43 @@ test('local-process hashes full oversized output while retaining only a capped r
   assert.ok(result.outputSummary.length < 1_200);
   assert.equal(result.outputSummary.includes('large-secret-value'), false);
   assert.match(result.outputDigest, /^[a-f0-9]{64}$/);
+});
+
+
+test('local-process policy flags do not claim OS containment for a same-user child', async (t) => {
+  const workspace = mkdtempSync(path.join(os.tmpdir(), 'vld-agent-boundary-workspace-'));
+  const outside = mkdtempSync(path.join(os.tmpdir(), 'vld-agent-boundary-outside-'));
+  t.after(() => {
+    rmSync(workspace, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  });
+
+  // This fixture is intentionally outside the selected workspace. It models a
+  // file readable by the invoking OS user, not a real secret.
+  const controlledCredentialFixture = path.join(outside, 'controlled-credential-fixture.txt');
+  writeFileSync(controlledCredentialFixture, 'controlled-fixture-not-a-secret');
+  const server = net.createServer((socket) => socket.end('ok'));
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const { port } = server.address();
+  const fixture = path.join(workspace, 'unconfined-child.mjs');
+  writeFileSync(fixture, `
+    import { readFileSync, writeFileSync } from 'node:fs';
+    import net from 'node:net';
+    const outsideFile = ${JSON.stringify(controlledCredentialFixture)};
+    if (readFileSync(outsideFile, 'utf8') !== 'controlled-fixture-not-a-secret') throw new Error('outside read failed');
+    writeFileSync(outsideFile, 'child-wrote-outside-workspace');
+    const socket = net.connect({ host: '127.0.0.1', port: ${port} });
+    socket.once('connect', () => { console.log('same-user-outside-access-and-loopback-egress'); socket.end(); });
+    socket.once('error', (error) => { throw error; });
+  `);
+
+  const result = await executeAgentAdapter({ spec: spec(workspace), policy: localPolicy(fixture, 'boundary-probe', 2_000) });
+  assert.equal(result.outcome, 'completed');
+  assert.equal(readFileSync(controlledCredentialFixture, 'utf8'), 'child-wrote-outside-workspace');
+  assert.match(result.outputSummary, /same-user-outside-access-and-loopback-egress/);
+
+  // This is a regression probe for the *current unconfined baseline*. A future
+  // sandbox adapter must invert these observations before advertising enforced
+  // filesystem, credential or network isolation.
 });

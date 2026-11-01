@@ -211,7 +211,7 @@ vld workflow run discovery --execute
 | **Interoperability exports** | Bounded Spec Kit and Kiro layouts from a compiled packet | Generated one-way views carry source digest/provenance and state plainly that packet/change manifests remain authoritative. |
 | **Manual workspaces** | One Git worktree/branch for each frozen mission package | Repository-wide exclusive lock, sibling managed root, current-mission gate and recovery-aware cleanup; this is not an agent executor or merge-conflict guarantee. |
 | **Local Runtime state** | Durable lifecycle, leases and receipts for a frozen mission | Versioned ledger/snapshot, expected versions, idempotency and loopback-only API; it has no implicit process/model/network/credential authority. |
-| **Scoped adapter host** | Deterministic fake runs and one explicit read-only local argv | Separate closed policy, healthy M2 workspace + M3 lease gate, clean environment, output redaction and host-owned receipt; no shell, push, merge, candidate or sandbox-write claim. |
+| **Scoped adapter host** | Deterministic fake runs and one explicit unconfined local argv | Separate closed policy, healthy M2 workspace + M3 lease gate, clean environment and host-owned receipt; no shell, Runtime writes, push, merge or candidate authority. CWD/policy flags are not OS confinement. |
 | **Frozen delivery candidate** | Exact candidate tuple, detached packet integration, independent review and local queue | Runtime validates allocated branch/base ancestry and a live lease; a closed policy permits only in-process packet verification. It records bounded receipts and performs no project command, merge, push, PR, provider or credential action. |
 | **Local Studio** | Browser dashboard and VS Code command entry over the loopback Runtime API | Per-response nonce CSP, manual in-memory bearer token and text-only rendering; Studio has no Git, agent, shell, workspace-file, merge or forge authority. |
 | **Signed content catalog** | Curated, Git-fetched but Ed25519-verified inert content packages | An explicit local trust root verifies threshold-signed canonical index/package metadata, expiry, identity, compatibility and payload digests before cache/lock/copy; v1 never executes or enables content. |
@@ -294,9 +294,9 @@ vld runtime recover missions/report-export/mission.json --project .
 
 The fixed M3 policy denies network, process execution, Git push/merge and credential access. The host validates the lifecycle (`ready → allocated → running → changes_ready → verifying → in_review → approved → queued → merged`), roles, independent review, expected version and lease token before a receipt is appended. The loopback JSON API requires a bearer token, caps request bodies and rejects non-loopback browser Origins. Actor identities are deterministic local/fake identities in M3—not an agent adapter or external human authentication system. See [ADR-0005](docs/adr/0005-local-runtime-host-and-fake-run-state.md) for boundaries and recovery semantics.
 
-### Scoped adapter host — explicit fake or read-only local process
+### Scoped adapter host — explicit fake or unconfined local process
 
-M4 adds a separate, opt-in `runtime agent` surface. It requires **both** an M3 allocation/lease and an existing healthy M2 worktree. A reviewed, closed JSON policy selects either a deterministic process-free `fake` adapter or one exact `local-process` executable/argv. The Runtime, not the adapter, moves the package to `running`, writes a digest-linked/redacted receipt, then advances a successful run to `changes_ready` or blocks an unsuccessful run.
+M4 adds a separate, opt-in `runtime agent` surface. It requires **both** an M3 allocation/lease and an existing healthy M2 worktree. A reviewed, closed JSON policy selects either a deterministic process-free `fake` adapter or one exact `local-process` executable/argv. The Runtime, not the adapter, moves the package to `running`, writes metadata-only digest/byte-count/outcome evidence, then advances a successful run to `changes_ready` or blocks an unsuccessful run.
 
 ```bash
 # First allocate the worktree and M3 package as above, then author/review a policy
@@ -309,7 +309,7 @@ vld runtime agent run missions/report-export/mission.json export-api \
 vld runtime agent status missions/report-export/mission.json --project .
 ```
 
-`local-process` has no shell, PATH lookup or inherited environment; it gets only a fresh non-secret locale allowlist and VLD-derived IDs. A process CWD is **not** a sandbox, so this release rejects write-capable local-process policies rather than claiming a coding agent is confined. Fake runs are the deterministic CI path; a future sandbox adapter must prove filesystem/process/network isolation before VLD can grant process writes. Neither adapter can submit a candidate, verify project checks, approve, push, merge, open a PR or change policy. See [ADR-0006](docs/adr/0006-scoped-agent-adapter-host.md).
+`local-process` has no shell, PATH lookup or inherited environment; it gets only a fresh non-secret locale allowlist and VLD-derived IDs. It is nevertheless an **unconfined host process**: `read-only`, `network: false` and `credentialAccess: false` deny VLD authority and inherited environment values, but do **not** stop the executable from using files, credentials or network access available to the invoking OS user. A process CWD is **not** a sandbox, so this release rejects write-capable local-process policies and never treats those flags as OS enforcement. Fake runs are the deterministic CI path; a future sandbox adapter must prove outside-workspace filesystem denial, credential-fixture denial, network-egress denial and process-execution controls before VLD can grant sandboxed writes or claim enforced isolation. Neither adapter can submit a candidate, verify project checks, approve, push, merge, open a PR or change policy. See [ADR-0006](docs/adr/0006-scoped-agent-adapter-host.md).
 
 ### Frozen delivery candidates — exact local review handoff, not a merge engine
 
@@ -608,6 +608,10 @@ Run one provider/model/configuration at a time from the same commit, retain the 
 
 Live output is empirical evidence for the exact agent version, command, model and date that produced it; it is not a deterministic release gate. Preserve the raw JSON plus a short human-authored run note naming that configuration and any retries/failures. The generated Spec Kit/Kiro exports are portability aids, not a fourth benchmark arm or competing requirement source.
 
+#### Approval-gated GitHub benchmark
+
+The **live-agent benchmark** workflow is `workflow_dispatch` only; it is not triggered by a push or pull request and is never a required merge check. Before allowing a run, repository administrators must create the protected `live-agent-benchmark` environment, require reviewers, and add the matching `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` environment secret (optional base-URL secrets are supported). An approved operator selects only `openai` or `anthropic`, supplies an exact model identifier and a bounded task filter. The workflow uploads `outcome-report.json` and `provenance.json` containing the commit, workflow run/attempt, runner image/OS, Node version, provider/model/task inputs and timestamp. Treat this artifact as outcome evidence for that exact configuration—not as evidence supplied by deterministic calibration.
+
 ## Does it hold up? Ten ideas, judged
 
 `npm run stress` runs two suites: ten representative ideas, then twenty adversarial ones plus six profiles that must be **refused** cleanly. Together they score packets for things `verify` cannot see: does a Python service get pytest, does a library get told to rate-limit endpoints, does a packet point at a document it does not ship, can an idea forge a heading in a generated document, does a Rust project get handed `npm run lint`, how much of the idea actually reached the requirements.
@@ -689,7 +693,7 @@ factory/
     gate-runner.mjs    the gate checker shipped into every packet
   schema/
     spec.schema.json   the manifest contract
-  test/                179 tests: data integrity, planning, reproducibility, adoption,
+  test/                Node test suite: data integrity, planning, reproducibility, adoption,
                        delta specs, overlays, gates, EARS, MCP protocol, routing & outcome evals
 profile.json           this repository's own profile
 specs/                 this repository's own compiled packet, guarded in CI
@@ -707,11 +711,15 @@ docs/                  research notes, authoring guide, stress test, landscape s
 ```
 
 ```bash
-npm test        # 179 tests
+npm test        # complete Node test suite
 npm run eval    # library health + packet specificity + 74-prompt routing + 24-task outcome calibration
 npm run stress  # 10 representative + 24 hostile ideas, and 6 refusals; scored on soundness
 npm run check   # lint + index + tests + verify + self-guard + gates + eval + stress
 ```
+
+### Supported runtime and platform scope
+
+The dependency-free CLI and Node test suite support **Node 22** on Linux, macOS and Windows. CI runs the full portable `npm test` suite on `ubuntu-latest`, `macos-latest` and `windows-latest`; the Linux job additionally runs the shell-heavy package/install, Git-fixture and integration journey. Those portable checks validate CLI/runtime behavior, not OS sandbox equivalence: `local-process` and ACP peers are unconfined same-user host processes on every supported OS until a separately reviewed sandbox adapter proves enforced filesystem, credential, network and process isolation.
 
 ## Honest limitations
 
@@ -739,7 +747,7 @@ Shipped in v0.10: a packed-install CI journey, reviewable Git-store refresh prev
 Shipped in v0.11: versioned `vld mission init|validate|status`, which freezes a verified packet, Core-policy digest and immutable Git target into complete requirement-linked work packages without starting an agent or changing Git state.
 Shipped in v0.12: `vld workspace create|status|recover|remove`, a manually operated, repository-serialized Git worktree allocator derived only from a current frozen mission. It uses a sibling managed root, atomic recovery-aware locking and exact acknowledged discard; it does not add model/process execution, push, merge or GitHub integration.
 Shipped in v0.13: optional `vld runtime` host state for a frozen mission: versioned JSONL receipts plus an atomically checked snapshot, leases, role/version/idempotency validation, expiry recovery and a bearer-protected loopback API.
-Shipped in v0.14: `vld runtime agent run|status`, with deterministic fake runs and a policy-declared, direct-argv read-only local-process adapter. The host requires an M2 workspace and M3 lease, never inherits parent credentials, redacts output/path data and retains host-owned receipts. It deliberately does not claim CWD confinement as a write sandbox, and has no candidate, verification, review, push, merge, PR or GitHub/ACP integration.
+Shipped in v0.14: `vld runtime agent run|status`, with deterministic fake runs and a policy-declared, direct-argv unconfined local-process adapter. The host requires an M2 workspace and M3 lease, never inherits parent credentials, and retains host-owned metadata-only receipts. It deliberately does not claim CWD, `read-only`, network or credential policy flags provide OS confinement, and has no candidate, verification, review, push, merge, PR or GitHub/ACP integration.
 Shipped in v0.15: `vld runtime delivery submit|verify|approve|queue|status`, an exact-SHA local candidate/review foundation. It validates allocated-branch/base ancestry, uses one temporary detached integration worktree and a closed in-process packet check, records digest-bound independent review/queue receipts, and intentionally has no project-command, merge, push, PR, forge or credential capability.
 Shipped in v0.16: `vld studio serve` and the Runtime `/studio` dashboard, plus a VS Code command-entry extension. The static local client displays Runtime packet/mission/lease/receipt state through the existing authenticated loopback API, has a nonce CSP and text-only rendering, and can request only typed Runtime allocation/recovery actions—never Git, an agent, a shell, merge or forge work.
 Shipped in v0.17: `vld catalog trust|add|diff|update|status|copy`, a separately locked Ed25519 threshold-signed catalog of bounded inert content. An explicit local root validates canonical index/package metadata, expiry, compatibility, publisher and every payload digest before cache/lock/copy; Git transport cannot confer trust, and catalog content cannot execute or enable itself.

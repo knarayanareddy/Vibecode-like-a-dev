@@ -4,8 +4,9 @@
  * The fake adapter is deterministic and has no host-process authority. The
  * local-process adapter starts exactly one policy-declared executable using
  * direct argv spawning; it never uses a shell, PATH search or inherited env.
- * A portable process CWD is not a filesystem sandbox, so local-process is
- * deliberately read-only until a separately reviewed sandbox adapter exists.
+ * A portable process CWD is not a filesystem/network/credential sandbox.
+ * `local-process` is an unconfined host process with no VLD workspace-write
+ * authority until a separately reviewed OS sandbox adapter exists.
  */
 
 import { createHash } from 'node:crypto';
@@ -44,6 +45,7 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+/** Validate the selected CWD only; this does not constrain child filesystem access. */
 function workspaceDirectory(value) {
   if (typeof value !== 'string' || !path.isAbsolute(value) || !existsSync(value)) throw extensionError('agent workspace is unavailable', 'AGENT_WORKSPACE_UNAVAILABLE');
   const stats = lstatSync(value);

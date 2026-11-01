@@ -28,7 +28,7 @@ test('M4 fake agent policy is closed, canonical and has no process/network/crede
   assert.equal(validateAgentPolicy(broadened).ok, false);
 });
 
-test('M4 local-process policy is explicit one-argv, read-only and denies unsafe environment or write claims', (t) => {
+test('M4 local-process policy is explicit one-argv, no VLD workspace-write authority and rejects unsafe environment/write claims', (t) => {
   const policy = {
     schemaVersion: 1,
     id: 'fixture-process',
@@ -56,7 +56,9 @@ test('M4 local-process policy is explicit one-argv, read-only and denies unsafe 
   writes.mode = 'write-workspace';
   writes.capabilities.writeWorkspace = true;
   writes.capabilities.sandbox = true;
-  assert.equal(validateAgentPolicy(writes).ok, false, 'CWD is not misrepresented as a sandbox');
+  const checkedWrites = validateAgentPolicy(writes);
+  assert.equal(checkedWrites.ok, false, 'CWD is not misrepresented as a sandbox');
+  assert.match(checkedWrites.errors.join('\n'), /unconfined host process/);
   const inherited = structuredClone(policy);
   inherited.environment.PARENT_SECRET = 'should-not-pass';
   assert.equal(validateAgentPolicy(inherited).ok, false);

@@ -1,17 +1,23 @@
 name: check
 
+# Every PR check is deterministic and unprivileged. Live provider evaluation lives
+# in live-agent-benchmark.yml and must be explicitly approved.
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]
   pull_request:
 
 jobs:
-  check:
+  core:
+    name: Linux core specification checks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
 
@@ -55,23 +61,26 @@ jobs:
       - name: This repository passes its own drift guard
         run: node specs/spec-check.mjs --repo . --strict
 
-      - name: Library eval (discoverability, collisions, discrimination)
-        run: node scripts/eval-library.mjs
+      - name: Generated packet is in sync with the generator
+        run: |
+          node factory/cli.mjs compile examples/retro-board/profile.json -o /tmp/spec
+          for f in /tmp/spec/*.md /tmp/spec/spec.json /tmp/spec/AGENTS.md /tmp/spec/spec-check.mjs; do
+            name=$(basename "$f")
+            if ! diff -q "$f" "examples/retro-board/spec/$name" > /dev/null; then
+              echo "::error::examples/retro-board/spec/$name is stale. Run: node factory/cli.mjs compile examples/retro-board/profile.json -o examples/retro-board/spec --force"
+              exit 1
+            fi
+          done
+          echo "example packet is in sync"
 
-      - name: Specificity eval (a packet should not read like a form letter)
-        run: node scripts/eval-specificity.mjs
-
-      - name: MCP routing eval (precision >= 0.90, recall >= 0.70, metadata ablation)
-        run: node scripts/eval-routing.mjs
-
-      - name: Outcome harness (24 tasks x 3 arms, hidden oracles, defect and drift probes)
-        run: node scripts/eval-outcome.mjs
-
-      - name: Ten ideas survive the pipeline
-        run: node scripts/stress-test.mjs
-
-      - name: Twenty hostile ideas and six invalid profiles
-        run: node scripts/stress-adversarial.mjs
+  integration:
+    name: Linux integration fixtures
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
 
       - name: Adoption runs against this repository
         run: node factory/cli.mjs adopt . -o /tmp/self-profile.json --force
@@ -111,6 +120,15 @@ jobs:
           fs.writeFileSync(narrativeFile, fs.readFileSync(narrativeFile, 'utf8').replace('**Status:** Pending', '**Status:** Approved'));
           NODE
           node factory/cli.mjs change verify /tmp/change/out --project "$project"
+
+  packed-distribution:
+    name: Linux packed-install distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
 
       # A source checkout can hide omitted package files or an invalid bin link. Exercise
       # the tarball users receive, including compiler, export, mission, module, artifact and
@@ -222,25 +240,13 @@ jobs:
           "$vld" store update team-playbook --acknowledge "$acknowledgement" --project "$project"
           "$vld" store status team-playbook --project "$project"
 
-      - name: Generated packet is in sync with the generator
-        run: |
-          node factory/cli.mjs compile examples/retro-board/profile.json -o /tmp/spec
-          for f in /tmp/spec/*.md /tmp/spec/spec.json /tmp/spec/AGENTS.md /tmp/spec/spec-check.mjs; do
-            name=$(basename "$f")
-            if ! diff -q "$f" "examples/retro-board/spec/$name" > /dev/null; then
-              echo "::error::examples/retro-board/spec/$name is stale. Run: node factory/cli.mjs compile examples/retro-board/profile.json -o examples/retro-board/spec --force"
-              exit 1
-            fi
-          done
-          echo "example packet is in sync"
-
   acp-v1-bridge:
     name: ACP v1 bridge
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
 
@@ -253,3 +259,90 @@ jobs:
       - name: ACP stable v1 fake-peer bridge
         working-directory: factory/integrations/acp-v1
         run: npm test
+
+  evaluations:
+    name: Evaluation — ${{ matrix.label }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: library health
+            command: node scripts/eval-library.mjs
+          - label: specificity
+            command: node scripts/eval-specificity.mjs
+          - label: MCP routing
+            command: node scripts/eval-routing.mjs
+          - label: deterministic outcome calibration
+            command: node scripts/eval-outcome.mjs
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      # Calibration uses only checked-in fixtures. It is not live-agent evidence.
+      - name: ${{ matrix.label }}
+        run: ${{ matrix.command }}
+
+  stress:
+    name: Stress — ${{ matrix.label }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: representative ideas
+            command: node scripts/stress-test.mjs
+          - label: adversarial ideas and invalid profiles
+            command: node scripts/stress-adversarial.mjs
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - name: ${{ matrix.label }}
+        run: ${{ matrix.command }}
+
+  portable-smoke:
+    name: Portable CLI smoke — ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      # The dependency-free Node CLI and its portable test suite must work under
+      # each supported runner shell. Linux retains the shell-heavy pack journey.
+      - name: Full portable test suite
+        run: npm test
+
+  # Keep this ID stable for branch protection. It only succeeds once every
+  # complete-coverage job above has completed successfully.
+  check:
+    name: check
+    if: ${{ always() }}
+    needs: [core, integration, packed-distribution, acp-v1-bridge, evaluations, stress, portable-smoke]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all validation jobs
+        env:
+          CORE: ${{ needs.core.result }}
+          INTEGRATION: ${{ needs.integration.result }}
+          PACKED_DISTRIBUTION: ${{ needs.packed-distribution.result }}
+          ACP: ${{ needs.acp-v1-bridge.result }}
+          EVALUATIONS: ${{ needs.evaluations.result }}
+          STRESS: ${{ needs.stress.result }}
+          PORTABLE: ${{ needs.portable-smoke.result }}
+        run: |
+          test "$CORE" = success
+          test "$INTEGRATION" = success
+          test "$PACKED_DISTRIBUTION" = success
+          test "$ACP" = success
+          test "$EVALUATIONS" = success
+          test "$STRESS" = success
+          test "$PORTABLE" = success
+          echo "All required validation coverage passed."

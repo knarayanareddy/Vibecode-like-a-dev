@@ -146,11 +146,12 @@ export function validateAgentPolicy(policy) {
     if (policy.adapter === 'local-process' || policy.adapter === 'acp-v1') {
       if (script !== null) errors.push(`${policy.adapter} command.script must be null`);
       if (!safeAbsoluteExecutable(executable)) errors.push(`${policy.adapter} command.executable must be a safe absolute path`);
-      // A bare peer process has no portable filesystem or network containment.
-      // CWD is not a sandbox; ACP v1 retains the same read-only host boundary as
-      // local-process until a separately reviewed sandbox adapter exists.
+      // A bare peer process has no portable filesystem, network or credential
+      // containment. `read-only` means no VLD Runtime write authority, never
+      // that the child is OS-confined. ACP v1 has the same unconfined host
+      // boundary until a separately reviewed sandbox adapter exists.
       if (policy.mode !== 'read-only' || policy.capabilities?.writeWorkspace !== false || policy.capabilities?.sandbox !== false) {
-        errors.push(`${policy.adapter} is read-only until a separately reviewed sandbox adapter is available`);
+        errors.push(`${policy.adapter} is an unconfined host process and cannot receive VLD workspace writes or a sandbox claim`);
       }
       if (policy.capabilities?.runDeclaredCommands !== true) errors.push(`${policy.adapter} requires runDeclaredCommands: true for its one declared argv`);
     }

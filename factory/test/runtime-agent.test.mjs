@@ -157,7 +157,7 @@ test('M4 host turns cancellation into a durable receipt and blocked package', as
   assert.equal(result.status.packages[0].state, 'blocked');
 });
 
-test('M4 host runs one exact read-only local argv and persists metadata-only process evidence', async (t) => {
+test('M4 host runs one exact local argv without VLD workspace-write authority and persists metadata-only process evidence', async (t) => {
   const value = fixture(t);
   const executableFixture = path.join(value.project, 'local-adapter-fixture.mjs');
   const secretField = ['access', 'token'].join('_');
