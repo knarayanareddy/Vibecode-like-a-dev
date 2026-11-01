@@ -449,12 +449,34 @@ function isRealDirectoryTree(root, candidate) {
   }
 }
 
-function healthForAllocation(allocation, worktrees, root) {
+/**
+ * Verify a linked checkout through Git's own metadata when its porcelain output
+ * uses a path spelling Node cannot compare on Windows. A matching common Git
+ * directory plus a distinct per-worktree Git directory proves this is a
+ * registered linked worktree for this repository; it is not a loose copy.
+ */
+function registeredLinkedWorktree(allocationPath, commonDir) {
+  try {
+    const checkout = repository(allocationPath);
+    if (!samePath(checkout.commonDir, commonDir) || samePath(checkout.gitDir, checkout.commonDir)) return null;
+    let branch = null;
+    try { branch = git(allocationPath, ['symbolic-ref', '-q', 'HEAD']); } catch {}
+    return { path: allocationPath, branch, head: git(allocationPath, ['rev-parse', 'HEAD']) };
+  } catch {
+    return null;
+  }
+}
+
+function healthForAllocation(allocation, worktrees, root, commonDir) {
   if (!allocation || typeof allocation.worktree !== 'string') return { state: 'drifted', detail: 'registered allocation has an invalid worktree path' };
   const allocationPath = path.resolve(allocation.worktree);
-  const worktree = worktrees.find((entry) => sameFilesystemPath(entry.path, allocationPath));
-  if (!worktree || !existsSync(allocationPath)) return { state: 'missing', detail: 'registered worktree is absent' };
+  if (!existsSync(allocationPath)) return { state: 'missing', detail: 'registered worktree is absent' };
   if (!isRealDirectoryTree(root, allocationPath)) return { state: 'drifted', detail: 'registered worktree contains a symbolic link or is not a real directory' };
+  // Prefer porcelain for normal paths, but do not let its non-canonical Windows
+  // spelling turn a newly registered worktree into a false missing result.
+  const worktree = worktrees.find((entry) => sameFilesystemPath(entry.path, allocationPath))
+    ?? registeredLinkedWorktree(allocationPath, commonDir);
+  if (!worktree) return { state: 'missing', detail: 'registered worktree is absent' };
   if (worktree.branch !== `refs/heads/${allocation.branch}`) return { state: 'drifted', detail: `expected branch refs/heads/${allocation.branch}, found ${worktree.branch ?? 'detached HEAD'}` };
   if (worktree.head && !COMMIT.test(worktree.head)) return { state: 'drifted', detail: 'worktree has an invalid HEAD' };
   return { state: 'healthy', detail: null };
@@ -525,7 +547,7 @@ export function createWorkspace({ missionFile, packageId, projectDir = '.' } = {
     const missionDigest = digest(mission);
     const existing = state.allocations.find((entry) => entry.missionDigest === missionDigest && entry.packageId === packageId);
     if (existing) {
-      const health = healthForAllocation(existing, worktrees, workspaceRoot(repo));
+      const health = healthForAllocation(existing, worktrees, workspaceRoot(repo), repo.commonDir);
       if (existing.status === 'allocated' && health.state === 'healthy') return { changed: false, allocation: existing, warnings: [] };
       throw extensionError(`work package "${packageId}" has ${existing.status === 'removing' ? 'a pending removal' : `an unhealthy workspace (${health.detail})`}; run vld workspace recover before allocating it again`, 'WORKSPACE_RECOVERY_REQUIRED');
     }
@@ -561,7 +583,7 @@ export function createWorkspace({ missionFile, packageId, projectDir = '.' } = {
         resourceClaims: [...(workPackage.resourceClaims?.paths ?? [])],
         status: 'allocated'
       };
-      const healthy = healthForAllocation(allocation, listWorktrees(repo), workspaceRoot(repo));
+      const healthy = healthForAllocation(allocation, listWorktrees(repo), workspaceRoot(repo), repo.commonDir);
       if (healthy.state !== 'healthy') throw extensionError(`new workspace did not verify: ${healthy.detail}`, 'WORKSPACE_CREATE_FAILED');
       writeWorkspaceState(repo, { ...state, allocations: [...state.allocations, allocation] });
       return { changed: true, allocation, warnings };
@@ -594,7 +616,7 @@ export function workspaceStatus({ missionFile, projectDir = '.' } = {}) {
   const workPackages = Array.isArray(loadedMission.mission?.workPackages) ? loadedMission.mission.workPackages : [];
   const packageStatus = workPackages.map((workPackage) => {
     const allocation = allocations.find((entry) => entry?.packageId === workPackage?.id) ?? null;
-    return { id: workPackage?.id ?? '(invalid package)', allocation, status: allocation ? healthForAllocation(allocation, worktrees, workspaceRoot(repo)) : { state: 'unallocated', detail: null } };
+    return { id: workPackage?.id ?? '(invalid package)', allocation, status: allocation ? healthForAllocation(allocation, worktrees, workspaceRoot(repo), repo.commonDir) : { state: 'unallocated', detail: null } };
   });
   for (const entry of packageStatus) if (entry.status.state !== 'healthy' && entry.status.state !== 'unallocated') warnings.push(`work package "${entry.id}" is ${entry.status.state}: ${entry.status.detail}`);
   const root = workspaceRoot(repo);
@@ -628,7 +650,7 @@ export function runtimeWorkspaceAllocation({ missionFile, packageId, projectDir 
   if (loaded.errors.length) throw extensionError(`workspace state is invalid:\n${loaded.errors.map((error) => `- ${error}`).join('\n')}`, 'INVALID_WORKSPACE_STATE');
   const allocation = loaded.state.allocations.find((entry) => entry.missionDigest === digest(current.mission) && entry.packageId === packageId);
   if (!allocation || allocation.status !== 'allocated') throw extensionError(`work package "${packageId}" has no allocated workspace`, 'WORKSPACE_NOT_FOUND');
-  const health = healthForAllocation(allocation, listWorktrees(repo), workspaceRoot(repo));
+  const health = healthForAllocation(allocation, listWorktrees(repo), workspaceRoot(repo), repo.commonDir);
   if (health.state !== 'healthy') throw extensionError(`workspace is ${health.state}: ${health.detail}; run vld workspace recover`, 'WORKSPACE_RECOVERY_REQUIRED');
   return {
     id: allocation.id,
@@ -724,7 +746,7 @@ export function recoverWorkspaces({ missionFile, projectDir = '.' } = {}) {
         remaining.push(allocation);
         continue;
       }
-      const health = healthForAllocation(allocation, worktrees, workspaceRoot(repo));
+      const health = healthForAllocation(allocation, worktrees, workspaceRoot(repo), repo.commonDir);
       if (health.state === 'healthy') {
         const restored = { ...allocation, status: 'allocated' };
         delete restored.removal;
@@ -765,7 +787,7 @@ export function removeWorkspace({ missionFile, packageId, projectDir = '.', disc
     const allocation = state.allocations.find((entry) => entry.missionDigest === missionDigest && entry.packageId === packageId);
     if (!allocation) throw extensionError(`work package "${packageId}" has no allocated workspace`, 'WORKSPACE_NOT_FOUND');
     if (allocation.status !== 'allocated') throw extensionError(`work package "${packageId}" has a pending removal; run vld workspace recover`, 'WORKSPACE_RECOVERY_REQUIRED');
-    const health = healthForAllocation(allocation, listWorktrees(repo), workspaceRoot(repo));
+    const health = healthForAllocation(allocation, listWorktrees(repo), workspaceRoot(repo), repo.commonDir);
     if (health.state !== 'healthy') throw extensionError(`workspace is ${health.state}: ${health.detail}; run vld workspace recover`, 'WORKSPACE_RECOVERY_REQUIRED');
     const dirty = git(allocation.worktree, ['status', '--porcelain']);
     const tip = branchCommit(repo, allocation.branch);
