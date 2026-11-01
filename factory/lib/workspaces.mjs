@@ -581,7 +581,9 @@ export function createWorkspace({ missionFile, packageId, projectDir = '.' } = {
     mkdirWithoutSymlinks(path.dirname(workspace.directory), 'managed workspace root');
     let created = false;
     try {
-      git(repo.project, ['worktree', 'add', '-b', workspace.branch, workspace.directory, mission.target.commit]);
+      // Packet/catalog digests bind exact bytes. Suppress a caller's checkout-only
+      // line-ending conversion while materializing a verified worktree.
+      git(repo.project, ['-c', 'core.autocrlf=false', '-c', 'core.eol=lf', 'worktree', 'add', '-b', workspace.branch, workspace.directory, mission.target.commit]);
       created = true;
       const allocation = {
         // Deliberately unique per allocation lifetime: a stale discard acknowledgement
@@ -703,7 +705,7 @@ export function withRuntimeIntegrationWorkspace({ missionFile, packageId, candid
     if (!isWithin(root, directory)) throw extensionError('integration worktree path escapes its managed root', 'INVALID_WORKSPACE_ROOT');
     let created = false;
     try {
-      git(repo.project, ['worktree', 'add', '--detach', directory, current.mission.target.commit], 'INTEGRATION_WORKTREE_FAILED');
+      git(repo.project, ['-c', 'core.autocrlf=false', '-c', 'core.eol=lf', 'worktree', 'add', '--detach', directory, current.mission.target.commit], 'INTEGRATION_WORKTREE_FAILED');
       created = true;
       // --no-commit and --no-ff prepare the exact merge result for checks but
       // cannot update any branch. A conflict is a typed result, not an agent job.

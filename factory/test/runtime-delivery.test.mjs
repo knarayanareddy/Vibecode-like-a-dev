@@ -45,6 +45,9 @@ function fixture(t) {
   git(project, ['init', '-q']);
   git(project, ['config', 'user.email', 'delivery@example.invalid']);
   git(project, ['config', 'user.name', 'Delivery Test']);
+  // Proves managed worktree creation keeps signed packet bytes canonical even
+  // when the repository requests Windows-style checkout conversion.
+  git(project, ['config', 'core.autocrlf', 'true']);
   git(project, ['add', 'specs']);
   git(project, ['commit', '-qm', 'packet']);
   const requirements = JSON.parse(readFileSync(path.join(project, 'specs', 'spec.json'), 'utf8')).requirements.map((entry) => entry.id);
