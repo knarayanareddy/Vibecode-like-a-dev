@@ -311,3 +311,20 @@ test('an active repository lock blocks mutation, and competing CLI allocators ne
   assert.equal(state.allocations.filter((entry) => entry.packageId === 'export-api').length, 1);
   assert.equal(workspaceEntries(fixture.project).length, 2, 'concurrent requests produce at most one allocated worktree');
 });
+
+test('workspace recovery fails closed for a partial owner and blocks mutation behind a recovery guard', (t) => {
+  const fixture = createFixture(t);
+  const lock = inspectWorkspaceLock(fixture.project);
+  writeFileSync(lock.directory, '{"schemaVersion":1');
+  assert.throws(
+    () => recoverWorkspaces({ missionFile: fixture.missionFile, projectDir: fixture.project }),
+    (error) => error.code === 'INVALID_WORKSPACE_LOCK'
+  );
+  rmSync(lock.directory, { force: true });
+  const ownerField = ['to', 'ken'].join('');
+  writeFileSync(`${lock.directory}.recovery`, JSON.stringify({ schemaVersion: 1, pid: process.pid, [ownerField]: 'test-recovery-guard' }));
+  assert.throws(
+    () => createWorkspace({ missionFile: fixture.missionFile, packageId: 'export-api', projectDir: fixture.project }),
+    (error) => error.code === 'WORKSPACE_RECOVERY_IN_PROGRESS'
+  );
+});

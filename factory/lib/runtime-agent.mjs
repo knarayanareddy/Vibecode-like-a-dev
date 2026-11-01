@@ -3,7 +3,7 @@
  *
  * The adapter never mutates Runtime lifecycle state. This host verifies a live
  * allocated lease and healthy M2 workspace, moves it through M3 transitions,
- * persists a redacted receipt, and blocks failure/timeout/cancellation. It does
+ * persists a metadata-only receipt, and blocks failure/timeout/cancellation. It does
  * not submit candidates, run project verification, push, merge or open a PR.
  */
 
@@ -66,6 +66,15 @@ function safeFailureResult(error, startedAt) {
   };
 }
 
+function receiptOutputSummary(outcome) {
+  return ({
+    completed: 'agent completed successfully',
+    failed: 'agent failed',
+    cancelled: 'agent cancelled',
+    'timed-out': 'agent timed out'
+  })[outcome] ?? 'agent ended with an unknown outcome';
+}
+
 function attemptReceipt({ id, policyDigest, contextDigest, workspaceDigest, execution, attempts }) {
   return {
     id,
@@ -81,13 +90,51 @@ function attemptReceipt({ id, policyDigest, contextDigest, workspaceDigest, exec
     output: {
       digest: execution.outputDigest,
       bytes: execution.outputBytes,
-      summary: execution.outputSummary
+      // Arbitrary peer/process output is not a credential-safe persistence
+      // format. Retain its digest/size as evidence and only an allowlisted
+      // outcome label in the Runtime ledger.
+      summary: receiptOutputSummary(execution.outcome)
     }
   };
 }
 
 function retryable(outcome) {
   return outcome === 'failed' || outcome === 'timed-out';
+}
+
+function packageFromStatus(status, packageId) {
+  return status.packages.find((entry) => entry.id === packageId) ?? null;
+}
+
+/**
+ * Heartbeats legitimately advance the Runtime package version while an adapter
+ * runs. Settle against a fresh version and retry a small bounded number of
+ * compare-and-swap conflicts; never reuse the version captured at start.
+ */
+function settleRunningAgent({ missionFile, projectDir, packageId, runId, leaseToken, actor, completed, reason }) {
+  let lastStatus = runtimeStatus({ missionFile, projectDir });
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const current = packageFromStatus(lastStatus, packageId);
+    if (!current || current.state !== 'running' || current.run?.id !== runId) return { status: lastStatus, package: current, changed: false };
+    try {
+      return transitionRuntimePackage({
+        missionFile,
+        projectDir,
+        packageId,
+        to: completed ? 'changes_ready' : 'blocked',
+        actor: completed ? actor : { role: 'runtime', id: 'runtime-host' },
+        expectedVersion: current.version,
+        ...(completed ? { leaseToken } : { reason })
+      });
+    } catch (error) {
+      if (error.code === 'RUNTIME_VERSION_CONFLICT') {
+        lastStatus = runtimeStatus({ missionFile, projectDir });
+        continue;
+      }
+      return { error, status: runtimeStatus({ missionFile, projectDir }), package: null, changed: false };
+    }
+  }
+  return { error: extensionError('agent settlement conflicted with repeated lease updates', 'RUNTIME_VERSION_CONFLICT'), status: runtimeStatus({ missionFile, projectDir }), package: null, changed: false };
 }
 
 /**
@@ -120,7 +167,7 @@ export async function runRuntimeAgent({ missionFile, packageId, policyFile, leas
     workspace: workspace.worktree
   };
 
-  const started = transitionRuntimePackage({
+  transitionRuntimePackage({
     missionFile,
     projectDir,
     packageId,
@@ -165,43 +212,38 @@ export async function runRuntimeAgent({ missionFile, packageId, policyFile, leas
 
   let settled;
   if (execution.outcome === 'completed') {
-    try {
-      settled = transitionRuntimePackage({
+    settled = settleRunningAgent({ missionFile, projectDir, packageId, runId: workPackage.run.id, leaseToken, actor, completed: true, reason: null });
+    if (settled.error || settled.package?.state !== 'changes_ready') {
+      // A completed adapter that lost a lease or another Runtime race never
+      // receives success. Block from a freshly-read version when it is still
+      // our active run; if recovery already settled it, report that state.
+      settled = settleRunningAgent({
         missionFile,
         projectDir,
         packageId,
-        to: 'changes_ready',
+        runId: workPackage.run.id,
+        leaseToken,
         actor,
-        expectedVersion: started.package.version,
-        leaseToken
-      });
-    } catch (error) {
-      // A completed adapter that lost its lease never receives a success state.
-      // Runtime blocks it with a durable receipt rather than guessing/retrying.
-      settled = transitionRuntimePackage({
-        missionFile,
-        projectDir,
-        packageId,
-        to: 'blocked',
-        actor: { role: 'runtime', id: 'runtime-host' },
-        expectedVersion: started.package.version,
-        reason: `adapter completed but could not advance safely: ${error.code ?? 'runtime-state-error'}`
+        completed: false,
+        reason: `adapter completed but could not advance safely: ${settled.error?.code ?? 'runtime-state-error'}`
       });
     }
   } else {
-    settled = transitionRuntimePackage({
+    settled = settleRunningAgent({
       missionFile,
       projectDir,
       packageId,
-      to: 'blocked',
-      actor: { role: 'runtime', id: 'runtime-host' },
-      expectedVersion: started.package.version,
+      runId: workPackage.run.id,
+      leaseToken,
+      actor,
+      completed: false,
       reason: `adapter ${execution.outcome}`
     });
   }
 
+  const finalPackage = packageFromStatus(settled.status, packageId);
   return {
-    ok: execution.outcome === 'completed' && settled.package.state === 'changes_ready',
+    ok: execution.outcome === 'completed' && finalPackage?.state === 'changes_ready',
     changed: true,
     agentRun: recorded.agentRun,
     status: settled.status,
@@ -209,7 +251,7 @@ export async function runRuntimeAgent({ missionFile, packageId, policyFile, leas
   };
 }
 
-/** Read only the Runtime's redacted, durable agent receipts. */
+/** Read only the Runtime's metadata-only, durable agent receipts. */
 export function runtimeAgentStatus({ missionFile, projectDir = '.' } = {}) {
   const status = runtimeStatus({ missionFile, projectDir });
   return {

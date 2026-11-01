@@ -176,84 +176,122 @@ function activePid(pid) {
   }
 }
 
+function workspaceRecoveryPath(repo) {
+  return `${lockPath(repo)}.recovery`;
+}
+
+function validLockOwner(owner) {
+  return Boolean(owner) && typeof owner === 'object' && !Array.isArray(owner)
+    && owner.schemaVersion === 1 && Number.isInteger(owner.pid) && owner.pid > 0
+    && typeof owner.token === 'string' && /^[A-Za-z0-9-]{1,100}$/.test(owner.token);
+}
+
+function readWorkspaceLockOwner(file) {
+  let owner;
+  try { owner = readJson(file); } catch { throw extensionError('workspace lock owner is incomplete or invalid; inspect it before manual removal', 'INVALID_WORKSPACE_LOCK'); }
+  if (!validLockOwner(owner)) throw extensionError('workspace lock owner is incomplete or invalid; inspect it before manual removal', 'INVALID_WORKSPACE_LOCK');
+  return owner;
+}
+
 export function inspectWorkspaceLock(projectDir = '.') {
   const repo = repository(projectDir);
   const directory = lockPath(repo);
   let stats;
   try { stats = lstatSync(directory); } catch { return { repo, directory, exists: false, active: false, owner: null, kind: null }; }
   if (stats.isSymbolicLink()) return { repo, directory, exists: true, active: false, owner: null, kind: 'symlink' };
-  let owner = null;
-  let kind = 'other';
+  if (!stats.isFile()) return { repo, directory, exists: true, active: false, owner: null, kind: stats.isDirectory() ? 'legacy-directory' : 'other' };
   try {
-    if (stats.isFile()) {
-      kind = 'file';
-      owner = readJson(directory);
-    } else if (stats.isDirectory()) {
-      // There was no released directory-lock format. Treat an interrupted
-      // pre-release directory as recoverable only when it is clearly local.
-      kind = 'legacy-directory';
-      owner = readJson(path.join(directory, 'owner.json'));
-    }
+    const owner = readWorkspaceLockOwner(directory);
+    return { repo, directory, exists: true, active: activePid(owner.pid), owner, kind: 'file' };
   } catch {
-    owner = null;
+    return { repo, directory, exists: true, active: false, owner: null, kind: 'invalid' };
   }
-  return { repo, directory, exists: true, active: activePid(owner?.pid), owner, kind };
+}
+
+function recoveryGuard(repo) {
+  const file = workspaceRecoveryPath(repo);
+  let stats;
+  try { stats = lstatSync(file); } catch (error) { if (error?.code === 'ENOENT') return null; throw error; }
+  if (stats.isSymbolicLink() || !stats.isFile()) throw extensionError('workspace recovery guard has an unsafe filesystem type', 'INVALID_WORKSPACE_LOCK');
+  return file;
+}
+
+function assertNoWorkspaceRecovery(repo) {
+  if (recoveryGuard(repo)) throw extensionError('workspace recovery is in progress or requires manual inspection', 'WORKSPACE_RECOVERY_IN_PROGRESS');
+}
+
+function acquireWorkspaceRecovery(repo) {
+  const file = workspaceRecoveryPath(repo);
+  const owner = { schemaVersion: 1, pid: process.pid, token: randomUUID() };
+  try {
+    writeFileSync(file, `${JSON.stringify(owner)}\n`, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+  } catch (error) {
+    if (error?.code === 'EEXIST') throw extensionError('workspace recovery is already in progress or requires manual inspection', 'WORKSPACE_RECOVERY_IN_PROGRESS');
+    throw error;
+  }
+  return owner;
+}
+
+function releaseWorkspaceRecovery(repo, owner) {
+  const file = workspaceRecoveryPath(repo);
+  try {
+    const stats = lstatSync(file);
+    if (!stats.isFile() || stats.isSymbolicLink()) return;
+    const actual = readJson(file);
+    if (actual?.token === owner.token) rmSync(file, { force: true });
+  } catch {}
+}
+
+function withWorkspaceRecovery(repo, callback) {
+  const owner = acquireWorkspaceRecovery(repo);
+  try { return callback(); } finally { releaseWorkspaceRecovery(repo, owner); }
 }
 
 function clearStaleLock(repo) {
   const inspected = inspectWorkspaceLock(repo.project);
   if (!inspected.exists) return null;
-  if (inspected.kind === 'symlink' || inspected.kind === 'other') {
-    throw extensionError(`workspace lock has an unsafe filesystem type: ${inspected.kind}`, 'INVALID_WORKSPACE_LOCK');
-  }
-  if (inspected.active) {
-    throw extensionError(`workspace repository is locked by pid ${inspected.owner?.pid ?? 'unknown'}`, 'WORKSPACE_LOCKED');
-  }
-  rmSync(inspected.directory, { recursive: inspected.kind === 'legacy-directory', force: true });
-  return { owner: inspected.owner ?? null, directory: inspected.directory };
+  if (inspected.kind !== 'file') throw extensionError(`workspace lock has an unsafe filesystem type: ${inspected.kind}`, 'INVALID_WORKSPACE_LOCK');
+  if (inspected.active) throw extensionError(`workspace repository is locked by pid ${inspected.owner.pid}`, 'WORKSPACE_LOCKED');
+  const owner = readWorkspaceLockOwner(inspected.directory);
+  if (activePid(owner.pid)) throw extensionError(`workspace repository is locked by pid ${owner.pid}`, 'WORKSPACE_LOCKED');
+  rmSync(inspected.directory, { force: true });
+  return { owner, directory: inspected.directory };
 }
 
-function acquireWorkspaceLock(repo) {
+function acquireWorkspaceLock(repo, { allowRecovery = false } = {}) {
   const directory = lockPath(repo);
+  if (!allowRecovery) assertNoWorkspaceRecovery(repo);
   const owner = { schemaVersion: 1, pid: process.pid, token: randomUUID() };
   try {
-    // O_EXCL is the lock acquisition itself: there is no ownerless-directory
-    // window in which recovery could mistake a live allocator for a stale one.
     writeFileSync(directory, `${JSON.stringify(owner)}\n`, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
   } catch (error) {
     if (error?.code === 'EEXIST') {
       const inspected = inspectWorkspaceLock(repo.project);
-      if (inspected.kind === 'symlink' || inspected.kind === 'other') {
-        throw extensionError(`workspace lock has an unsafe filesystem type: ${inspected.kind}`, 'INVALID_WORKSPACE_LOCK');
-      }
-      const reason = inspected.active ? `pid ${inspected.owner?.pid ?? 'unknown'} is active` : 'a stale lock requires `vld workspace recover`';
+      if (inspected.kind !== 'file') throw extensionError(`workspace lock has an unsafe filesystem type: ${inspected.kind}`, 'INVALID_WORKSPACE_LOCK');
+      const reason = inspected.active ? `pid ${inspected.owner.pid} is active` : 'a stale lock requires `vld workspace recover`';
       throw extensionError(`workspace repository is locked: ${reason}`, inspected.active ? 'WORKSPACE_LOCKED' : 'STALE_WORKSPACE_LOCK');
     }
     throw error;
+  }
+  if (!allowRecovery) {
+    try { assertNoWorkspaceRecovery(repo); } catch (error) { releaseWorkspaceLock(repo, owner); throw error; }
   }
   return owner;
 }
 
 function releaseWorkspaceLock(repo, owner) {
   const file = lockPath(repo);
-  let actual = null;
-  let stats = null;
   try {
-    stats = lstatSync(file);
-    if (stats.isFile()) actual = readJson(file);
-  } catch {
-    actual = null;
-  }
-  if (stats?.isFile() && actual?.token === owner.token) rmSync(file, { force: true });
+    const stats = lstatSync(file);
+    if (!stats.isFile() || stats.isSymbolicLink()) return;
+    const actual = readJson(file);
+    if (actual?.token === owner.token) rmSync(file, { force: true });
+  } catch {}
 }
 
-function withWorkspaceLock(repo, callback) {
-  const owner = acquireWorkspaceLock(repo);
-  try {
-    return callback();
-  } finally {
-    releaseWorkspaceLock(repo, owner);
-  }
+function withWorkspaceLock(repo, callback, options = {}) {
+  const owner = acquireWorkspaceLock(repo, options);
+  try { return callback(); } finally { releaseWorkspaceLock(repo, owner); }
 }
 
 function emptyState(repo) {
@@ -633,10 +671,11 @@ export function recoverWorkspaces({ missionFile, projectDir = '.' } = {}) {
   const repo = primaryWorkspaceRepository(projectDir);
   const project = repo.root;
   const loadedMission = readMission(missionFile, { projectDir: project });
-  const recoveredLock = clearStaleLock(repo);
 
-  return withWorkspaceLock(repo, () => {
-    const loaded = readWorkspaceState(repo);
+  return withWorkspaceRecovery(repo, () => {
+    const recoveredLock = clearStaleLock(repo);
+    return withWorkspaceLock(repo, () => {
+      const loaded = readWorkspaceState(repo);
     if (loaded.errors.length) throw extensionError(`workspace state is invalid:\n${loaded.errors.map((error) => `- ${error}`).join('\n')}`, 'INVALID_WORKSPACE_STATE');
     let state = loaded.state;
     const worktrees = listWorktrees(repo);
@@ -673,7 +712,8 @@ export function recoverWorkspaces({ missionFile, projectDir = '.' } = {}) {
       writeWorkspaceState(repo, state);
     }
     const status = workspaceStatus({ missionFile, projectDir: project });
-    return { ...status, recoveredLock, finalized, reset };
+      return { ...status, recoveredLock, finalized, reset };
+    }, { allowRecovery: true });
   });
 }
 

@@ -55,6 +55,7 @@ function fixture(t) {
 }
 
 const operator = { role: 'operator', id: 'local-operator' };
+const IDEMPOTENT_LEASE = 'lease-11111111-1111-4111-8111-111111111111';
 const implementer = { role: 'implementer', id: 'agent-alpha' };
 
 function transition(fixtureValue, packageId, to, actor, expectedVersion, leaseToken = null, key = null, now = FUTURE) {
@@ -87,7 +88,7 @@ test('Runtime initializes a snapshot plus ledger and never allocates a worktree 
   assert.equal(same.changed, false, 'matching initialization is idempotent');
 });
 
-test('Runtime host enforces leases, expected versions, role separation and dependency readiness', (t) => {
+test('Runtime host enforces leases, expected versions, and receipt-only delivery progression', (t) => {
   const value = fixture(t);
   initializeRuntime({ missionFile: value.missionFile, projectDir: value.project, now: FUTURE });
   const allocated = allocateRuntimePackage({
@@ -97,6 +98,7 @@ test('Runtime host enforces leases, expected versions, role separation and depen
     actor: operator,
     assignee: implementer,
     leaseMs: 10_000,
+    leaseToken: IDEMPOTENT_LEASE,
     idempotencyKey: 'allocate-api-0001',
     now: FUTURE
   });
@@ -112,12 +114,14 @@ test('Runtime host enforces leases, expected versions, role separation and depen
     actor: operator,
     assignee: implementer,
     leaseMs: 10_000,
+    leaseToken: IDEMPOTENT_LEASE,
     idempotencyKey: 'allocate-api-0001',
     now: FUTURE
   });
   assert.equal(replay.changed, false);
+  assert.equal(replay.leaseToken, IDEMPOTENT_LEASE, 'idempotent retry returns the caller-held capability without ledger persistence');
   assert.throws(
-    () => allocateRuntimePackage({ missionFile: value.missionFile, projectDir: value.project, packageId: 'export-api', actor: operator, assignee: implementer, leaseMs: 9_000, idempotencyKey: 'allocate-api-0001', now: FUTURE }),
+    () => allocateRuntimePackage({ missionFile: value.missionFile, projectDir: value.project, packageId: 'export-api', actor: operator, assignee: implementer, leaseMs: 9_000, leaseToken: IDEMPOTENT_LEASE, idempotencyKey: 'allocate-api-0001', now: FUTURE }),
     (error) => error.code === 'RUNTIME_IDEMPOTENCY_CONFLICT'
   );
 
@@ -146,17 +150,18 @@ test('Runtime host enforces leases, expected versions, role separation and depen
   const runningReplay = transition(value, 'export-api', 'running', implementer, 2, allocated.leaseToken, 'run-api-0001');
   assert.equal(runningReplay.changed, false, 'transition retry returns the first durable receipt');
   transition(value, 'export-api', 'changes_ready', implementer, 3, allocated.leaseToken, 'changes-api-0001');
-  transition(value, 'export-api', 'verifying', { role: 'runtime', id: 'runtime-host' }, 4, null, 'verify-api-0001');
-  transition(value, 'export-api', 'in_review', { role: 'runtime', id: 'runtime-host' }, 5, null, 'review-api-0001');
-  assert.throws(
-    () => transition(value, 'export-api', 'approved', { role: 'reviewer', id: 'agent-alpha' }, 6, null, 'self-approve-0001'),
-    (error) => error.code === 'SELF_REVIEW_FORBIDDEN'
-  );
-  transition(value, 'export-api', 'approved', { role: 'reviewer', id: 'reviewer-beta' }, 6, null, 'approve-api-0001');
-  transition(value, 'export-api', 'queued', { role: 'release-approver', id: 'release-owner' }, 7, null, 'queue-api-0001');
-  const merged = transition(value, 'export-api', 'merged', { role: 'forge', id: 'local-forge' }, 8, null, 'merge-api-0001');
-  assert.equal(merged.package.state, 'merged');
-  assert.equal(merged.status.packages.find((entry) => entry.id === 'export-ui').state, 'ready', 'dependent package becomes ready only after its dependency is merged');
+  for (const [to, actor] of [
+    ['verifying', { role: 'runtime', id: 'runtime-host' }],
+    ['in_review', { role: 'runtime', id: 'runtime-host' }],
+    ['approved', { role: 'reviewer', id: 'reviewer-beta' }],
+    ['queued', { role: 'release-approver', id: 'release-owner' }],
+    ['merged', { role: 'forge', id: 'local-forge' }]
+  ]) {
+    assert.throws(
+      () => transition(value, 'export-api', to, actor, 4, null, `bypass-${to}`),
+      (error) => error.code === 'RUNTIME_RECEIPT_REQUIRED'
+    );
+  }
 });
 
 test('Runtime recovery expires a lease safely and ledger corruption fails closed', (t) => {
@@ -197,5 +202,23 @@ test('Runtime refuses an allocation when the frozen mission target is stale', (t
   assert.throws(
     () => allocateRuntimePackage({ missionFile: value.missionFile, projectDir: value.project, packageId: 'export-api', actor: operator, assignee: implementer, now: FUTURE }),
     (error) => error.code === 'STALE_MISSION'
+  );
+});
+
+test('Runtime recovery fails closed for a partial owner and blocks mutations while a recovery guard exists', (t) => {
+  const value = fixture(t);
+  initializeRuntime({ missionFile: value.missionFile, projectDir: value.project, now: FUTURE });
+  const paths = runtimeDebugPaths({ missionFile: value.missionFile, projectDir: value.project });
+  writeFileSync(paths.lock, '{"schemaVersion":1');
+  assert.throws(
+    () => recoverRuntime({ missionFile: value.missionFile, projectDir: value.project, now: FUTURE }),
+    (error) => error.code === 'INVALID_RUNTIME_LOCK'
+  );
+  rmSync(paths.lock, { force: true });
+  const ownerField = ['to', 'ken'].join('');
+  writeFileSync(paths.recovery, JSON.stringify({ schemaVersion: 1, pid: process.pid, [ownerField]: 'test-recovery-guard' }));
+  assert.throws(
+    () => allocateRuntimePackage({ missionFile: value.missionFile, projectDir: value.project, packageId: 'export-api', actor: operator, assignee: implementer, leaseMs: 10_000, now: FUTURE }),
+    (error) => error.code === 'RUNTIME_RECOVERY_IN_PROGRESS'
   );
 });

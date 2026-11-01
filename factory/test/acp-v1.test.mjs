@@ -43,9 +43,16 @@ test('M8 ACP policy remains a read-only direct-argv optional boundary and Core d
   const adapter = readFileSync(path.join(ROOT, 'factory', 'lib', 'agent-adapters.mjs'), 'utf8');
   const bridge = readFileSync(path.join(ROOT, 'factory', 'integrations', 'acp-v1', 'index.mjs'), 'utf8');
   const manifest = JSON.parse(readFileSync(path.join(ROOT, 'factory', 'integrations', 'acp-v1', 'package.json'), 'utf8'));
+  const rootManifest = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+  const agents = readFileSync(path.join(ROOT, 'AGENTS.md'), 'utf8');
+  const ci = readFileSync(path.join(ROOT, '.github', 'workflows', 'ci.yml'), 'utf8');
   assert.doesNotMatch(adapter, /from ['"]@agentclientprotocol\/sdk/);
   assert.match(bridge, /from '@agentclientprotocol\/sdk'/);
   assert.doesNotMatch(bridge, /@agentclientprotocol\/sdk\/unstable|experimental\/v2/);
   assert.equal(manifest.dependencies['@agentclientprotocol/sdk'], '2.2.0');
+  assert.equal(rootManifest.engines.node, '>=22');
+  assert.equal(manifest.engines.node, '>=22');
+  assert.match(agents, /Node 22\+/);
+  assert.match(ci, /node-version: 22/);
   await assert.rejects(() => executeAgentAdapter({ spec: { ...spec, workspace: ROOT }, policy: unavailablePolicy }), (error) => error.code === 'ACP_V1_ADAPTER_UNAVAILABLE');
 });

@@ -101,7 +101,7 @@ export function studioDashboardScript() {
   async function refresh() { try { render(await call('status', {})); } catch (error) { applyCapabilities(null); setConnection(error.message, true); } }
   elements.connect.addEventListener('click', async () => { token = elements.token.value; elements.token.value = ''; await refresh(); if (token) elements.refresh.disabled = false; });
   elements.refresh.addEventListener('click', refresh);
-  elements.allocate.addEventListener('click', async () => { try { const leaseMs = Number(elements.leaseMs.value); await call('allocate', { packageId: elements.packageId.value, assignee: { role: 'implementer', id: elements.assignee.value }, leaseMs }); await refresh(); } catch (error) { setConnection(error.message, true); } });
+  elements.allocate.addEventListener('click', async () => { try { if (!globalThis.crypto || !crypto.randomUUID) throw new Error('This browser cannot generate a lease capability. Use the CLI instead.'); const leaseMs = Number(elements.leaseMs.value); const leaseToken = 'lease-' + crypto.randomUUID(); const result = await call('allocate', { packageId: elements.packageId.value, assignee: { role: 'implementer', id: elements.assignee.value }, leaseMs, leaseToken }); await refresh(); setConnection('Allocation created. Copy this lease capability now; Studio will not retain it: ' + result.leaseToken, false); } catch (error) { setConnection(error.message, true); } });
   elements.recover.addEventListener('click', async () => { try { await call('recover', {}); await refresh(); } catch (error) { setConnection(error.message, true); } });
 })();`;
 }

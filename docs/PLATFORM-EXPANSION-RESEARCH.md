@@ -124,7 +124,7 @@ This boundary prevents a dashboard from becoming a second source of truth.
 | Append-only run/review/merge receipt | Runtime ledger plus a selected evidence link/attestation when required | Runtime writes receipt; Core verifies selected evidence references | Retain immutable digest/reference, not raw secrets or full model transcripts by default |
 | UI layout, filters and local tokens | User-local config/keychain | Studio only | Never checked in |
 
-A SQLite-backed local ledger is a reasonable option because the Node 22 runtime examined supports experimental `node:sqlite`; VLD's declared Node 20+ floor does not by itself guarantee that facility. VLD should first hide storage behind a `MissionStore` interface and support a JSONL test implementation. It should not couple the mission model to an experimental runtime API.
+A SQLite-backed local ledger is a reasonable option because the Node 22 runtime examined supports experimental `node:sqlite`; VLD's Node 22+ floor does not by itself guarantee that facility. VLD should first hide storage behind a `MissionStore` interface and support a JSONL test implementation. It should not couple the mission model to an experimental runtime API.
 
 ### 3.3 The mission state machine
 
@@ -271,7 +271,7 @@ A one-stop shop increases the blast radius. The following requirements are basel
 | Target branch advances after validation | Recreate/rebase integration candidate and rerun checks; approvals bind to candidate and target SHAs. |
 | Malicious/compromised marketplace item | Signed/digested locks, reviewed candidate diff, local trust policy, revocation, no arbitrary in-process code. |
 | Runtime UI becomes an exposed local RCE endpoint | Loopback/Unix socket only; random launch token; origin checking; no broad CORS; privileged operations require server-side policy and user confirmation. |
-| Credentials leak through logs or receipts | Credential references and environment allowlist only; redaction before persistence; short retention for raw streams; no token values in Git artifacts. |
+| Credentials leak through logs or receipts | Credential references and environment allowlist only; digest/byte-count evidence plus fixed outcome labels in durable receipts; no token values in Git artifacts. |
 | Provider outage / runtime crash | Durable append-only event receipts, idempotency keys, leases, explicit recovery/reconciliation commands, and no implicit destructive cleanup. |
 | Deterministic compiler becomes model-dependent | Keep model execution, network calls and runtime state out of plan/compile/verify. Test that Core works with Runtime/Studio absent. |
 

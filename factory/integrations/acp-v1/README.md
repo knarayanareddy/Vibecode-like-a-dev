@@ -4,8 +4,7 @@ This package is the only VLD source boundary that imports
 `@agentclientprotocol/sdk`. It uses that package's stable root entry point for
 ACP v1; it does not use `unstable` or experimental v2 exports.
 
-It is intentionally **not** a root VLD dependency. Normal `vld` commands and
-CI do not install it. Install it only after reviewing the agent peer and its
+It is intentionally **not** a root VLD dependency. Normal `vld` commands and Core CI do not install it. A separate adapter CI job installs and tests this package in isolation. Install it only after reviewing the agent peer and its
 direct executable policy:
 
 ```bash

@@ -109,13 +109,20 @@ test('loopback Runtime API requires a local token, rejects hostile origins and n
   assert.equal(JSON.stringify(status.body).includes(fixture.project), false, 'API status does not reveal host project paths');
   assert.equal(status.body.result.studio.actions.allocate, true, 'Studio receives advisory capabilities but Runtime stays authoritative');
 
-  const allocated = await request('request-0004', 'allocate', { packageId: 'api-work', assignee: { role: 'implementer', id: 'agent-alpha' }, leaseMs: 10_000 });
+  const missingLeaseCapability = await request('request-0004-missing-capability', 'allocate', { packageId: 'api-work', assignee: { role: 'implementer', id: 'agent-alpha' }, leaseMs: 10_000 });
+  assert.equal(missingLeaseCapability.status, 400);
+  assert.equal(missingLeaseCapability.body.error.code, 'RUNTIME_LEASE_TOKEN_REQUIRED');
+  const capability = ['lease', '22222222-2222-4222-8222-222222222222'].join('-');
+  const allocated = await request('request-0004', 'allocate', { packageId: 'api-work', assignee: { role: 'implementer', id: 'agent-alpha' }, leaseMs: 10_000, leaseToken: capability });
   assert.equal(allocated.status, 200);
-  assert.match(allocated.body.result.leaseToken, /^lease-/);
+  assert.equal(allocated.body.result.leaseToken, capability);
+  const allocationReplay = await request('request-0004', 'allocate', { packageId: 'api-work', assignee: { role: 'implementer', id: 'agent-alpha' }, leaseMs: 10_000, leaseToken: capability });
+  assert.equal(allocationReplay.status, 200);
+  assert.equal(allocationReplay.body.result.leaseToken, capability, 'dropped allocation responses can be retried with the caller-held capability');
 
   const impersonation = await request('request-0005', 'transition', { packageId: 'api-work', to: 'approved', expectedVersion: 1 });
   assert.equal(impersonation.status, 400);
-  assert.equal(impersonation.body.error.code, 'RUNTIME_ACTOR_FORBIDDEN');
+  assert.equal(impersonation.body.error.code, 'RUNTIME_RECEIPT_REQUIRED', 'generic API cannot manufacture an approval state');
 
   const badEnvelope = await request('request-0006', 'status', { surprise: true });
   assert.equal(badEnvelope.status, 400);

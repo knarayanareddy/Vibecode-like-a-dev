@@ -35,9 +35,38 @@ function environmentFor(spec, policy) {
     VLD_REQUIREMENT_IDS: spec.requirementIds.join(',')
   });
 }
-function terminate(child) {
+const TERMINATION_GRACE_MS = 250;
+const CANCELLATION_GRACE_MS = 250;
+
+function signalProcess(child, signal) {
   if (!child || child.exitCode !== null || child.signalCode) return;
-  try { if (process.platform !== 'win32' && Number.isInteger(child.pid)) process.kill(-child.pid, 'SIGTERM'); else child.kill('SIGTERM'); } catch {}
+  try { if (process.platform !== 'win32' && Number.isInteger(child.pid)) process.kill(-child.pid, signal); else child.kill(signal); } catch {}
+}
+
+function waitForExit(child, milliseconds) {
+  if (!child || child.exitCode !== null || child.signalCode) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => { child.off('close', onClose); resolve(false); }, milliseconds);
+    const onClose = () => { clearTimeout(timer); resolve(true); };
+    child.once('close', onClose);
+  });
+}
+
+async function terminate(child) {
+  signalProcess(child, 'SIGTERM');
+  if (await waitForExit(child, TERMINATION_GRACE_MS)) return;
+  signalProcess(child, 'SIGKILL');
+  await waitForExit(child, TERMINATION_GRACE_MS);
+}
+
+function boundedCancellation(connection, sessionId) {
+  if (!connection || !sessionId) return;
+  // Cancellation is advisory. Never allow a non-responsive peer RPC to delay
+  // local process termination or the caller's AbortSignal outcome.
+  void Promise.race([
+    connection.agent.request(methods.agent.session.cancel, { sessionId }),
+    new Promise((resolve) => setTimeout(resolve, CANCELLATION_GRACE_MS))
+  ]).catch(() => {});
 }
 function result({ outcome, startedAt, outputDigest, outputBytes, outputSummary, signal = null }) {
   return { outcome, exitCode: outcome === 'completed' ? 0 : null, signal, outputDigest, outputBytes, outputSummary, startedAt, finishedAt: now() };
@@ -50,7 +79,7 @@ function result({ outcome, startedAt, outputDigest, outputBytes, outputSummary, 
  * state transitions.
  */
 export async function runAcpV1Adapter({ spec, policy, signal = null, onEvent = null } = {}) {
-  const startedAt = now(); const command = commandFor(policy); const prompt = acpV1Prompt(spec); let child; let timer; let updateBytes = 0; let updates = 0; let diagnosticBytes = 0;
+  const startedAt = now(); const command = commandFor(policy); const prompt = acpV1Prompt(spec); let child; let timer; let updateBytes = 0; let updates = 0; let diagnosticBytes = 0; let connection = null; let sessionId = null; let stopped = null;
   const emit = (event) => { if (typeof onEvent === 'function') onEvent(event); };
   try {
     child = spawn(command.executable, command.args, {
@@ -70,12 +99,20 @@ export async function runAcpV1Adapter({ spec, policy, signal = null, onEvent = n
       updates += 1; updateBytes += normalized.bytes;
       emit({ type: normalized.type, at: normalized.at, message: normalized.message, bytes: normalized.bytes });
     });
-    const connection = app.connect(stream);
-    const abort = async () => {
-      try { await connection.agent.request(methods.agent.session.cancel, { sessionId }); } catch {}
-      terminate(child);
+    connection = app.connect(stream);
+    const stop = () => {
+      if (!stopped) {
+        stopped = (async () => {
+          try { connection?.close(); } catch {}
+          await terminate(child);
+        })();
+      }
+      return stopped;
     };
-    let sessionId = null;
+    const abort = () => {
+      boundedCancellation(connection, sessionId);
+      return stop();
+    };
     const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(extensionError('ACP v1 session exceeded policy duration', 'ACP_V1_TIMED_OUT')), policy.limits.durationMs); });
     const work = (async () => {
       emit({ type: 'started', at: startedAt, message: 'ACP v1 adapter started' });
@@ -91,18 +128,28 @@ export async function runAcpV1Adapter({ spec, policy, signal = null, onEvent = n
       session.dispose(); connection.close();
       return normalized;
     })();
-    const onAbort = () => { abort(); };
-    if (signal?.aborted) await abort(); else signal?.addEventListener('abort', onAbort, { once: true });
+    let rejectCancellation;
+    const cancellation = new Promise((_, reject) => { rejectCancellation = reject; });
+    const onAbort = () => {
+      void abort();
+      rejectCancellation(extensionError('ACP v1 session cancelled', 'ACP_V1_CANCELLED'));
+    };
+    if (signal?.aborted) onAbort(); else signal?.addEventListener('abort', onAbort, { once: true });
     let normalized;
-    try { normalized = await Promise.race([work, timeout]); } finally { clearTimeout(timer); signal?.removeEventListener('abort', onAbort); }
+    try { normalized = await Promise.race([work, timeout, cancellation]); } finally { clearTimeout(timer); signal?.removeEventListener('abort', onAbort); }
     if (signal?.aborted || normalized.outcome === 'cancelled') return result({ outcome: 'cancelled', startedAt, outputDigest: normalized.outputDigest, outputBytes: updateBytes + diagnosticBytes, outputSummary: normalized.outputSummary, signal: 'SIGTERM' });
     emit({ type: normalized.outcome === 'completed' ? 'completed' : 'failed', at: now(), message: normalized.outputSummary });
     return result({ outcome: normalized.outcome, startedAt, outputDigest: digest({ peer: normalized.outputDigest, updates, updateBytes, diagnosticBytes }), outputBytes: updateBytes + diagnosticBytes, outputSummary: normalized.outputSummary });
   } catch (error) {
-    const timedOut = error?.code === 'ACP_V1_TIMED_OUT'; const cancelled = signal?.aborted;
-    terminate(child);
+    const timedOut = error?.code === 'ACP_V1_TIMED_OUT'; const cancelled = signal?.aborted || error?.code === 'ACP_V1_CANCELLED';
+    boundedCancellation(connection, sessionId);
+    await (stopped ?? (async () => { try { connection?.close(); } catch {}; await terminate(child); })());
     const output = redactAgentOutput(timedOut ? 'ACP v1 session timed out' : cancelled ? 'ACP v1 session cancelled' : `ACP v1 peer failed: ${error?.code ?? 'protocol-error'}`);
     emit({ type: timedOut ? 'timed-out' : cancelled ? 'cancelled' : 'failed', at: now(), message: output });
     return result({ outcome: timedOut ? 'timed-out' : cancelled ? 'cancelled' : 'failed', startedAt, outputDigest: digest({ outcome: timedOut ? 'timed-out' : cancelled ? 'cancelled' : 'failed', updateBytes, diagnosticBytes }), outputBytes: updateBytes + diagnosticBytes, outputSummary: output, signal: timedOut || cancelled ? 'SIGTERM' : null });
-  } finally { clearTimeout(timer); terminate(child); }
+  } finally {
+    clearTimeout(timer);
+    if (stopped) await stopped;
+    else { try { connection?.close(); } catch {}; await terminate(child); }
+  }
 }

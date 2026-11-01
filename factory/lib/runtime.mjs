@@ -39,6 +39,7 @@ const LOCK_VERSION = 1;
 const MAX_RECEIPTS = 200;
 const COMMIT = /^[a-f0-9]{40}$/;
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9][A-Za-z0-9._-]{7,120}$/;
+const LEASE_TOKEN = /^lease-[a-f0-9-]{36}$/;
 const EVENT_TYPES = new Set(['initialized', 'allocated', 'heartbeat', 'transition', 'ready', 'lease-expired', 'agent-run', 'candidate', 'verification', 'approval', 'queue', 'forge-plan']);
 
 function errorDetail(error) {
@@ -145,7 +146,8 @@ function runtimePaths(repo, mission) {
     events: path.join(directory, 'events.jsonl'),
     snapshot: path.join(directory, 'state.json'),
     pending: path.join(directory, 'pending.json'),
-    lock: path.join(directory, 'runtime.lock')
+    lock: path.join(directory, 'runtime.lock'),
+    recovery: path.join(directory, 'runtime.lock.recovery')
   };
 }
 
@@ -179,9 +181,18 @@ function runtimeContext({ missionFile, projectDir = '.', requireCurrent = true }
   return { repo, mission: loaded.mission, missionFile: path.relative(repo.root, loaded.file).split(path.sep).join('/'), missionReport: report, paths: runtimePaths(repo, loaded.mission) };
 }
 
+function validLockOwner(owner) {
+  return Boolean(owner) && typeof owner === 'object' && !Array.isArray(owner)
+    && owner.schemaVersion === LOCK_VERSION && Number.isInteger(owner.pid) && owner.pid > 0
+    && typeof owner.token === 'string' && /^[A-Za-z0-9-]{1,100}$/.test(owner.token);
+}
+
 function lockOwner(paths) {
-  if (!safeRegularFile(paths.lock, 'runtime lock')) return null;
-  try { return readJson(paths.lock); } catch { return null; }
+  if (!safeRegularFile(paths.lock, 'runtime lock')) throw extensionError('runtime lock has an unsafe filesystem type', 'INVALID_RUNTIME_LOCK');
+  let owner;
+  try { owner = readJson(paths.lock); } catch { throw extensionError('runtime lock owner is incomplete or invalid; inspect it before manual removal', 'INVALID_RUNTIME_LOCK'); }
+  if (!validLockOwner(owner)) throw extensionError('runtime lock owner is incomplete or invalid; inspect it before manual removal', 'INVALID_RUNTIME_LOCK');
+  return owner;
 }
 
 function activePid(pid) {
@@ -194,8 +205,48 @@ function activePid(pid) {
   }
 }
 
-function acquireRuntimeLock(paths) {
+function recoveryGuard(paths) {
+  let stats;
+  try { stats = lstatSync(paths.recovery); } catch (error) { if (error?.code === 'ENOENT') return null; throw error; }
+  if (stats.isSymbolicLink() || !stats.isFile()) throw extensionError('runtime recovery guard has an unsafe filesystem type', 'INVALID_RUNTIME_LOCK');
+  // The guard is deliberately fail-closed. A crash leaves an operator-visible
+  // file to inspect rather than allowing a second recovery to race cleanup.
+  return paths.recovery;
+}
+
+function assertNoRecovery(paths) {
+  if (recoveryGuard(paths)) throw extensionError('runtime recovery is in progress or requires manual inspection', 'RUNTIME_RECOVERY_IN_PROGRESS');
+}
+
+function acquireRecoveryGuard(paths) {
   mkdirWithoutSymlinks(paths.directory, 'runtime directory');
+  const owner = { schemaVersion: LOCK_VERSION, pid: process.pid, token: randomUUID() };
+  try {
+    writeFileSync(paths.recovery, `${JSON.stringify(owner)}\n`, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+  } catch (error) {
+    if (error?.code === 'EEXIST') throw extensionError('runtime recovery is already in progress or requires manual inspection', 'RUNTIME_RECOVERY_IN_PROGRESS');
+    throw error;
+  }
+  return owner;
+}
+
+function releaseRecoveryGuard(paths, owner) {
+  try {
+    const stats = lstatSync(paths.recovery);
+    if (!stats.isFile() || stats.isSymbolicLink()) return;
+    const actual = readJson(paths.recovery);
+    if (actual?.token === owner.token) rmSync(paths.recovery, { force: true });
+  } catch {}
+}
+
+function withRecoveryGuard(paths, callback) {
+  const owner = acquireRecoveryGuard(paths);
+  try { return callback(); } finally { releaseRecoveryGuard(paths, owner); }
+}
+
+function acquireRuntimeLock(paths, { allowRecovery = false } = {}) {
+  mkdirWithoutSymlinks(paths.directory, 'runtime directory');
+  if (!allowRecovery) assertNoRecovery(paths);
   const owner = { schemaVersion: LOCK_VERSION, pid: process.pid, token: randomUUID() };
   try {
     writeFileSync(paths.lock, `${JSON.stringify(owner)}\n`, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
@@ -203,27 +254,34 @@ function acquireRuntimeLock(paths) {
     if (error?.code === 'EEXIST') {
       const stats = lstatSync(paths.lock);
       if (stats.isSymbolicLink() || !stats.isFile()) throw extensionError('runtime lock has an unsafe filesystem type', 'INVALID_RUNTIME_LOCK');
-      const owner = lockOwner(paths);
-      if (activePid(owner?.pid)) throw extensionError(`runtime is locked by active pid ${owner.pid}`, 'RUNTIME_LOCKED');
+      const existing = lockOwner(paths);
+      if (activePid(existing.pid)) throw extensionError(`runtime is locked by active pid ${existing.pid}`, 'RUNTIME_LOCKED');
       throw extensionError('runtime has a stale lock; run vld runtime recover', 'STALE_RUNTIME_LOCK');
     }
     throw error;
+  }
+  if (!allowRecovery) {
+    try {
+      assertNoRecovery(paths);
+    } catch (error) {
+      releaseRuntimeLock(paths, owner);
+      throw error;
+    }
   }
   return owner;
 }
 
 function releaseRuntimeLock(paths, owner) {
-  let actual = null;
-  let stats = null;
   try {
-    stats = lstatSync(paths.lock);
-    if (stats.isFile()) actual = readJson(paths.lock);
+    const stats = lstatSync(paths.lock);
+    if (!stats.isFile() || stats.isSymbolicLink()) return;
+    const actual = readJson(paths.lock);
+    if (actual?.token === owner.token) rmSync(paths.lock, { force: true });
   } catch {}
-  if (stats?.isFile() && actual?.token === owner.token) rmSync(paths.lock, { force: true });
 }
 
-function withRuntimeLock(paths, callback) {
-  const owner = acquireRuntimeLock(paths);
+function withRuntimeLock(paths, callback, options = {}) {
+  const owner = acquireRuntimeLock(paths, options);
   try {
     return callback();
   } finally {
@@ -232,13 +290,13 @@ function withRuntimeLock(paths, callback) {
 }
 
 function clearStaleRuntimeLock(paths) {
-  if (!existsSync(paths.lock)) return null;
-  const stats = lstatSync(paths.lock);
+  let stats;
+  try { stats = lstatSync(paths.lock); } catch (error) { if (error?.code === 'ENOENT') return null; throw error; }
   if (stats.isSymbolicLink() || !stats.isFile()) throw extensionError('runtime lock has an unsafe filesystem type', 'INVALID_RUNTIME_LOCK');
   const owner = lockOwner(paths);
-  if (activePid(owner?.pid)) throw extensionError(`runtime is locked by active pid ${owner.pid}`, 'RUNTIME_LOCKED');
+  if (activePid(owner.pid)) throw extensionError(`runtime is locked by active pid ${owner.pid}`, 'RUNTIME_LOCKED');
   rmSync(paths.lock, { force: true });
-  return { pid: owner?.pid ?? null };
+  return { pid: owner.pid };
 }
 
 function assertEventActor(actor) {
@@ -712,12 +770,28 @@ function normalizeIdempotency(key, request) {
   return { key: String(key), requestDigest: digest(request) };
 }
 
-function idempotentResult(events, metadata, state, context) {
+function suppliedLeaseToken(value) {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'string' || !LEASE_TOKEN.test(value)) throw extensionError('lease token must be a lease-prefixed UUID capability', 'INVALID_RUNTIME_LEASE');
+  return value;
+}
+
+function idempotentResult(events, metadata, state, context, { leaseToken = null } = {}) {
   if (!metadata) return null;
   const existing = events.find((event) => event.idempotencyKey === metadata.key);
   if (!existing) return null;
   if (existing.requestDigest !== metadata.requestDigest) throw extensionError('idempotency key was reused for a different request', 'RUNTIME_IDEMPOTENCY_CONFLICT');
-  return { changed: false, replayedSequence: existing.sequence, status: reportRuntime(context, state) };
+  return { changed: false, replayedSequence: existing.sequence, status: reportRuntime(context, state), ...(leaseToken ? { leaseToken } : {}) };
+}
+
+function assertGenericRuntimeTransition(from, to) {
+  // Candidate, verification, approval, queue and forge progression are evidence
+  // transitions. They are deliberately available only through their typed
+  // receipt APIs below, never through the generic state endpoint.
+  if (to === 'blocked') return;
+  if (!new Set(['allocated->running', 'running->changes_ready', 'blocked->ready']).has(`${from}->${to}`)) {
+    throw extensionError(`transition ${from}->${to} requires its typed Runtime receipt API`, 'RUNTIME_RECEIPT_REQUIRED');
+  }
 }
 
 function activeLease(workPackage, token, at) {
@@ -822,24 +896,26 @@ export function runtimeForgeEvidence({ missionFile, packageId, candidateId, proj
 }
 
 /** Allocate one ready package and return its one-time lease token. */
-export function allocateRuntimePackage({ missionFile, packageId, projectDir = '.', actor = { role: 'operator', id: 'local-operator' }, assignee, leaseMs = 5 * 60 * 1_000, idempotencyKey = null, now, policy = defaultRuntimePolicy() } = {}) {
+export function allocateRuntimePackage({ missionFile, packageId, projectDir = '.', actor = { role: 'operator', id: 'local-operator' }, assignee, leaseMs = 5 * 60 * 1_000, leaseToken = null, idempotencyKey = null, now, policy = defaultRuntimePolicy() } = {}) {
   const context = runtimeContext({ missionFile, projectDir, requireCurrent: true });
   const requestedActor = assertCanAllocate(actor);
   const holder = assertRuntimeActor(assignee);
   if (holder.role !== 'implementer') throw extensionError('runtime assignee must have implementer role', 'INVALID_RUNTIME_ASSIGNEE');
   const duration = assertLeaseDuration(leaseMs, policy);
+  const suppliedToken = suppliedLeaseToken(leaseToken);
+  if (idempotencyKey && !suppliedToken) throw extensionError('idempotent allocation requires a caller-held lease token', 'RUNTIME_LEASE_TOKEN_REQUIRED');
+  const token = suppliedToken ?? `lease-${randomUUID()}`;
   const at = nowIso(now);
   return withRuntimeLock(context.paths, () => {
     const { events, state } = readLedger(context.paths);
     assertCurrentRuntime(context, state, policy);
-    const request = { operation: 'allocate', packageId, actor: requestedActor, assignee: holder, leaseMs: duration };
+    const request = { operation: 'allocate', packageId, actor: requestedActor, assignee: holder, leaseMs: duration, leaseTokenDigest: digest(token) };
     const idempotency = normalizeIdempotency(idempotencyKey, request);
-    const replay = idempotentResult(events, idempotency, state, context);
+    const replay = idempotentResult(events, idempotency, state, context, { leaseToken: suppliedToken });
     if (replay) return replay;
     const workPackage = state.packages.find((entry) => entry.id === packageId);
     if (!workPackage) throw extensionError(`runtime mission has no work package "${packageId}"`, 'UNKNOWN_WORK_PACKAGE');
     if (workPackage.state !== 'ready') throw extensionError(`work package "${packageId}" is ${workPackage.state}, not ready`, 'RUNTIME_PACKAGE_NOT_READY');
-    const leaseToken = `lease-${randomUUID()}`;
     const event = {
       schemaVersion: EVENT_VERSION,
       sequence: state.sequence + 1,
@@ -848,12 +924,12 @@ export function allocateRuntimePackage({ missionFile, packageId, projectDir = '.
       actor: requestedActor,
       packageId,
       run: { id: `run-${randomUUID()}`, holderId: holder.id },
-      lease: { id: `lease-${randomUUID()}`, tokenDigest: digest(leaseToken), expiresAt: plusMilliseconds(at, duration) },
+      lease: { id: `lease-${randomUUID()}`, tokenDigest: digest(token), expiresAt: plusMilliseconds(at, duration) },
       ...(idempotency ? { idempotencyKey: idempotency.key, requestDigest: idempotency.requestDigest } : {})
     };
     const committed = appendEvents(context.paths, events, [event]);
     const allocated = committed.state.packages.find((entry) => entry.id === packageId);
-    return { changed: true, leaseToken, status: reportRuntime(context, committed.state), allocation: publicPackage(allocated) };
+    return { changed: true, leaseToken: token, status: reportRuntime(context, committed.state), allocation: publicPackage(allocated) };
   });
 }
 
@@ -908,6 +984,7 @@ export function transitionRuntimePackage({ missionFile, packageId, to, actor, ex
     if (replay) return replay;
     if (isTerminalRuntimeState(workPackage.state)) throw extensionError('terminal package state cannot transition again', 'RUNTIME_TERMINAL_STATE');
     if (!Number.isSafeInteger(expectedVersion) || expectedVersion !== workPackage.version) throw extensionError(`expected package version ${workPackage.version}`, 'RUNTIME_VERSION_CONFLICT');
+    assertGenericRuntimeTransition(workPackage.state, to);
     const requestedActor = assertRuntimeTransition({ from: workPackage.state, to, actor: declaredActor, holderId: workPackage.run?.holderId ?? null });
     if (['allocated', 'running'].includes(workPackage.state) && ['running', 'changes_ready'].includes(to)) activeLease(workPackage, leaseToken, at);
     if (reason !== null && (typeof reason !== 'string' || !reason.trim() || /[\r\n\0]/.test(reason) || reason.length > 500)) throw extensionError('transition reason must be a bounded one-line string', 'INVALID_RUNTIME_TRANSITION');
@@ -1195,10 +1272,11 @@ export function recordRuntimeAgentReceipt({ missionFile, packageId, runId, agent
 /** Reconcile an interrupted transaction/stale lock and block expired leases. */
 export function recoverRuntime({ missionFile, projectDir = '.', now, policy = defaultRuntimePolicy() } = {}) {
   const context = runtimeContext({ missionFile, projectDir, requireCurrent: false });
-  const recoveredLock = clearStaleRuntimeLock(context.paths);
   const at = nowIso(now);
-  return withRuntimeLock(context.paths, () => {
-    const pending = reconcilePending(context.paths);
+  return withRecoveryGuard(context.paths, () => {
+    const recoveredLock = clearStaleRuntimeLock(context.paths);
+    return withRuntimeLock(context.paths, () => {
+      const pending = reconcilePending(context.paths);
     const { events, state } = readLedger(context.paths);
     const expired = state.packages.filter((entry) => entry.lease && new Date(entry.lease.expiresAt).getTime() <= new Date(at).getTime() && !isTerminalRuntimeState(entry.state));
     let committed = { events, state };
@@ -1218,6 +1296,7 @@ export function recoverRuntime({ missionFile, projectDir = '.', now, policy = de
     }
     const checked = validateRuntimePolicy(policy);
     const warnings = checked.ok && committed.state.policy.digest !== runtimePolicyDigest(policy) ? ['runtime policy digest differs from requested local policy'] : [];
-    return reportRuntime(context, committed.state, { warnings, recovered: { lock: recoveredLock, pending, expiredLeases: expired.map((entry) => entry.id) } });
+      return reportRuntime(context, committed.state, { warnings, recovered: { lock: recoveredLock, pending, expiredLeases: expired.map((entry) => entry.id) } });
+    }, { allowRecovery: true });
   });
 }

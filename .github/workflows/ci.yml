@@ -233,3 +233,23 @@ jobs:
             fi
           done
           echo "example packet is in sync"
+
+  acp-v1-bridge:
+    name: ACP v1 bridge
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # The optional adapter stays outside Core's dependency tree. This isolated
+      # job proves its locked stable-SDK bridge against the fake ACP peer.
+      - name: Install optional ACP adapter dependencies
+        working-directory: factory/integrations/acp-v1
+        run: npm ci --ignore-scripts
+
+      - name: ACP stable v1 fake-peer bridge
+        working-directory: factory/integrations/acp-v1
+        run: npm test

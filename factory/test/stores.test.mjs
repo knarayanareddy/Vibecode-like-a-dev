@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -94,4 +94,33 @@ test('store refresh is a non-mutating reviewed preview followed by an exact comm
   assert.equal(refreshed.store.commit, preview.next.commit);
   assert.equal(refreshed.store.acknowledgedCommit, preview.next.commit);
   assert.equal(storeStatus(project, 'team-playbook').ok, true);
+});
+
+
+test('store assets and copied outputs reject intermediate symbolic-link escapes', (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'vld-store-symlink-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const source = makeStore(root); const project = path.join(root, 'consumer'); const outside = path.join(root, 'outside');
+  mkdirSync(project, { recursive: true }); mkdirSync(outside, { recursive: true });
+  writeFileSync(path.join(outside, 'escaped.md'), '# outside\n');
+  symlinkSync(outside, path.join(source, 'linked'), 'dir');
+  const manifest = JSON.parse(readFileSync(path.join(source, 'vld-store.json'), 'utf8'));
+  manifest.assets.push({ id: 'escaped-asset', kind: 'guidance', file: 'linked/escaped.md' });
+  writeFileSync(path.join(source, 'vld-store.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+  git(source, ['add', '.']); git(source, ['-c', 'user.name=VLD Test', '-c', 'user.email=vld@example.test', 'commit', '-m', 'symlink asset']);
+
+  assert.throws(
+    () => addStore({ projectDir: project, id: 'team-playbook', repository: `file://${source}` }),
+    (error) => error.code === 'INVALID_STORE_MANIFEST' && /not a real directory/.test(error.message)
+  );
+
+  // Use a separate valid pinned store to test output containment independently.
+  const safe = makeStore(path.join(root, 'safe-root'));
+  addStore({ projectDir: project, id: 'team-playbook', repository: `file://${safe}` });
+  symlinkSync(outside, path.join(project, 'docs'), 'dir');
+  assert.throws(
+    () => copyStoreAsset({ projectDir: project, storeId: 'team-playbook', assetId: 'review-notes' }),
+    (error) => error.code === 'INVALID_STORE_OUTPUT'
+  );
+  assert.equal(existsSync(path.join(outside, 'shared', 'team-playbook', 'review-notes.md')), false);
 });
