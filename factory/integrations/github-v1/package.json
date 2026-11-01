@@ -6,6 +6,6 @@
   "type": "module",
   "description": "Optional VLD GitHub REST adapter. Credentials are caller-supplied in memory and never read by VLD Core.",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   }
 }

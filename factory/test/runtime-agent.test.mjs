@@ -9,7 +9,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { createMission } from '../lib/missions.mjs';
 import { runRuntimeAgent, runtimeAgentStatus } from '../lib/runtime-agent.mjs';
-import { allocateRuntimePackage, initializeRuntime, runtimeDebugPaths } from '../lib/runtime.mjs';
+import { allocateRuntimePackage, heartbeatRuntimeLease, initializeRuntime, runtimeDebugPaths } from '../lib/runtime.mjs';
 import { createWorkspace } from '../lib/workspaces.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -157,10 +157,14 @@ test('M4 host turns cancellation into a durable receipt and blocked package', as
   assert.equal(result.status.packages[0].state, 'blocked');
 });
 
-test('M4 host runs one exact read-only local argv and stores only redacted process output', async (t) => {
+test('M4 host runs one exact read-only local argv and persists metadata-only process evidence', async (t) => {
   const value = fixture(t);
   const executableFixture = path.join(value.project, 'local-adapter-fixture.mjs');
-  writeFileSync(executableFixture, `console.log('cwd=' + process.cwd()); console.log('token=runtime-agent-output-secret');`);
+  const secretField = ['access', 'token'].join('_');
+  const cloudField = ['AWS', 'SECRET', 'ACCESS', 'KEY'].join('_');
+  const sensitiveValue = ['runtime', 'agent', 'output', 'secret'].join('-');
+  const cloudValue = ['fixture', 'value'].join('-');
+  writeFileSync(executableFixture, `console.log('cwd=' + process.cwd()); console.log(JSON.stringify({ [${JSON.stringify(secretField)}]: ${JSON.stringify(sensitiveValue)}, aws: ${JSON.stringify(`${cloudField}=${cloudValue}`)} }));`);
   writeFileSync(path.join(value.project, 'agent-policy.json'), `${JSON.stringify(localProcessPolicy(executableFixture))}\n`);
   const result = await runRuntimeAgent({
     missionFile: value.missionFile,
@@ -171,7 +175,38 @@ test('M4 host runs one exact read-only local argv and stores only redacted proce
   });
   assert.equal(result.ok, true);
   assert.equal(result.agentRun.adapter, 'local-process');
-  assert.equal(result.agentRun.output.summary.includes('runtime-agent-output-secret'), false);
+  assert.equal(result.agentRun.output.summary, 'agent completed successfully');
+  assert.equal(result.agentRun.output.summary.includes(sensitiveValue), false);
   assert.equal(result.agentRun.output.summary.includes(value.project), false);
-  assert.match(result.agentRun.output.summary, /token=\[REDACTED\]/);
+  const ledger = readFileSync(runtimeDebugPaths({ missionFile: value.missionFile, projectDir: value.project }).events, 'utf8');
+  assert.equal(ledger.includes(sensitiveValue), false);
+  assert.equal(ledger.includes(cloudValue), false);
+});
+
+
+test('M4 settles a completed adapter after a valid concurrent lease heartbeat', async (t) => {
+  const value = fixture(t);
+  const policy = fakePolicy('succeed'); policy.limits.durationMs = 100;
+  writeFileSync(path.join(value.project, 'agent-policy.json'), `${JSON.stringify(policy)}\n`);
+  const running = runRuntimeAgent({
+    missionFile: value.missionFile,
+    packageId: 'agent-work',
+    policyFile: 'agent-policy.json',
+    leaseToken: value.allocated.leaseToken,
+    projectDir: value.project
+  });
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const heartbeat = heartbeatRuntimeLease({
+    missionFile: value.missionFile,
+    packageId: 'agent-work',
+    runId: value.allocated.allocation.run.id,
+    leaseToken: value.allocated.leaseToken,
+    actor: { role: 'implementer', id: 'agent-alpha' },
+    leaseMs: 30_000,
+    projectDir: value.project
+  });
+  assert.equal(heartbeat.package.state, 'running');
+  const result = await running;
+  assert.equal(result.ok, true);
+  assert.equal(result.status.packages[0].state, 'changes_ready');
 });

@@ -12,7 +12,7 @@
 - [x] **M1 initial mission foundation:** Core validates schema-versioned, complete requirement-linked work-package declarations; it freezes a verified packet digest, Core-policy digest and immutable Git target; `init`, `validate` and read-only `status` have real-Git and public-CLI tests.
 - [x] **M2 manual worktree safety foundation:** `workspace create|status|recover|remove` allocates only a current verified mission package at its frozen commit, uses an atomic common-Git lock and sibling managed root, validates a repository-bound ledger, reports drift and preserves work during recovery. It has real-Git, symlink/state/lock/concurrency, public-CLI and packed-install coverage. [ADR-0004](adr/0004-safe-manual-worktree-allocation.md) fixes its narrow authority boundary.
 - [x] **M3 local Runtime host:** `runtime init|status|allocate|heartbeat|transition|recover|serve` owns versioned fake-run state, policy digest, leases, expected versions, receipts and a bearer-protected loopback API. It has policy/role/lease/recovery/API/public-CLI tests and no execution authority. [ADR-0005](adr/0005-local-runtime-host-and-fake-run-state.md) defines the trust boundary.
-- [x] **M4 adapter-host foundation:** `runtime agent run|status` has a deterministic fake adapter and a strictly policy-declared direct-argv local process adapter. It verifies an M2 workspace plus M3 lease, owns transitions/receipts, excludes parent credentials and retains only redacted output. [ADR-0006](adr/0006-scoped-agent-adapter-host.md) records why unsandboxed local processes are read-only.
+- [x] **M4 adapter-host foundation:** `runtime agent run|status` has a deterministic fake adapter and a strictly policy-declared direct-argv local process adapter. It verifies an M2 workspace plus M3 lease, owns transitions/receipts, excludes parent credentials and persists no arbitrary process output. [ADR-0006](adr/0006-scoped-agent-adapter-host.md) records why unsandboxed local processes are read-only.
 - [x] **M5 candidate/review foundation:** `runtime delivery submit|verify|approve|queue|status` freezes exact branch/base/target/packet/policy identities, uses a Runtime-locked detached integration worktree for only an in-process packet check, and writes independent review/queue receipts. It has no project-command, merge, push, PR, forge or credential authority. [ADR-0007](adr/0007-frozen-candidates-and-no-merge-m5-foundation.md) records the boundary.
 - [x] **M6 local Studio foundation:** `studio serve` and Runtime `/studio` provide a static, accessible mission/receipt dashboard through the existing authenticated loopback API; a VS Code command entry opens the dashboard or a read-only inspector. The UI has no Git/agent/shell/merge/forge authority and retains no token. [ADR-0008](adr/0008-local-studio-is-a-runtime-client.md) records the boundary.
 - [x] **M7 signed content-catalog foundation:** `catalog trust|add|diff|update|status|copy` pins an explicit local Ed25519 trust root and verifies threshold-signed canonical index/package metadata and bounded inert payloads before cache/lock/copy. It has no executable/plugin/enablement authority. [ADR-0009](adr/0009-signed-content-only-catalog.md) records the boundary.
@@ -102,7 +102,7 @@ Policy is data validated by the host, not prompt prose interpreted by an agent.
 
 - [ ] Specify the initial storage interface (`MissionStore`) before choosing an implementation.
 - [ ] Supply a deterministic JSONL implementation for tests and recovery fixtures.
-- [ ] Evaluate SQLite behind the interface only. The inspected Node 22 runtime exposes experimental `node:sqlite`, but VLD's Node 20+ support floor does not guarantee it.
+- [ ] Evaluate SQLite behind the interface only. The inspected Node 22 runtime exposes experimental `node:sqlite`, but VLD's Node 22+ support floor does not guarantee it.
 - [ ] Ensure a storage implementation never writes runtime state into a compiled packet directory.
 - [ ] Use atomic create/write/rename semantics and record schema versions for every persisted file.
 - [ ] Define migration and downgrade behavior; reject unknown future schema versions rather than guessing.
@@ -378,7 +378,7 @@ reconnect(runId) -> current status or explicit unsupported result
 - [x] Construct a digest-only context from VLD-controlled frozen mission/packet/work-package authority; do not persist a raw prompt/transcript.
 - [x] Pass only a fresh non-secret locale allowlist plus VLD-derived identifiers; never inherit the parent environment or a credential handle.
 - [x] Set CWD to a validated M2 allocated worktree immediately before launch.
-- [x] Enforce duration/output/retry limits, process-group termination where supported, cancellation and redacted timeout/cancellation receipts.
+- [x] Enforce duration/output/retry limits, process-group termination where supported, cancellation and metadata-only timeout/cancellation receipts.
 - [x] Keep Git push/merge/network/credential capabilities disabled. A portable CWD is not a sandbox, so unsandboxed `local-process` is read-only; a write capability is rejected until a later sandbox adapter proves isolation.
 - [x] Make the local-process mode read-only; fake runs are process-free deterministic state fixtures.
 - [x] Preserve current `vld agent install` handoffs and document that handoff mode does not imply Runtime execution.
@@ -401,7 +401,7 @@ reconnect(runId) -> current status or explicit unsupported result
 - [x] Verify CWD is the validated allocated worktree; a missing/unsafe workspace is refused before spawn.
 - [x] Verify policy validation rejects write/network/credential/broad environment capability before spawn.
 - [x] Seed a parent secret environment variable and assert it is absent from the fixture; only explicit locale/VLD identifiers are present.
-- [x] Verify output is capped/redacted; token-like text and absolute host paths do not appear in durable receipts/status.
+- [x] Verify arbitrary output is not persisted in durable receipts/status; retain only digest, byte count and fixed outcome labels.
 - [x] Verify timeout/cancel terminates the process group where supported and the Runtime host records a receipt then blocks unsafe work.
 - [x] Verify retry count is bounded and does not create a candidate submission (M4 has no candidate authority).
 
@@ -426,7 +426,7 @@ reconnect(runId) -> current status or explicit unsupported result
 - [ ] Record command/version/model/configuration without recording credentials; retain raw output only in a protected local result location.
 - [ ] Verify the same user journey through an ACP-capable peer when one is available.
 
-**M4 foundation exit:** complete for deterministic fake runs and opt-in read-only direct-argv local processes. They require a frozen lease/workspace, never involve Core model calls or broad credential inheritance, and emit host-owned redacted receipts. A write-capable sandbox adapter and ACP v1 remain separate future gates; do not treat a working-directory setting as confinement.
+**M4 foundation exit:** complete for deterministic fake runs and opt-in read-only direct-argv local processes. They require a frozen lease/workspace, never involve Core model calls or broad credential inheritance, and emit host-owned metadata-only receipts. A write-capable sandbox adapter and ACP v1 remain separate future gates; do not treat a working-directory setting as confinement.
 
 ---
 
@@ -441,7 +441,7 @@ Turn a candidate commit into a frozen, independently reviewed and revalidated me
 - [x] Freeze `{missionId, packageId, candidateSha, baseSha, targetRef, targetSha, packetDigest, policyDigest, adapterRunId, generatedAt}` through a Runtime-owned candidate receipt (M5 foundation).
 - [x] Reject candidate SHA that is not the clean allocated-worktree branch HEAD, is not descended from its frozen base, or is not reachable from the allocated branch (M5 foundation).
 - [x] Define a closed policy-derived verification surface: M5 permits only an in-process VLD packet check and an empty command list; no agent-supplied shell string or project executable exists (M5 foundation).
-- [x] Store the built-in check identity, bounded output digest/redacted summary and candidate/target SHA (M5 foundation; command exit/environment fields await a sandboxed project-check adapter).
+- [x] Store the built-in check identity, bounded output digest, byte count and fixed outcome label and candidate/target SHA (M5 foundation; command exit/environment fields await a sandboxed project-check adapter).
 - [x] Bind review approval to candidate SHA, target SHA, policy digest and reviewer identity; Runtime's current-mission guard fail-closes further mutation when packet/target authority changes (M5 foundation).
 - [x] Persist a closed, versioned Runtime `forge-plan` receipt only after replaying the exact queued candidate, passed verification, independent approval and queue tuple. It binds each receipt ID/digest plus candidate/target SHA and packet/policy digest to a digest-checked, merge-disabled GitHub v1 plan (M8.1).
 - [ ] Emit a final merge receipt with local merge commit or forge PR/merge identifier, target result SHA and linked evidence references (deferred: no merge authority in this release).
@@ -504,7 +504,7 @@ Deliver the interactive one-stop surface over Runtime's local API. Studio displa
 - [x] Add a VS Code command entry point for VLD Studio: open the exact local dashboard URL or a read-only Runtime inspector (M6 foundation).
 - [x] Add a read-only packet/requirements view showing packet digest, Core policy digest, current/stale state and package requirement IDs (M6 foundation; browser file links remain deliberately unavailable).
 - [x] Add a mission board showing package state, dependencies, resource claims, agent/run identity, lease health and blocked cause (M6 foundation; raw worktree paths remain intentionally hidden).
-- [x] Add a run inspector for bounded/redacted adapter summaries and candidate/verification/review/queue receipt identities (M6 foundation; project command checks are not available).
+- [x] Add a run inspector for metadata-only adapter outcome labels and candidate/verification/review/queue receipt identities (M6 foundation; project command checks are not available).
 - [ ] Add approval UI that displays precisely requested privilege/candidate/target digest and requires an explicit operator decision/reason when policy requires it (deferred until a typed Runtime approval endpoint and policy inputs exist).
 - [x] Add an evidence/review view joining package `REQ-` IDs with candidate/verification/review/queue receipt SHA/digest identities (M6 foundation; artifact coverage remains deferred).
 - [x] Add a local queue/verification projection from Runtime delivery receipts (M6 foundation; target movement, ordering and forge links require later merge/provider work).

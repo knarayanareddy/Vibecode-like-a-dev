@@ -21,3 +21,20 @@ test('optional bridge completes a stable v1 fake peer session without client cap
   assert.equal(result.outputBytes, 0);
   assert.deepEqual(events.map((event) => event.type), ['started', 'completed']);
 });
+
+
+test('abort bounds an unresponsive ACP cancel RPC and escalates a SIGTERM-ignoring peer', async (t) => {
+  const workspace = mkdtempSync(path.join(os.tmpdir(), 'vld-acp-v1-cancel-')); t.after(() => rmSync(workspace, { recursive: true, force: true }));
+  const controller = new AbortController();
+  const abortTimer = setTimeout(() => controller.abort(), 40);
+  const started = Date.now();
+  const result = await runAcpV1Adapter({
+    spec: { id: 'agent-run-cancel', missionId: 'fixture-mission', packageId: 'fixture-package', packetDigest: HASH, contextDigest: HASH, requirementIds: ['REQ-001'], workspace },
+    policy: { environment: {}, limits: { durationMs: 3_000 }, command: { script: null, executable: process.execPath, args: [PEER, '--ignore-cancel'] }, capabilities: { reconnect: false } },
+    signal: controller.signal
+  });
+  clearTimeout(abortTimer);
+  assert.equal(result.outcome, 'cancelled');
+  assert.equal(result.signal, 'SIGTERM');
+  assert.ok(Date.now() - started < 1_500, 'local termination must not wait for the peer policy timeout');
+});

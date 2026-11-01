@@ -20,7 +20,7 @@ The policy cannot contain a shell snippet, credential field, network grant, Git 
 
 The M4 host starts only an already allocated package with a healthy M2 workspace and a live M3 lease token. It constructs a digest-only context reference from frozen mission/packet/policy data, moves the package to `running`, then records an `agent-run` Runtime ledger receipt before it either advances to `changes_ready` or blocks the package.
 
-An adapter can emit normalized progress metadata only. It cannot transition a package, broaden a policy, submit a candidate, approve, queue, merge, push, open a PR, run project verification, or make a network request. Receipt output is bounded, redacted and digest-linked; no raw stdout/stderr, host path, argv, environment, lease token, credential or prompt transcript is persisted.
+An adapter can emit normalized progress metadata only. It cannot transition a package, broaden a policy, submit a candidate, approve, queue, merge, push, open a PR, run project verification, or make a network request. Receipt output retains only a digest, byte count and fixed outcome label. Arbitrary stdout/stderr is never persisted: pattern redaction is display-only and is not treated as a proof that a value is credential-free. Host paths, argv, environment, lease tokens and prompt transcripts are not persisted.
 
 ### 3. Two intentionally different M4 adapters
 
@@ -36,7 +36,7 @@ Existing `vld agent install` handoffs remain separate generated documentation; i
 **Gained**
 
 - A deterministic fake run and a real, opt-in, direct-argv local process path can be exercised without Core dependencies, model calls, credentials or network.
-- Runtime receipts bind adapter/policy/context/workspace digests and redacted execution facts to the allocated run.
+- Runtime receipts bind adapter/policy/context/workspace digests and metadata-only execution facts to the allocated run.
 - Accidental parent environment secrets, shell injection and CWD substitution are refused or excluded by construction.
 - Failed, timed-out and cancelled adapter executions leave a host-owned receipt and a blocked package rather than a self-certified success state.
 
@@ -52,4 +52,4 @@ Existing `vld agent install` handoffs remain separate generated documentation; i
 - **Pass a formatted command string to a shell.** That makes task, package and policy text command-injection surfaces.
 - **Forward `process.env`.** It leaks unrelated tokens and credentials into an adapter.
 - **Let the adapter call lifecycle transition APIs directly.** It bypasses lease/version/role checks and makes agent output operational authority.
-- **Persist raw logs for debugging.** Raw output can contain tokens, paths and prompt content; the receipt keeps a digest and bounded redacted summary instead.
+- **Persist raw logs for debugging.** Raw output can contain tokens, paths and prompt content; the receipt keeps only a digest, byte count and fixed outcome label.

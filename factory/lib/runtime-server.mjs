@@ -144,9 +144,9 @@ function dispatch({ request, actor, missionFile, projectDir, close }) {
       };
     }
     case 'allocate': {
-      closedParams(params, new Set(['packageId', 'assignee', 'leaseMs']), 'allocate');
+      closedParams(params, new Set(['packageId', 'assignee', 'leaseMs', 'leaseToken']), 'allocate');
       if (!ID_PATTERN.test(String(params.packageId ?? ''))) throw extensionError('allocate params.packageId is invalid', 'INVALID_RUNTIME_REQUEST');
-      return allocateRuntimePackage({ missionFile, projectDir, packageId: params.packageId, actor, assignee: params.assignee, leaseMs: params.leaseMs, idempotencyKey: request.requestId });
+      return allocateRuntimePackage({ missionFile, projectDir, packageId: params.packageId, actor, assignee: params.assignee, leaseMs: params.leaseMs, leaseToken: params.leaseToken, idempotencyKey: request.requestId });
     }
     case 'heartbeat': {
       closedParams(params, new Set(['packageId', 'runId', 'leaseToken', 'leaseMs']), 'heartbeat');

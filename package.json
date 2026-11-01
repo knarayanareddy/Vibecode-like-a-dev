@@ -28,7 +28,7 @@
     "eval": "node scripts/eval-library.mjs && node scripts/eval-specificity.mjs && node scripts/eval-routing.mjs && node scripts/eval-outcome.mjs"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "keywords": [
     "spec-driven-development",

@@ -31,7 +31,7 @@ Ship a closed local foundation first.
    project command, inherited environment or agent-selected executable.
 3. Verification creates a Runtime-lock-serialized, detached temporary worktree at
    the frozen target SHA, integrates the exact candidate with fixed Git argv and
-   records either a conflict or a bounded/redacted check receipt. The worktree is
+   records either a conflict or a bounded check receipt. The worktree is
    forcibly removed in `finally`; no branch/ref is updated.
 4. A review receipt is bound to candidate SHA, target SHA and policy digest. The
    reducer enforces a reviewer role different from the implementer. Queueing

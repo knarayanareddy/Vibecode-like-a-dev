@@ -7,6 +7,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { digest, ensureProjectDir, extensionError, ID_PATTERN, readJson, stableJson, vldDir, writeJsonAtomic } from './extension-utils.mjs';
@@ -48,11 +49,81 @@ export function validateRepository(repository) {
   }
   return value;
 }
+function regularDirectory(target, label) {
+  let stats;
+  try { stats = lstatSync(target); } catch { throw extensionError(`${label} is missing`, 'INVALID_STORE_PATH'); }
+  if (stats.isSymbolicLink() || !stats.isDirectory()) throw extensionError(`${label} is not a real directory`, 'INVALID_STORE_PATH');
+}
+
+/**
+ * Lexical containment is not filesystem containment: an intermediate symlink
+ * can otherwise escape a trusted store/project root. Validate every existing
+ * component before using it. The managed project/store root itself must also be
+ * a real directory.
+ */
+function containedPath(root, relative, label) {
+  const base = path.resolve(root);
+  const resolved = path.resolve(base, relative);
+  if (!resolved.startsWith(`${base}${path.sep}`)) throw extensionError(`${label} escapes its trusted root`, 'INVALID_STORE_PATH');
+  regularDirectory(base, `${label} root`);
+  let cursor = base;
+  for (const part of path.relative(base, resolved).split(path.sep).filter(Boolean).slice(0, -1)) {
+    cursor = path.join(cursor, part);
+    let stats;
+    try { stats = lstatSync(cursor); } catch (error) { if (error?.code === 'ENOENT') break; throw error; }
+    if (stats.isSymbolicLink() || !stats.isDirectory()) throw extensionError(`${label} parent is not a real directory`, 'INVALID_STORE_PATH');
+  }
+  return resolved;
+}
+
 function assetPath(root, relative) {
   if (typeof relative !== 'string' || !SAFE_ASSET.test(relative)) throw extensionError(`asset file "${relative}" is not a safe relative path`, 'INVALID_STORE_MANIFEST');
-  const resolved = path.resolve(root, relative);
-  if (!resolved.startsWith(`${root}${path.sep}`)) throw extensionError(`asset file "${relative}" escapes the store`, 'INVALID_STORE_MANIFEST');
+  const resolved = containedPath(root, relative, `asset file "${relative}"`);
+  try {
+    const stats = lstatSync(resolved);
+    if (stats.isSymbolicLink()) throw extensionError(`asset file "${relative}" is a symbolic link`, 'INVALID_STORE_MANIFEST');
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+  }
   return resolved;
+}
+
+function createOutputParents(project, target) {
+  const base = path.resolve(project);
+  regularDirectory(base, 'store asset project root');
+  let cursor = base;
+  for (const part of path.relative(base, path.dirname(target)).split(path.sep).filter(Boolean)) {
+    cursor = path.join(cursor, part);
+    try {
+      const stats = lstatSync(cursor);
+      if (stats.isSymbolicLink() || !stats.isDirectory()) throw extensionError('store asset output has an unsafe parent path', 'INVALID_STORE_OUTPUT');
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+      mkdirSync(cursor, { mode: 0o700 });
+      regularDirectory(cursor, 'store asset output parent');
+    }
+  }
+}
+
+function writeOutput(target, content, force) {
+  let existing = null;
+  try { existing = lstatSync(target); } catch (error) { if (error?.code !== 'ENOENT') throw error; }
+  if (existing?.isSymbolicLink() || (existing && !existing.isFile())) throw extensionError('store asset output is not a regular file', 'INVALID_STORE_OUTPUT');
+  if (existing && !force) throw extensionError(`${target} exists; pass --force to replace it`, 'STORE_ASSET_EXISTS');
+  if (!force) {
+    // O_EXCL refuses a racing final symlink/file rather than following it.
+    writeFileSync(target, content, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+    return;
+  }
+  // Rename replaces a final symlink itself rather than following it. The temp
+  // file is created in the vetted output directory so it cannot cross devices.
+  const temporary = path.join(path.dirname(target), `.${path.basename(target)}.${process.pid}.${randomUUID()}.tmp`);
+  try {
+    writeFileSync(temporary, content, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+    renameSync(temporary, target);
+  } finally {
+    rmSync(temporary, { force: true });
+  }
 }
 
 /** Validate a manifest and return only data safe to record in a project lock. */
@@ -300,9 +371,8 @@ export function copyStoreAsset({ projectDir = '.', storeId, assetId, out = null,
     throw extensionError('store asset output must be a non-state path inside the project', 'INVALID_STORE_OUTPUT');
   }
   if (!target.endsWith('.md')) throw extensionError('store asset output must be a Markdown file', 'INVALID_STORE_OUTPUT');
-  if (existsSync(target) && !force) throw extensionError(`${target} exists; pass --force to replace it`, 'STORE_ASSET_EXISTS');
-  mkdirSync(path.dirname(target), { recursive: true });
-  writeFileSync(target, loaded.content, 'utf8');
+  createOutputParents(loaded.project, target);
+  writeOutput(target, loaded.content, force);
   return { ...loaded, output: target };
 }
 
