@@ -41,6 +41,15 @@ function samePath(left, right) {
     : normalizedLeft === normalizedRight;
 }
 
+/** Compare existing paths by filesystem identity to absorb Windows 8.3/case and macOS alias spelling. */
+function sameFilesystemPath(left, right) {
+  try {
+    return samePath(realpathSync(left), realpathSync(right));
+  } catch {
+    return samePath(left, right);
+  }
+}
+
 function displayRelative(root, target) {
   return path.relative(root, target).split(path.sep).join('/');
 }
@@ -443,7 +452,7 @@ function isRealDirectoryTree(root, candidate) {
 function healthForAllocation(allocation, worktrees, root) {
   if (!allocation || typeof allocation.worktree !== 'string') return { state: 'drifted', detail: 'registered allocation has an invalid worktree path' };
   const allocationPath = path.resolve(allocation.worktree);
-  const worktree = worktrees.find((entry) => entry.path === allocationPath);
+  const worktree = worktrees.find((entry) => sameFilesystemPath(entry.path, allocationPath));
   if (!worktree || !existsSync(allocationPath)) return { state: 'missing', detail: 'registered worktree is absent' };
   if (!isRealDirectoryTree(root, allocationPath)) return { state: 'drifted', detail: 'registered worktree contains a symbolic link or is not a real directory' };
   if (worktree.branch !== `refs/heads/${allocation.branch}`) return { state: 'drifted', detail: `expected branch refs/heads/${allocation.branch}, found ${worktree.branch ?? 'detached HEAD'}` };
@@ -528,7 +537,7 @@ export function createWorkspace({ missionFile, packageId, projectDir = '.' } = {
       if (overlap) warnings.push(`resource claim "${overlap}" overlaps allocated package "${allocation.packageId}"; worktree isolation does not prevent a later merge conflict`);
     }
     if (branchExists(repo, workspace.branch)) throw extensionError(`workspace branch "${workspace.branch}" already exists; run recover or choose a new mission/package id`, 'WORKSPACE_BRANCH_EXISTS');
-    if (existsSync(workspace.directory) || worktrees.some((entry) => entry.path === workspace.directory)) {
+    if (existsSync(workspace.directory) || worktrees.some((entry) => sameFilesystemPath(entry.path, workspace.directory))) {
       throw extensionError(`workspace path already exists: ${workspace.directory}`, 'WORKSPACE_PATH_EXISTS');
     }
 
@@ -589,8 +598,8 @@ export function workspaceStatus({ missionFile, projectDir = '.' } = {}) {
   });
   for (const entry of packageStatus) if (entry.status.state !== 'healthy' && entry.status.state !== 'unallocated') warnings.push(`work package "${entry.id}" is ${entry.status.state}: ${entry.status.detail}`);
   const root = workspaceRoot(repo);
-  const known = new Set((loadedState.state?.allocations ?? []).filter((entry) => typeof entry?.worktree === 'string').map((entry) => path.resolve(entry.worktree)));
-  const unmanaged = worktrees.filter((entry) => isWithin(root, entry.path) && !known.has(entry.path)).map((entry) => entry.path);
+  const known = (loadedState.state?.allocations ?? []).filter((entry) => typeof entry?.worktree === 'string').map((entry) => entry.worktree);
+  const unmanaged = worktrees.filter((entry) => isWithin(root, entry.path) && !known.some((registered) => sameFilesystemPath(registered, entry.path))).map((entry) => entry.path);
   if (unmanaged.length) warnings.push(`${unmanaged.length} managed-root worktree(s) are not recorded in workspace state`);
   const missionCurrent = missionReport.ok;
   return {
