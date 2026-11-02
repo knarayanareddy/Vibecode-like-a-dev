@@ -14,7 +14,6 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { adoptRepo, isRemoteRepo, writeAdoptedProfile } from './lib/adopt.mjs';
 import { artifactStatus, initArtifact, listArtifacts, validateArtifact, verifyArtifacts } from './lib/artifacts.mjs';
-import { initDiscoverabilityReadiness, validateDiscoverabilityReadiness } from './lib/discoverability-readiness.mjs';
 import { agentStatus, installAgent, listAdapters } from './lib/agents.mjs';
 import { applyBundle, getBundle, listBundles } from './lib/bundles.mjs';
 import { CHANGE_TEMPLATE, applyChange, archiveChange, emitChange, planChange, verifyChange } from './lib/change.mjs';
@@ -647,7 +646,9 @@ function runArtifact() {
   } catch (error) { fail(error.message); }
 }
 
-function runDiscoverabilityReadiness() {
+async function runDiscoverabilityReadiness() {
+  // Keep this optional advisory surface out of unrelated CLI command graphs.
+  const { initDiscoverabilityReadiness, validateDiscoverabilityReadiness } = await import('./lib/discoverability-readiness.mjs');
   const [action] = positional;
   const common = {
     projectDir: option('--project', '.'),
@@ -1557,7 +1558,7 @@ switch (command) {
     runArtifact();
     break;
   case 'discoverability-readiness':
-    runDiscoverabilityReadiness();
+    await runDiscoverabilityReadiness();
     break;
   case 'export':
     runExport();
