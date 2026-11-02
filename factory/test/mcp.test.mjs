@@ -204,6 +204,16 @@ test('protocol errors follow JSON-RPC', () => {
   assert.equal(handleMessage({ jsonrpc: '2.0', method: 'some/notification' }), null);
 });
 
+test('MCP rejects malformed envelopes and numeric coercion instead of silently changing requests', () => {
+  for (const invalid of [null, [], 1, {}, { jsonrpc: '2.0', id: {}, method: 'ping' }, { jsonrpc: '2.0', id: 1, method: 'ping', params: [] }]) {
+    assert.equal(handleMessage(invalid).error.code, -32600, JSON.stringify(invalid));
+  }
+  const badLimit = handleMessage({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'search_primitives', arguments: { query: 'testing', limit: '50' } } });
+  assert.equal(badLimit.error.code, -32602);
+  const badTier = handleMessage({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'get_gates', arguments: { tier: 4 } } });
+  assert.equal(badTier.error.code, -32602);
+});
+
 function runMcpUntilEof(source) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [path.join(ROOT, 'factory', 'cli.mjs'), 'mcp'], { stdio: ['pipe', 'pipe', 'pipe'] });

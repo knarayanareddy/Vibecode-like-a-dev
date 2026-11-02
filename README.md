@@ -497,7 +497,7 @@ Tier is a function of risk signals and stage, with an explicit cap so prototypes
 
 | Tier | Score | Practices | Packet | Typical |
 | --- | --- | --- | --- | --- |
-| 0 sketch | 0 | 6 | single file, ≤140 lines | spike, throws away |
+| 0 sketch | 0 | 6 | single file, ≤160 lines | spike, throws away |
 | 1 standard | 1-3 | 22 | full, ~900 lines | MVP with users |
 | 2 production | 4-6 | 28 | full, ~1000 lines | real money or personal data at scale |
 | 3 critical | 7+ | 34 | full, ~1100 lines | payments, regulated, multi-tenant |

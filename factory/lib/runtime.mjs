@@ -884,7 +884,9 @@ export function runtimeStatus({ missionFile, projectDir = '.', now } = {}) {
 
 /**
  * Read the exact durable tuple that may be bound into a data-only forge plan.
- * The caller receives no Runtime paths, credential material or provider facts.
+ * This is local-ledger evidence only: the caller receives no Runtime paths,
+ * credential material, provider facts, GitHub ref/PR state, CI status, or
+ * branch-protection attestation.
  */
 export function runtimeForgeEvidence({ missionFile, packageId, candidateId, projectDir = '.', policy = defaultRuntimePolicy() } = {}) {
   const context = runtimeContext({ missionFile, projectDir, requireCurrent: true });
@@ -903,6 +905,11 @@ export function runtimeForgeEvidence({ missionFile, packageId, candidateId, proj
     if (!candidate || !verification || verification.outcome !== 'passed' || !approval || !queue) throw extensionError('forge plan requires one passed verification, independent approval and queue receipt', 'RUNTIME_FORGE_TUPLE_INVALID');
     if (candidate.candidateSha !== verification.candidateSha || candidate.targetSha !== verification.targetSha || candidate.policyDigest !== verification.policyDigest || candidate.candidateSha !== approval.candidateSha || candidate.targetSha !== approval.targetSha || candidate.policyDigest !== approval.policyDigest || candidate.candidateSha !== queue.candidateSha || candidate.targetSha !== queue.targetSha || candidate.policyDigest !== queue.policyDigest) throw extensionError('forge plan tuple authority does not match', 'RUNTIME_FORGE_TUPLE_INVALID');
     return {
+      authority: {
+        scope: 'local-ledger',
+        externalAttestation: false,
+        limitations: ['no-provider-ref', 'no-pull-request-state', 'no-ci-status', 'no-branch-protection-state']
+      },
       mission: { id: context.mission.id, targetRef: context.mission.target.ref, targetSha: context.mission.target.commit, packetDigest: context.mission.packet.digest },
       package: publicPackage(workPackage),
       candidate: publicDeliveryReceipt(candidate),

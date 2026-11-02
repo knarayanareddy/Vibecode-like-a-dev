@@ -380,7 +380,7 @@ function detectSchemaSignals(scan) {
   const signals = { multiTenant: [], pii: [], destructive: [] };
   const sources = [
     ...scan.filesMatching(/schema\.prisma$|\.sql$|migrations?\//).slice(0, 60),
-    ...scan.contentSample.filter((file) => /model|entity|schema/i).slice(0, 40)
+    ...scan.contentSample.filter((file) => /model|entity|schema/i.test(file)).slice(0, 40)
   ];
 
   for (const file of new Set(sources)) {

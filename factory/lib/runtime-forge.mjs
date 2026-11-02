@@ -42,6 +42,7 @@ function deterministicBody(evidence) {
   const { candidate, verification, approval, queue } = evidence;
   return [
     'VLD Runtime safe forge plan export.',
+    'Authority scope: local Runtime ledger only; this is not provider, PR, CI, ref, or branch-protection attestation.',
     '',
     `Candidate: ${candidate.id}`,
     `Candidate SHA: ${candidate.candidateSha}`,

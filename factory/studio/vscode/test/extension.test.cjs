@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const http = require('node:http');
 const test = require('node:test');
 const extension = require('../extension.cjs');
 
@@ -22,4 +23,21 @@ test('Studio rendering keeps its content-security boundary and redacts control c
   assert.match(html, /acquireVsCodeApi/);
   assert.equal(extension.safeError(new Error('bad\nmessage\0')), 'bad message ');
   assert.deepEqual(extension.safeRuntimeValue({ value: 'safe\u202eevil' }), { value: 'safe�evil' });
+});
+
+test('Studio rejects an oversized Runtime response before buffering it', async () => {
+  const server = http.createServer((request, response) => {
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ ok: true, result: { payload: 'x'.repeat(20_000) } }));
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const { port } = server.address();
+    await assert.rejects(
+      extension.runtimeStatus(new URL(`http://127.0.0.1:${port}/v1/runtime`), 'test-token', { maxBytes: 512 }),
+      /exceeds 512 bytes/
+    );
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
 });

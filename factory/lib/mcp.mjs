@@ -495,8 +495,8 @@ const HANDLERS = {
   },
 
   search_primitives(args) {
-    const maxTier = Number.isInteger(args.maxTier) ? args.maxTier : 3;
-    const limit = Math.min(args.limit ?? 10, 50);
+    const maxTier = args.maxTier ?? 3;
+    const limit = args.limit ?? 10;
     const activate = args.activate === true;
     const ranked = rankPrimitives(index().primitives, args.query, {
       maxTier,
@@ -570,7 +570,7 @@ const HANDLERS = {
 
   get_gates(args) {
     const policy = loadPolicy();
-    const tier = Math.max(0, Math.min(3, Number(args.tier ?? 0)));
+    const tier = args.tier ?? 0;
     const gates = [];
     for (let current = 0; current <= tier; current += 1) {
       for (const gate of policy.gates[String(current)] ?? []) gates.push({ ...gate, tier: current });
@@ -608,7 +608,7 @@ const HANDLERS = {
     const tag = '@' + 'req';
     return {
       marker: tag,
-      syntax: `${tag} REQ-xxx in TypeScript/JS/Go/Rust/Java, or # ${tag} REQ-xxx in Python/Ruby/Shell: strictly ONE requirement ID per anchor comment line`,
+      syntax: `${tag} REQ-<three-or-more digits> in TypeScript/JS/Go/Rust/Java, or # ${tag} REQ-<three-or-more digits> in Python/Ruby/Shell; repeat the marker for every requirement ID on the line`,
       countedIn: 'test files only: tests/, test/, __tests__/, spec/, *.test.*, *.spec.*, test_*.py, *_test.{py,go,rb,rs,exs}, *Test.{java,kt,cs,php}',
       ratchet: 'requirements start as "todo" (pending notice); marking one "done" without an anchor in a test is an error',
       checks: [
@@ -634,6 +634,29 @@ const HANDLERS = {
 
 // -------------------------------------------------------------- JSON-RPC
 
+const MAX_REQUEST_BYTES = 1_000_000;
+const isPlainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+
+function invalidParams(id, message) {
+  return rpcError(id ?? null, -32602, message);
+}
+
+function validateToolCall(params, id) {
+  if (!isPlainObject(params)) return invalidParams(id, 'tools/call params must be an object');
+  if (typeof params.name !== 'string' || params.name === '') return invalidParams(id, 'tools/call params.name must be a non-empty string');
+  if ('arguments' in params && !isPlainObject(params.arguments)) return invalidParams(id, 'tools/call params.arguments must be an object');
+  const args = params.arguments ?? {};
+  if (params.name === 'search_primitives') {
+    if (typeof args.query !== 'string') return invalidParams(id, 'search_primitives query must be a string');
+    if (args.maxTier !== undefined && (!Number.isInteger(args.maxTier) || args.maxTier < 0 || args.maxTier > 3)) return invalidParams(id, 'search_primitives maxTier must be an integer from 0 to 3');
+    if (args.limit !== undefined && (!Number.isInteger(args.limit) || args.limit < 1 || args.limit > 50)) return invalidParams(id, 'search_primitives limit must be an integer from 1 to 50');
+  }
+  if (params.name === 'get_gates' && args.tier !== undefined && (!Number.isInteger(args.tier) || args.tier < 0 || args.tier > 3)) {
+    return invalidParams(id, 'get_gates tier must be an integer from 0 to 3');
+  }
+  return null;
+}
+
 function rpcResult(id, result) {
   return { jsonrpc: '2.0', id, result };
 }
@@ -643,6 +666,15 @@ function rpcError(id, code, message, data) {
 }
 
 export function handleMessage(message) {
+  if (!isPlainObject(message) || message.jsonrpc !== '2.0' || typeof message.method !== 'string') {
+    return rpcError(null, -32600, 'Invalid Request: expected a JSON-RPC 2.0 object with a string method');
+  }
+  if ('id' in message && message.id !== null && typeof message.id !== 'string' && typeof message.id !== 'number') {
+    return rpcError(null, -32600, 'Invalid Request: id must be a string, number, or null');
+  }
+  if ('params' in message && !isPlainObject(message.params)) {
+    return rpcError(message.id ?? null, -32600, 'Invalid Request: params must be an object');
+  }
   const { id, method, params } = message;
 
   if (method === 'initialize') {
@@ -660,7 +692,9 @@ export function handleMessage(message) {
   if (method === 'tools/list') return rpcResult(id, { tools: TOOLS });
 
   if (method === 'tools/call') {
-    const name = params?.name;
+    const validationError = validateToolCall(params, id);
+    if (validationError) return validationError;
+    const name = params.name;
     const handler = HANDLERS[name];
     if (!handler) return rpcError(id, -32602, `Unknown tool: ${name}`);
     try {
@@ -683,6 +717,7 @@ export function handleMessage(message) {
 
 export function serve({ input = process.stdin, output = process.stdout } = {}) {
   let buffer = '';
+  let discardingOversizeLine = false;
 
   const send = (message) => {
     if (message) output.write(`${JSON.stringify(message)}\n`);
@@ -700,10 +735,27 @@ export function serve({ input = process.stdin, output = process.stdout } = {}) {
 
   input.on('data', (chunk) => {
     buffer += chunk.toString('utf8');
+    if (discardingOversizeLine) {
+      const newline = buffer.indexOf('\n');
+      if (newline === -1) {
+        buffer = '';
+        return;
+      }
+      buffer = buffer.slice(newline + 1);
+      discardingOversizeLine = false;
+    }
+    if (Buffer.byteLength(buffer, 'utf8') > MAX_REQUEST_BYTES && buffer.indexOf('\n') === -1) {
+      buffer = '';
+      discardingOversizeLine = true;
+      send(rpcError(null, -32600, `Invalid Request: line exceeds ${MAX_REQUEST_BYTES} bytes`));
+      return;
+    }
     let newline = buffer.indexOf('\n');
     while (newline !== -1) {
-      processLine(buffer.slice(0, newline));
+      const line = buffer.slice(0, newline);
       buffer = buffer.slice(newline + 1);
+      if (Buffer.byteLength(line, 'utf8') > MAX_REQUEST_BYTES) send(rpcError(null, -32600, `Invalid Request: line exceeds ${MAX_REQUEST_BYTES} bytes`));
+      else processLine(line);
       newline = buffer.indexOf('\n');
     }
   });
@@ -712,7 +764,7 @@ export function serve({ input = process.stdin, output = process.stdout } = {}) {
     // JSON-RPC streams commonly delimit messages with newlines, but EOF still
     // terminates a complete final JSON value. Process it before Node naturally
     // exits; calling process.exit() here previously lost the final request.
-    processLine(buffer);
+    if (!discardingOversizeLine) processLine(buffer);
     buffer = '';
   });
   return { send };

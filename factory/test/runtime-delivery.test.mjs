@@ -119,6 +119,12 @@ test('M5 delivery foundation and M8.1 forge export bind only a verified approved
     now: '2026-11-01T00:00:00.000Z'
   };
   const prepared = prepareRuntimeForgePlan(forgeRequest);
+  assert.deepEqual(prepared.evidence.authority, {
+    scope: 'local-ledger',
+    externalAttestation: false,
+    limitations: ['no-provider-ref', 'no-pull-request-state', 'no-ci-status', 'no-branch-protection-state']
+  });
+  assert.match(prepared.plan.body, /local Runtime ledger only/);
   assert.equal(prepared.plan.allowMergeRequest, false, 'offline export plans can never authorize merge requests');
   assert.equal(prepared.plan.headSha, submitted.candidate.candidateSha);
   assert.equal(prepared.forge.queueId, queued.queue.id);
