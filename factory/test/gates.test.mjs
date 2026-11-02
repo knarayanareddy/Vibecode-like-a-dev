@@ -131,6 +131,22 @@ test('a missing document fails the gate that needs it, and names the fix', () =>
   }
 });
 
+test('the generated gate runner keeps JSON fixture text out of anchor evidence, matching spec-check', () => {
+  const p = packet();
+  try {
+    const repo = satisfyingRepo(p, path.join(p.root, 'repo'));
+    const marker = ['@', 'req REQ-999'].join('');
+    write(repo, 'fixtures/adversarial.json', JSON.stringify({ idea: `quoted ${marker} marker` }));
+    const summary = JSON.parse(run(p.outDir, ['--repo', repo, '--json']).stdout);
+    for (const id of ['G1-DOMAIN-TESTS', 'G1-AC-TRACE']) {
+      const result = summary.results.find((entry) => entry.id === id);
+      assert.equal(result?.status, 'pass', `${id} should ignore JSON fixture text: ${JSON.stringify(result)}`);
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
 test('the generated gate runner skips linked external files and directory loops', () => {
   const p = packet();
   try {

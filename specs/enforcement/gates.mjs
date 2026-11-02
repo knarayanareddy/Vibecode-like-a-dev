@@ -144,7 +144,11 @@ const JSON_OUT = flag('--json');
 const REPO = path.resolve(option('--repo', process.cwd()));
 
 const IGNORED = new Set(['node_modules', '.git', 'dist', 'build', 'out', 'coverage', 'vendor', '.next', '.nuxt', '.venv', 'venv', '__pycache__', 'target', '.turbo']);
-const SOURCE = /\.(ts|tsx|js|jsx|mjs|cjs|py|go|rb|java|kt|cs|php|rs|dart|ex|exs|swift|sh|yml|yaml|json|toml|tf|env|ini|conf)$/;
+// Anchor semantics must match the shipped spec checker and factory verifier.
+// Configuration files may quote @req in fixtures or metadata; they are not source
+// evidence and must not create a stray-anchor failure in only the gate runner.
+const SOURCE = /\.(ts|tsx|js|jsx|mjs|cjs|py|go|rb|java|kt|cs|php|rs|sh|feature|exs)$/;
+const SECRET_SOURCE = /\.(ts|tsx|js|jsx|mjs|cjs|py|go|rb|java|kt|cs|php|rs|dart|ex|exs|swift|sh|yml|yaml|json|toml|tf|env|ini|conf)$/;
 const TEST_PATH = /(^|\/)(tests?|__tests__|spec|e2e)\//i;
 const TEST_NAME = /\.(test|spec)\.[a-z]+$|(^|\/)test_[^/]+\.py$|_test\.(py|go|rb|rs|exs)$|Tests?\.(java|kt|cs|php)$/;
 const ANCHOR_LINE = /@req\s+(REQ-\d{3,})/g;
@@ -377,7 +381,7 @@ function check(rule) {
     case 'no-secrets': {
       const hits = [];
       for (const file of relative) {
-        if (!SOURCE.test(file) && !/\.env/.test(file)) continue;
+        if (!SECRET_SOURCE.test(file) && !/\.env/.test(file)) continue;
         if (/\.(lock|min|map)$/.test(file)) continue;
         const text = read(file);
         for (const [index, line] of text.split('\n').entries()) {
