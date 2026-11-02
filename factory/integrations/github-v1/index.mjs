@@ -35,7 +35,10 @@ export function createGitHubV1Client({ token, fetchImpl = globalThis.fetch, apiU
   if (typeof fetchImpl !== 'function') throw extensionError('GitHub adapter fetch implementation is invalid', 'INVALID_GITHUB_CLIENT');
   if (apiUrl !== API) throw extensionError('GitHub adapter only permits the public GitHub REST API endpoint', 'INVALID_GITHUB_ENDPOINT');
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 60_000) throw extensionError('GitHub adapter timeout must be 100ms to 60s', 'INVALID_GITHUB_CLIENT');
-  async function request(method, pathname, body = null) {
+  async function requestPage(method, pathname, body = null) {
+    // Pagination links are accepted only when they remain on the public GitHub
+    // API. The adapter never follows an arbitrary Link header supplied by a peer.
+    if (typeof pathname !== 'string' || !pathname.startsWith('/')) throw extensionError('GitHub request path is invalid', 'GITHUB_RESPONSE_INVALID');
     const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), timeoutMs); let response;
     try {
       response = await fetchImpl(`${API}${pathname}`, {
@@ -51,9 +54,22 @@ export function createGitHubV1Client({ token, fetchImpl = globalThis.fetch, apiU
       const code = status === 401 ? 'GITHUB_AUTH_FAILED' : exhausted || status === 429 ? 'GITHUB_RATE_LIMITED' : status === 403 ? 'GITHUB_FORBIDDEN' : status >= 500 ? 'GITHUB_UNAVAILABLE' : 'GITHUB_REQUEST_FAILED';
       throw extensionError(`GitHub ${method} request was rejected (${status || 'network'})`, code);
     }
-    try { return await response.json(); } catch { throw extensionError('GitHub response was not valid JSON', 'GITHUB_RESPONSE_INVALID'); }
+    let result;
+    try { result = await response.json(); } catch { throw extensionError('GitHub response was not valid JSON', 'GITHUB_RESPONSE_INVALID'); }
+    const links = String(response.headers?.get?.('link') ?? '');
+    const nextMatch = /<([^>]+)>;\s*rel="next"/i.exec(links);
+    let next = null;
+    if (nextMatch) {
+      try {
+        const url = new URL(nextMatch[1]);
+        if (url.origin !== API || !url.pathname.startsWith('/')) throw new Error('foreign link');
+        next = `${url.pathname}${url.search}`;
+      } catch { throw extensionError('GitHub pagination link is invalid', 'GITHUB_RESPONSE_INVALID'); }
+    }
+    return { result, next };
   }
-  return { request };
+  async function request(method, pathname, body = null) { return (await requestPage(method, pathname, body)).result; }
+  return { request, requestPage };
 }
 
 export async function publishGitHubPullRequest({ client, plan } = {}) {
@@ -65,6 +81,62 @@ export async function publishGitHubPullRequest({ client, plan } = {}) {
   return { planDigest: plan.digest, pullRequest: validatePull(raw, expected) };
 }
 
+const MAX_PREFLIGHT_PAGES = 20;
+const MAX_PREFLIGHT_ITEMS = 2_000;
+
+function orderValue(item) {
+  const timestamp = Date.parse(String(item?.completed_at ?? item?.submitted_at ?? item?.started_at ?? item?.updated_at ?? ''));
+  return [Number.isFinite(timestamp) ? timestamp : -1, Number.isSafeInteger(item?.id) ? item.id : -1];
+}
+function later(left, right) {
+  const a = orderValue(left), b = orderValue(right);
+  return a[0] > b[0] || (a[0] === b[0] && a[1] > b[1]);
+}
+
+async function paged(client, pathname, kind) {
+  const values = [];
+  let next = pathname;
+  let pages = 0;
+  while (next) {
+    if (pages >= MAX_PREFLIGHT_PAGES) throw extensionError(`GitHub ${kind} pagination exceeds the safety limit`, 'GITHUB_RESPONSE_INVALID');
+    const page = typeof client.requestPage === 'function'
+      ? await client.requestPage('GET', next)
+      : { result: await client.request('GET', next), next: null };
+    const result = page?.result;
+    const items = kind === 'checks' ? result?.check_runs : result;
+    if (!Array.isArray(items)) throw extensionError(`GitHub ${kind} response is invalid`, 'GITHUB_RESPONSE_INVALID');
+    values.push(...items);
+    if (values.length > MAX_PREFLIGHT_ITEMS) throw extensionError(`GitHub ${kind} response exceeds the safety limit`, 'GITHUB_RESPONSE_INVALID');
+    next = page.next ?? null;
+    pages += 1;
+  }
+  return values;
+}
+
+function latestChecks(checks, headSha) {
+  const byName = new Map();
+  for (const check of checks) {
+    if (!object(check) || !safeLine(check.name, 120)) continue;
+    if (check.head_sha !== undefined && check.head_sha !== headSha) continue;
+    const old = byName.get(check.name);
+    if (!old || later(check, old)) byName.set(check.name, check);
+  }
+  return [...byName.values()].map((check) => ({ name: check.name, status: check.status, conclusion: check.conclusion ?? null, id: Number.isSafeInteger(check.id) ? check.id : null }));
+}
+
+function latestReviews(reviews, headSha) {
+  const byUser = new Map();
+  for (const review of reviews) {
+    if (!object(review) || !object(review.user) || !safeLine(review.user.login, 120)) continue;
+    // A review on another commit cannot approve this immutable candidate. GitHub's
+    // review payload exposes commit_id for exactly this purpose.
+    if (review.commit_id !== headSha) continue;
+    const old = byUser.get(review.user.login);
+    if (!old || later(review, old)) byUser.set(review.user.login, review);
+  }
+  return [...byUser.values()];
+}
+
 /** Read only the remote check/review facts for the reviewed plan's exact head SHA. */
 export async function inspectGitHubPullRequest({ client, plan, pullNumber } = {}) {
   if (!client || typeof client.request !== 'function') throw extensionError('GitHub client is invalid', 'INVALID_GITHUB_PLAN');
@@ -72,17 +144,19 @@ export async function inspectGitHubPullRequest({ client, plan, pullNumber } = {}
   const number = safeNumber(pullNumber); const expected = { headRef: plan.headRef, headSha: plan.headSha, baseRef: plan.baseRef };
   const [pull, checks, reviews] = await Promise.all([
     client.request('GET', `/repos/${plan.repository}/pulls/${number}`),
-    client.request('GET', `/repos/${plan.repository}/commits/${plan.headSha}/check-runs?per_page=100`),
-    client.request('GET', `/repos/${plan.repository}/pulls/${number}/reviews?per_page=100`)
+    paged(client, `/repos/${plan.repository}/commits/${plan.headSha}/check-runs?per_page=100`, 'checks'),
+    paged(client, `/repos/${plan.repository}/pulls/${number}/reviews?per_page=100`, 'reviews')
   ]);
   const pullRequest = validatePull(pull, expected);
-  if (!object(checks) || !Array.isArray(checks.check_runs) || !Array.isArray(reviews)) throw extensionError('GitHub checks/reviews response is invalid', 'GITHUB_RESPONSE_INVALID');
-  const completed = checks.check_runs.filter((item) => object(item) && safeLine(item.name, 120)).map((item) => ({ name: item.name, status: item.status, conclusion: item.conclusion ?? null }));
+  const completed = latestChecks(checks, plan.headSha);
+  // A required name passes only if its *latest* run completed successfully. A
+  // newer pending/failing rerun defeats an older success rather than being hidden
+  // by `some(success)`.
   const requiredChecksPassed = plan.requiredChecks.every((name) => completed.some((check) => check.name === name && check.status === 'completed' && check.conclusion === 'success'));
-  const approved = reviews.some((review) => object(review) && review.state === 'APPROVED' && object(review.user) && safeLine(review.user.login, 120));
+  const effectiveReviews = latestReviews(reviews, plan.headSha);
+  const approved = effectiveReviews.some((review) => review.state === 'APPROVED');
   return { planDigest: plan.digest, pullRequest, checks: completed, requiredChecksPassed, githubApproval: approved };
 }
-
 /** Request GitHub's merge endpoint only after remote facts still match the exact plan. */
 export async function requestGitHubMerge({ client, plan, pullNumber } = {}) {
   if (plan?.allowMergeRequest !== true) throw extensionError('GitHub merge request is not enabled by the reviewed plan', 'GITHUB_MERGE_NOT_ALLOWED');
