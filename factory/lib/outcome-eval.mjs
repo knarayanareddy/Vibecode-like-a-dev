@@ -35,6 +35,7 @@ import { OUTCOME_ARMS, OUTCOME_TASKS, validateOutcomeTasks } from '../evals/task
 import { buildIndex } from './indexer.mjs';
 import { buildPlan } from './planner.mjs';
 import { normalizeProfile } from './profile.mjs';
+import { canonicalTemporaryPath } from './extension-utils.mjs';
 
 const REQ_MARKER = `@${'req'}`;
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -65,13 +66,13 @@ function safeChildDetail(error) {
 
 function workspacePermissionArgs(workspaceDir, { write = false, includeFixtures = false } = {}) {
   if (!PERMISSION_MODEL_AVAILABLE) return [];
-  const readable = [path.resolve(workspaceDir)];
+  const readable = [canonicalTemporaryPath(workspaceDir)];
   if (includeFixtures) readable.push(WORKER_FILE, TASK_FIXTURE_DIR);
   // Node accepts one permission entry per flag. A comma-joined path list is a
   // single literal pathname on supported Node 22 builds, which would silently
   // deny the trusted task fixtures.
   const args = ['--permission', ...readable.map((entry) => `--allow-fs-read=${entry}`)];
-  if (write) args.push(`--allow-fs-write=${path.resolve(workspaceDir)}`);
+  if (write) args.push(`--allow-fs-write=${canonicalTemporaryPath(workspaceDir)}`);
   return args;
 }
 
@@ -90,7 +91,7 @@ export function writeModelResponseFiles(workspaceDir, files) {
   if (!files || typeof files !== 'object' || Array.isArray(files)) throw new Error('model response files must be an object');
   const entries = Object.entries(files);
   if (entries.length > MODEL_MAX_FILES) throw new Error(`model response exceeds ${MODEL_MAX_FILES} files`);
-  const root = path.resolve(workspaceDir);
+  const root = canonicalTemporaryPath(workspaceDir);
   let total = 0;
   for (const [relPath, content] of entries) {
     if (typeof relPath !== 'string' || !relPath || relPath.length > 240 || /[\0\r\n]/.test(relPath) || !MODEL_EDIT_EXTENSION.test(relPath)) {
@@ -195,6 +196,7 @@ function renderTaskPrompt(task, arm) {
  * Create a clean starter workspace for `(task, arm)` and measure exact prompt/spec bytes.
  */
 export function materializeWorkspace(task, arm, targetDir, { index = buildIndex() } = {}) {
+  targetDir = canonicalTemporaryPath(targetDir);
   mkdirSync(targetDir, { recursive: true });
 
   writeRel(
@@ -368,6 +370,7 @@ export function attachReferenceArtifacts(workspaceDir, arm) {
 const execFileAsync = promisify(execFile);
 
 async function runNodeScript(cwd, args) {
+  cwd = canonicalTemporaryPath(cwd);
   try {
     const { stdout } = await execFileAsync(process.execPath, args, {
       cwd,
@@ -427,11 +430,12 @@ export async function runWorkspaceLocalChecks(workspaceDir) {
 }
 
 async function runIsolatedWorkspaceOracle(task, workspaceDir) {
+  workspaceDir = canonicalTemporaryPath(workspaceDir);
   const args = [
     ...workspacePermissionArgs(workspaceDir, { includeFixtures: true }),
     WORKER_FILE,
     task.id,
-    path.resolve(workspaceDir)
+    workspaceDir
   ];
   try {
     const { stdout } = await execFileAsync(process.execPath, args, {
@@ -514,7 +518,7 @@ export async function evaluateWorkspace(task, arm, workspaceDir, { runDrift = tr
  * workspace's own committed checks notice — without the hidden oracle.
  */
 export async function runPostMergeDriftProbes(task, workspaceDir) {
-  const scratchRoot = mkdtempSync(path.join(os.tmpdir(), 'vld-drift-'));
+  const scratchRoot = canonicalTemporaryPath(mkdtempSync(path.join(os.tmpdir(), 'vld-drift-')));
   try {
     // 1. Anchor / requirement-test drop: remove requirement test file while smoke stays green.
     const dropDir = path.join(scratchRoot, 'anchor-drop');
@@ -724,7 +728,7 @@ export async function runOutcomeHarness({
   }
 
   const index = buildIndex();
-  const rootTmp = mkdtempSync(path.join(os.tmpdir(), 'vld-outcome-'));
+  const rootTmp = canonicalTemporaryPath(mkdtempSync(path.join(os.tmpdir(), 'vld-outcome-')));
   const findings = [];
   const armRecords = Object.fromEntries(arms.map((arm) => [arm, []]));
   const calibrationChecks = [];
