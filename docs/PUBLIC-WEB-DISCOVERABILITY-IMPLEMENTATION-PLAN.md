@@ -1,7 +1,7 @@
-# Public Web Discoverability — Phase 1 Implementation Plan
+# Public Web Discoverability — Phases 1–2 Implementation Plan
 
-**Status:** Implemented; local validation complete (hosted CI pending branch push)
-**Decision:** Add an explicit, deterministic planning capability for public websites. It turns reviewed discoverability intent into requirements and engineering guidance; it does **not** crawl a site, evaluate rankings, call a model, install a browser, use credentials, or make a live SEO score authoritative.
+**Status:** Phase 1 and its hosted validation are complete. Phase 2 implements a dedicated, human-authored readiness artifact with deterministic local initialization and validation; branch validation is recorded with the implementation.
+**Decision:** Add an explicit, deterministic planning capability for public websites, then a packet-linked human readiness record. Neither phase crawls a site, evaluates rankings, calls a model, installs a browser, uses credentials, or makes a live SEO score authoritative.
 
 ## Objective
 
@@ -17,7 +17,7 @@ The feature is deliberately a Phase 1 compiler capability inspired by the archit
 - It does not promise rankings, traffic, indexing by a third party, AI citations, or an SEO score.
 - It adds no dependencies, network access, browser automation, search-provider API, plugin installation, or credential handling.
 - It does not change existing profiles or packets that do not opt in.
-- A future reviewed phase may add a human-authored readiness artifact, and only after that an explicitly configured external-report adapter. Neither is part of Phase 1.
+- Phase 2 adds only a human-authored, digest-linked local readiness artifact. An external-report adapter remains out of scope and would require a separate reviewed design.
 
 ## Implementation checklist
 
@@ -53,12 +53,23 @@ The feature is deliberately a Phase 1 compiler capability inspired by the archit
 - [x] Generated acceptance criteria require locally reviewable evidence, not a dynamic rank/citation claim.
 - [x] No compiler code path gains external I/O, a dependency, a model call, or a credential surface.
 
+## Phase 2 implementation checklist
+
+- [x] Add a dedicated `vld discoverability-readiness init|validate` command rather than extending the product brief.
+- [x] Require the existing explicit public-web profile opt-in and a compiled packet containing `web.discoverability`.
+- [x] Record and validate a SHA-256 digest of the exact local packet manifest so stale readiness records fail closed.
+- [x] Generate a human-authored template for canonical-origin policy, indexable and excluded route inventories, metadata/social and structured-data evidence, local verification, human review, and requirement links.
+- [x] Keep the result explicitly advisory: validation checks local record structure and linkage only, not reviewer identity or third-party outcomes.
+- [x] Add focused adversarial regressions for absent/disabled profiles, malformed evidence, Draft placeholders, and stale packet content.
+- [x] Document commands, required sections, refresh procedure, and no-network/no-provider authority boundary in `docs/DISCOVERABILITY-READINESS.md`.
+
 ## Validation matrix
 
 - [x] Focused profile/planner/MCP regression tests (46 passing assertions/tests).
+- [x] Focused Phase 2 readiness regressions: eligible init/strict validation, CLI JSON contract, absent/disabled profiles, malformed evidence, missing human-review value, stale packet digest, and symlink refusal (5 passing tests).
 - [x] `npm run index -- --check`.
-- [x] `npm test` (261 passing tests).
-- [x] `npm run check` (lint, index, tests, verification, guard/gates, eval, and stress suites).
+- [x] `npm test` (286 passing tests on 2026-11-02).
+- [x] `npm run check` (lint, index, tests, verification, guard/gates, eval, and stress suites; passed on 2026-11-02).
 - [x] Explicit positive compile and `verify` smoke test.
 - [x] `git diff --check`.
-- [ ] Hosted CI green on Linux, macOS, Windows, minimum Node 22, and latest Node 22 (after branch push).
+- [x] Hosted CI green on Linux, macOS, Windows, minimum Node 22, and latest Node 22 (run `41458026147` for the merged Phase 1/remediation baseline).
