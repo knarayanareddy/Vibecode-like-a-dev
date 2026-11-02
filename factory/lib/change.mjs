@@ -21,6 +21,7 @@ import path from 'node:path';
 import { ARTIFACTS, validateArtifact } from './artifacts.mjs';
 import { earsError } from './ears.mjs';
 import { emitPacket } from './emit/index.mjs';
+import { stackContract } from './emit/derive.mjs';
 import { buildIndex, loadIndex } from './indexer.mjs';
 import { buildPlan } from './planner.mjs';
 import { normalizeProfile } from './profile.mjs';
@@ -50,6 +51,22 @@ function nextRequirementIds(existing, count) {
     .filter((value) => Number.isFinite(value));
   const start = (numbers.length > 0 ? Math.max(...numbers) : 0) + 1;
   return Array.from({ length: count }, (_, index) => `REQ-${String(start + index).padStart(3, '0')}`);
+}
+
+function retiredRequirements(packetDir) {
+  const historyFile = path.join(packetDir, 'changes', 'history.json');
+  if (!existsSync(historyFile)) return [];
+  const history = readJson(historyFile);
+  return (history.retiredRequirementIds ?? [])
+    .filter((entry) => /^REQ-\d{3,}$/.test(String(entry?.id ?? '')))
+    .map((entry) => ({ id: entry.id }));
+}
+
+function defaultAnchor(spec, requirement) {
+  if (requirement.verify !== 'automated') return null;
+  const contract = stackContract({ constraints: { stack: spec.project?.constraints?.stack ?? 'undecided' } });
+  if (!contract.recognised) return `tests/choose-runner/${requirement.key.replace(/\./g, '-')}.test`;
+  return `tests/${requirement.area ?? 'core'}/${requirement.key.replace(/\./g, '-')}.test.${contract.testExtension}`;
 }
 
 /** Criteria are appended, never renumbered: an anchor may already cite AC-01. */
@@ -98,8 +115,8 @@ export function validateChange(change) {
   modify.forEach((entry, index) => {
     const label = `modify[${index}]`;
     if (!entry.key) errors.push(`${label}.key: required (the requirement key or id to change)`);
-    if (!entry.statement && !entry.failurePath && !(entry.addAcceptance ?? []).length) {
-      errors.push(`${label}: does nothing. Provide statement, failurePath or addAcceptance.`);
+    if (!entry.title && !entry.statement && !entry.failurePath && !(entry.addAcceptance ?? []).length) {
+      errors.push(`${label}: does nothing. Provide title, statement, failurePath or addAcceptance.`);
     }
     if (entry.statement) {
       const ears = earsError(entry.statement);
@@ -160,7 +177,10 @@ export function planChange({ packetDir, change }) {
   }
 
   const added = [];
-  const ids = nextRequirementIds(requirements, (change.add ?? []).length);
+  // A retired identifier is permanent historical authority, even when no active
+  // requirement owns it. Include it in allocation so a later delta never binds
+  // old anchors or review evidence to a different requirement.
+  const ids = nextRequirementIds([...requirements, ...retiredRequirements(packetDir)], (change.add ?? []).length);
   (change.add ?? []).forEach((entry, position) => {
     if (byKey.has(entry.key)) {
       errors.push(`add: "${entry.key}" already exists in this packet. Use modify instead.`);
@@ -178,7 +198,7 @@ export function planChange({ packetDir, change }) {
         text: String(criteria).trim()
       })),
       verify: entry.verify ?? 'automated',
-      anchor: entry.anchor ?? `tests/${entry.area ?? 'core'}/${entry.key.replace(/\./g, '-')}.test.ts`,
+      anchor: entry.anchor ?? defaultAnchor(spec, entry),
       status: 'todo',
       why: entry.why ?? ''
     });
@@ -332,6 +352,7 @@ function proposalMarkdown(plan) {
       ['Requirement', 'Field', 'After'],
       modified.flatMap(({ target, definition }) => {
         const rows = [];
+        if (definition.title) rows.push([`${target.id} \`${target.key}\``, 'title', definition.title]);
         if (definition.statement) rows.push([`${target.id} \`${target.key}\``, 'statement', definition.statement]);
         if (definition.failurePath) rows.push([`${target.id} \`${target.key}\``, 'failure path', definition.failurePath]);
         for (const text of definition.addAcceptance ?? []) rows.push([`${target.id} \`${target.key}\``, 'accepted criterion (appended)', text]);
@@ -420,7 +441,8 @@ function tasksMarkdown(plan) {
   }
   for (const { target, definition } of modified) {
     const criteria = (definition.addAcceptance ?? []).length;
-    lines.push(box(`${target.id} \`${target.key}\`: ${criteria > 0 ? `add ${criteria} assertion(s) for the new criteria` : 'update the existing test'} in the anchored test, then change the behaviour.`));
+    const behavioural = definition.statement || definition.failurePath || criteria > 0;
+    lines.push(box(`${target.id} \`${target.key}\`: ${behavioural ? `${criteria > 0 ? `add ${criteria} assertion(s) for the new criteria` : 'update the existing test'} in the anchored test, then change the behaviour` : 'review the title-only clarification; no behaviour or anchor changes are implied'}.`));
   }
   for (const { target, definition } of removed) {
     lines.push(box(`Remove ${target.id} \`${target.key}\`${target.anchor ? ` and delete or re-anchor \`${target.anchor}\`` : ''}. Reason recorded: ${definition.why}`));
@@ -962,7 +984,7 @@ function verifyEvidence({ changeDir, projectDir, delta, after }) {
     const signature = `${entry.kind}:${file}`;
     if (seen.has(signature)) { errors.push(`${label} repeats ${entry.kind} at ${entry.file}`); continue; }
     seen.add(signature);
-    if (!Array.isArray(entry.requirements) || !entry.requirements.length || entry.requirements.some((id) => typeof id !== 'string' || !/^REQ-\d{3}$/.test(id))) {
+    if (!Array.isArray(entry.requirements) || !entry.requirements.length || entry.requirements.some((id) => typeof id !== 'string' || !/^REQ-\d{3,}$/.test(id))) {
       errors.push(`${label}.requirements must be a non-empty REQ-### list`); continue;
     }
     if (new Set(entry.requirements).size !== entry.requirements.length) { errors.push(`${label}.requirements must not repeat`); continue; }

@@ -108,7 +108,7 @@ export const AGGREGATE_HINTS = {
   'library.api-stability': [
     { name: 'PublicSurface', invariants: ['Every exported symbol is covered by a snapshot test.', 'A removed export requires a major version.'] }
   ],
-  'ops.audit-trail': [
+  'delivery.audit-trail': [
     { name: 'AuditRecord', invariants: ['Records are append-only; application code has no update or delete grant.', 'Records never contain secrets or full personal data.'] }
   ]
 };

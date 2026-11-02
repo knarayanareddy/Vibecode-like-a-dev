@@ -94,7 +94,9 @@ export function constitution(plan, d) {
     return `**${gate.id}** — ${gate.statement}${reading ? ` _Here: ${reading}._` : ''}`;
   });
   dod.push(
-    `${automatedCount} of ${plan.requirements.length} requirements carry an \`@req\` anchor; ${d.start.id} is the first, at \`${d.anchors.get(d.start.id) ?? 'tests/'}\`.`
+    d.contract.stack.recognised
+      ? `${automatedCount} of ${plan.requirements.length} requirements carry an \`@req\` anchor; ${d.start.id} is the first, at \`${d.anchors.get(d.start.id) ?? 'tests/'}\`.`
+      : `${automatedCount} automated requirement(s) need a chosen test runner and real \`@req\` anchor before they can be proven; each \`tests/choose-runner/\` path is a visible placeholder, not an implementation instruction.`
   );
   if (profile.traits.includes('payments')) dod.push(`A refund or reversal path exists and is tested for the ${primary} it applies to.`);
   if (profile.risks.multiTenant) dod.push('At least one test proves a cross-tenant read is impossible.');
@@ -552,13 +554,13 @@ export function architecture(plan, d) {
       .join('\n'),
     `Add an ADR for every dependency around ${d.aPrimary} that would take more than a day to remove, and for every boundary decision a future reader would otherwise reverse-engineer from this repository.`,
     '',
-    h2('9. Fitness functions'),
+    h2('8. Fitness functions'),
     '',
     `Architecture that is not executable is decoration, so each of these runs in CI for ${d.project} rather than living in a review checklist.`,
     '',
     table(['Property', 'Check', 'Automated how', 'Fails when'], fitness),
     '',
-    h2('10. When this architecture should change'),
+    h2('9. When this architecture should change'),
     '',
     bullets([
       `A single ${d.primary} operation needs to scale on a different curve from the rest, measured rather than predicted.`,
@@ -727,7 +729,7 @@ export function verification(plan, d) {
     requirement.id,
     (d.phrases.get(requirement.key) ?? requirement.title).replace(/\s+/g, ' '),
     requirement.verify,
-    requirement.verify === 'automated' ? `\`${d.anchors.get(requirement.id)}?\`` : 'manual script',
+    requirement.verify === 'automated' ? (d.anchors.get(requirement.id) ? `\`${d.anchors.get(requirement.id)}?\`` : 'choose runner and test path first') : 'manual script',
     '☐'
   ]);
 
@@ -738,6 +740,34 @@ export function verification(plan, d) {
   const startAc = d.start?.acceptance?.[0]?.text ?? `the behaviour of ${d.primary}`;
   const startAcId = d.start?.acceptance?.[0]?.id ?? 'AC-01';
   const startSlug = d.start?.title ? d.start.title.toLowerCase() : d.primary;
+  const anchorExample = d.contract.stack.kind === 'unsupported'
+    ? [
+        `No test syntax is suggested for the unrecognised stack \`${plan.profile.constraints.stack}\`.`,
+        `Choose and record its test runner, test-file path, and comment syntax in an ADR first.`,
+        `Then place @req ${d.start.id} on the same line as a real test using that language's comment form.`
+      ]
+    : d.contract.stack.kind === 'python'
+    ? [
+        `# @req ${d.start.id}  # @req-ignore: example inside a spec document`,
+        `def test_${startSlug.toLowerCase().replace(/[^a-z0-9]+/g, '_')}_${startAcId.toLowerCase().replace(/[^a-z0-9]+/g, '_')}():`,
+        `    # ${startAc.replace(/^Given |, when |, then /g, (m) => m.trim() + ' ').slice(0, 150)}`,
+        '    assert outcome_is_observable'
+      ]
+    : d.contract.stack.kind === 'go'
+      ? [
+          `// @req ${d.start.id}  // @req-ignore: example inside a spec document`,
+          `func Test${titleize(startSlug).replace(/[^A-Za-z0-9]/g, '')}${startAcId.replace(/[^A-Za-z0-9]/g, '')}(t *testing.T) {`,
+          `  // ${startAc.replace(/^Given |, when |, then /g, (m) => m.trim() + ' ').slice(0, 150)}`,
+          '  if !outcomeIsObservable { t.Fatal("expected observable outcome") }',
+          '}'
+        ]
+      : [
+          `// @req ${d.start.id}  // @req-ignore: example inside a spec document`,
+          `test('${startSlug} (${startAcId})', async () => {`,
+          `  // ${startAc.replace(/^Given |, when |, then /g, (m) => m.trim() + ' ').slice(0, 150)}`,
+          '  expect(outcome).toBeDefined();',
+          '});'
+        ];
 
   const ciYaml = [
     'name: spec',
@@ -786,16 +816,7 @@ export function verification(plan, d) {
     '',
     `Every automated requirement carries one anchor line in the test that proves it. The example below is ${d.start.id}, so it is the one you will write first.`,
     '',
-    code(
-      d.contract.stack.fenceLanguage,
-      [
-        `// @req ${d.start.id}  // @req-ignore: example inside a spec document`,
-        `test('${startSlug} (${startAcId})', async () => {`,
-        `  // ${startAc.replace(/^Given |, when |, then /g, (m) => m.trim() + ' ').slice(0, 150)}`,
-        `  // assert the outcome, not the absence of a throw`,
-        '});'
-      ].join('\n')
-    ),
+    code(d.contract.stack.fenceLanguage, anchorExample.join('\n')),
     '',
     bullets([
       `An anchor inside \`${d.anchors.get(d.start.id)?.replace(/[^/]+$/, '') ?? 'tests/'}\` counts as proof; an anchor in the ${d.primary} handler does not.`,
@@ -807,7 +828,7 @@ export function verification(plan, d) {
     '',
     `Anchor column: suggested path, followed by \`?\` until the file exists. Toggle the last column when the test is green.`,
     '',
-    table(['Req', 'Criteria', 'Verified by', 'Anchor'], trace),
+    table(['Req', 'Criteria', 'Verified by', 'Anchor', 'Status'], trace),
     '',
     h2('4. Gates for tier ' + plan.rigor.tier),
     '',
@@ -863,7 +884,7 @@ export function verification(plan, d) {
       ...(plan.profile.traits.includes('auth') || plan.profile.risks.multiTenant
         ? [`Every new read of another ${d.secondary}'s ${d.primary} is authorized server-side.`]
         : []),
-      ...(plan.primitives.some((primitive) => primitive.id === 'engineering.dependency-policy') ? ['New dependency? ADR present, pinned, removable in a day.'] : [])
+      ...(plan.primitives.some((primitive) => primitive.id === 'security.secrets-and-supply-chain') ? ['New dependency? ADR present, pinned, removable in a day.'] : [])
     ]),
     '',
     `Deliberately absent: a coverage percentage target (it rewards executing code, not checking it), mocks of the domain to test the domain, and tests of framework behaviour. Reasoning: \`testing.test-budget\` in the library.`,
@@ -958,7 +979,7 @@ export function agentHandoff(plan, d) {
     requirement.id,
     d.phrases.get(requirement.key) ?? requirement.title,
     requirement.verify,
-    requirement.verify === 'automated' ? `\`${d.anchors.get(requirement.id)}\`` : 'manual run'
+    requirement.verify === 'automated' ? (d.anchors.get(requirement.id) ? `\`${d.anchors.get(requirement.id)}\`` : 'choose runner and test path first') : 'manual run'
   ]);
 
   // Escalation triggers this product can actually hit. A generic list wastes the
@@ -1278,7 +1299,9 @@ export function manifest(plan, d) {
       },
       anchorConvention: {
         marker: '@req',
-        syntax: '// @req REQ-xxx   (or "# @req REQ-xxx" in Python)',
+        syntax: d.contract.stack.kind === 'unsupported'
+          ? 'choose the stack comment syntax and test path in an ADR before adding @req markers'
+          : d.contract.stack.kind === 'python' ? '# @req REQ-xxx' : '// @req REQ-xxx',
         countedIn: ['tests/**'],
         check: 'node specs/spec-check.mjs --repo .'
       },

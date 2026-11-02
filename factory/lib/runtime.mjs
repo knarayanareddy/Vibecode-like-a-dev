@@ -512,10 +512,69 @@ function cloneState(state) {
   return JSON.parse(JSON.stringify(state));
 }
 
-function applyEvent(state, event) {
+/**
+ * The public Runtime status deliberately retains only a small recent-event
+ * window. Lifecycle authority must not use that presentation window: a valid
+ * candidate can outlive hundreds of heartbeats. This ephemeral index is rebuilt
+ * from the full durable ledger on every validation/read, remains out of the
+ * JSON snapshot, and gives replay validation the same complete history.
+ */
+function createReceiptIndex() {
+  return {
+    agentRuns: new Map(),
+    candidates: new Map(),
+    verifications: new Map(),
+    verificationsByCandidate: new Map(),
+    approvals: new Map(),
+    approvalsByCandidate: new Map(),
+    queues: new Map(),
+    queuesByCandidate: new Map(),
+    forges: new Map(),
+    delivery: []
+  };
+}
+
+function recordReceipt(index, event) {
+  if (event.type === 'agent-run') {
+    index.agentRuns.set(event.agentRun.id, {
+      sequence: event.sequence, packageId: event.packageId, runId: event.runId,
+      agentRun: publicAgentRun(event.agentRun)
+    });
+    return;
+  }
+  const entry = {
+    sequence: event.sequence,
+    packageId: event.packageId,
+    ...(event.runId ? { runId: event.runId } : {})
+  };
+  if (event.type === 'candidate') {
+    entry.candidate = publicDeliveryReceipt(event.candidate);
+    index.candidates.set(event.candidate.id, entry);
+  } else if (event.type === 'verification') {
+    entry.verification = publicDeliveryReceipt(event.verification);
+    index.verifications.set(event.verification.id, entry);
+    index.verificationsByCandidate.set(event.verification.candidateId, entry);
+  } else if (event.type === 'approval') {
+    entry.approval = publicDeliveryReceipt(event.approval);
+    index.approvals.set(event.approval.id, entry);
+    index.approvalsByCandidate.set(event.approval.candidateId, entry);
+  } else if (event.type === 'queue') {
+    entry.queue = publicDeliveryReceipt(event.queue);
+    index.queues.set(event.queue.id, entry);
+    index.queuesByCandidate.set(event.queue.candidateId, entry);
+  } else if (event.type === 'forge-plan') {
+    entry.forge = publicDeliveryReceipt(event.forge);
+    index.forges.set(event.forge.id, entry);
+  } else {
+    return;
+  }
+  index.delivery.push(entry);
+}
+
+function applyEvent(state, event, receipts = state?.receipts ?? createReceiptIndex()) {
   if (event.type === 'initialized') {
     if (state !== null) throw extensionError('runtime ledger contains more than one initialized event', 'INVALID_RUNTIME_LEDGER');
-    return {
+    const initialized = {
       schemaVersion: RUNTIME_STATE_VERSION,
       mission: event.mission,
       policy: event.policy,
@@ -524,6 +583,8 @@ function applyEvent(state, event) {
       sequence: event.sequence,
       eventDigest: null
     };
+    Object.defineProperty(initialized, 'receipts', { value: receipts, enumerable: false });
+    return initialized;
   }
   if (!state) throw extensionError('runtime ledger is missing its initialized event', 'INVALID_RUNTIME_LEDGER');
   const next = cloneState(state);
@@ -533,37 +594,37 @@ function applyEvent(state, event) {
     if (event.actor.role !== 'runtime' || workPackage.state !== 'running' || workPackage.run?.id !== event.runId) {
       throw extensionError('runtime agent receipt does not match a running package', 'INVALID_RUNTIME_LEDGER');
     }
-    if (next.recentEvents.some((receipt) => receipt.agentRun?.id === event.agentRun.id)) throw extensionError('runtime agent receipt repeats', 'INVALID_RUNTIME_LEDGER');
+    if (receipts.agentRuns.has(event.agentRun.id)) throw extensionError('runtime agent receipt repeats', 'INVALID_RUNTIME_LEDGER');
   } else if (event.type === 'candidate') {
     if (workPackage.state !== 'changes_ready' || workPackage.run?.id !== event.runId || event.actor.role !== 'implementer' || event.actor.id !== workPackage.run.holderId || event.candidate.missionId !== next.mission.id || event.candidate.packageId !== event.packageId) {
       throw extensionError('runtime candidate does not match an implementer changes-ready package', 'INVALID_RUNTIME_LEDGER');
     }
-    if (next.recentEvents.some((receipt) => receipt.candidate?.id === event.candidate.id)) throw extensionError('runtime candidate receipt repeats', 'INVALID_RUNTIME_LEDGER');
+    if (receipts.candidates.has(event.candidate.id)) throw extensionError('runtime candidate receipt repeats', 'INVALID_RUNTIME_LEDGER');
   } else if (event.type === 'verification') {
-    const candidate = next.recentEvents.find((receipt) => receipt.candidate?.id === event.verification.candidateId)?.candidate;
+    const candidate = receipts.candidates.get(event.verification.candidateId)?.candidate;
     if (workPackage.state !== 'verifying' || !candidate || candidate.candidateSha !== event.verification.candidateSha || candidate.targetSha !== event.verification.targetSha || candidate.policyDigest !== event.verification.policyDigest) {
       throw extensionError('runtime verification does not match its frozen candidate', 'INVALID_RUNTIME_LEDGER');
     }
-    if (next.recentEvents.some((receipt) => receipt.verification?.id === event.verification.id)) throw extensionError('runtime verification receipt repeats', 'INVALID_RUNTIME_LEDGER');
+    if (receipts.verifications.has(event.verification.id)) throw extensionError('runtime verification receipt repeats', 'INVALID_RUNTIME_LEDGER');
   } else if (event.type === 'approval') {
-    const candidate = next.recentEvents.find((receipt) => receipt.candidate?.id === event.approval.candidateId)?.candidate;
-    const verification = next.recentEvents.find((receipt) => receipt.verification?.candidateId === event.approval.candidateId)?.verification;
+    const candidate = receipts.candidates.get(event.approval.candidateId)?.candidate;
+    const verification = receipts.verificationsByCandidate.get(event.approval.candidateId)?.verification;
     if (workPackage.state !== 'in_review' || event.actor.role !== 'reviewer' || event.actor.id !== event.approval.reviewerId || event.actor.id === workPackage.run?.holderId || !candidate || !verification || verification.outcome !== 'passed' || candidate.candidateSha !== event.approval.candidateSha || candidate.targetSha !== event.approval.targetSha || candidate.policyDigest !== event.approval.policyDigest) {
       throw extensionError('runtime approval does not satisfy independent verified review', 'INVALID_RUNTIME_LEDGER');
     }
-    if (next.recentEvents.some((receipt) => receipt.approval?.id === event.approval.id)) throw extensionError('runtime approval receipt repeats', 'INVALID_RUNTIME_LEDGER');
+    if (receipts.approvals.has(event.approval.id)) throw extensionError('runtime approval receipt repeats', 'INVALID_RUNTIME_LEDGER');
   } else if (event.type === 'queue') {
-    const candidate = next.recentEvents.find((receipt) => receipt.candidate?.id === event.queue.candidateId)?.candidate;
-    const approval = next.recentEvents.find((receipt) => receipt.approval?.candidateId === event.queue.candidateId)?.approval;
+    const candidate = receipts.candidates.get(event.queue.candidateId)?.candidate;
+    const approval = receipts.approvalsByCandidate.get(event.queue.candidateId)?.approval;
     if (workPackage.state !== 'approved' || event.actor.role !== 'release-approver' || !candidate || !approval || candidate.candidateSha !== event.queue.candidateSha || candidate.targetSha !== event.queue.targetSha || candidate.policyDigest !== event.queue.policyDigest) {
       throw extensionError('runtime queue receipt does not match an approved candidate', 'INVALID_RUNTIME_LEDGER');
     }
-    if (next.recentEvents.some((receipt) => receipt.queue?.id === event.queue.id)) throw extensionError('runtime queue receipt repeats', 'INVALID_RUNTIME_LEDGER');
+    if (receipts.queues.has(event.queue.id)) throw extensionError('runtime queue receipt repeats', 'INVALID_RUNTIME_LEDGER');
   } else if (event.type === 'forge-plan') {
-    const candidate = next.recentEvents.find((receipt) => receipt.candidate?.id === event.forge.candidateId)?.candidate;
-    const verification = next.recentEvents.find((receipt) => receipt.verification?.candidateId === event.forge.candidateId)?.verification;
-    const approval = next.recentEvents.find((receipt) => receipt.approval?.candidateId === event.forge.candidateId)?.approval;
-    const queue = next.recentEvents.find((receipt) => receipt.queue?.candidateId === event.forge.candidateId)?.queue;
+    const candidate = receipts.candidates.get(event.forge.candidateId)?.candidate;
+    const verification = receipts.verificationsByCandidate.get(event.forge.candidateId)?.verification;
+    const approval = receipts.approvalsByCandidate.get(event.forge.candidateId)?.approval;
+    const queue = receipts.queuesByCandidate.get(event.forge.candidateId)?.queue;
     const exactTuple = candidate && verification && approval && queue
       && verification.outcome === 'passed'
       && digest(candidate) === event.forge.candidateDigest && candidate.candidateSha === event.forge.candidateSha && candidate.targetSha === event.forge.targetSha && candidate.packetDigest === event.forge.packetDigest && candidate.policyDigest === event.forge.policyDigest
@@ -571,7 +632,7 @@ function applyEvent(state, event) {
       && queue.id === event.forge.queueId && queue.candidateSha === event.forge.candidateSha && queue.targetSha === event.forge.targetSha && queue.policyDigest === event.forge.policyDigest
       && verification.id === event.forge.verificationId && digest(verification) === event.forge.verificationDigest && digest(approval) === event.forge.approvalDigest && digest(queue) === event.forge.queueDigest;
     if (workPackage.state !== 'queued' || !exactTuple) throw extensionError('runtime forge receipt does not match a passed, independently approved queued tuple', 'INVALID_RUNTIME_LEDGER');
-    if (next.recentEvents.some((receipt) => receipt.forge?.id === event.forge.id)) throw extensionError('runtime forge receipt repeats', 'INVALID_RUNTIME_LEDGER');
+    if (receipts.forges.has(event.forge.id)) throw extensionError('runtime forge receipt repeats', 'INVALID_RUNTIME_LEDGER');
   } else if (event.type === 'allocated') {
     assertCanAllocate(event.actor);
     if (workPackage.state !== 'ready' || workPackage.run || workPackage.lease) throw extensionError('runtime allocation event is not valid for package state', 'INVALID_RUNTIME_LEDGER');
@@ -614,20 +675,26 @@ function applyEvent(state, event) {
     ...(event.type === 'forge-plan' ? { forge: publicDeliveryReceipt(event.forge) } : {})
   }].slice(-MAX_RECEIPTS);
   next.sequence = event.sequence;
+  recordReceipt(receipts, event);
+  Object.defineProperty(next, 'receipts', { value: receipts, enumerable: false });
   return next;
 }
 
 function deriveState(events) {
   let state = null;
+  const receipts = createReceiptIndex();
   let expectedSequence = 1;
   for (const event of events) {
     validateEvent(event);
     if (event.sequence !== expectedSequence) throw extensionError(`runtime ledger sequence ${event.sequence} is not contiguous`, 'INVALID_RUNTIME_LEDGER');
-    state = applyEvent(state, event);
+    state = applyEvent(state, event, receipts);
     expectedSequence += 1;
   }
   if (!state) throw extensionError('runtime ledger has no initialized event', 'INVALID_RUNTIME_LEDGER');
   state.eventDigest = digest(events);
+  // Receipt data is derived authority for the current process, not part of the
+  // serialised snapshot or the bounded `recentEvents` public transport field.
+  Object.defineProperty(state, 'receipts', { value: receipts, enumerable: false });
   return state;
 }
 
@@ -811,8 +878,9 @@ function publicPackage(workPackage) {
   };
 }
 
-function reportRuntime(context, state, { warnings = [], recovered = null } = {}) {
-  const expired = state.packages.filter((entry) => entry.lease && new Date(entry.lease.expiresAt).getTime() <= Date.now()).map((entry) => entry.id);
+function reportRuntime(context, state, { warnings = [], recovered = null, now = Date.now() } = {}) {
+  const timestamp = new Date(now).getTime();
+  const expired = state.packages.filter((entry) => entry.lease && new Date(entry.lease.expiresAt).getTime() <= timestamp).map((entry) => entry.id);
   if (!currentMissionMatches(state, context)) warnings.push('runtime state belongs to a different revision of this mission; allocation and transitions are blocked');
   if (!context.missionReport.ok) warnings.push('mission is not current; allocation and transitions are blocked');
   if (expired.length) warnings.push(`${expired.length} lease(s) are expired; run vld runtime recover`);
@@ -831,21 +899,24 @@ function reportRuntime(context, state, { warnings = [], recovered = null } = {})
     // A bounded status convenience window, not durable history. Use
     // runtimeEventHistory / the `events` API for cursor-paged evidence.
     recentEvents: state.recentEvents.map((receipt) => ({ ...receipt, actor: { ...receipt.actor } })),
-    agentRuns: state.recentEvents.filter((receipt) => receipt.type === 'agent-run' && receipt.agentRun).map((receipt) => ({
-      sequence: receipt.sequence,
-      packageId: receipt.packageId,
-      runId: receipt.runId,
-      ...publicAgentRun(receipt.agentRun)
+    // These receipt projections come from the complete validated ledger, not
+    // from `recentEvents`. A long-running package can therefore complete its
+    // delivery lifecycle after the status transport window has rolled over.
+    agentRuns: [...state.receipts.agentRuns.values()].map((entry) => ({
+      sequence: entry.sequence,
+      packageId: entry.packageId,
+      runId: entry.runId,
+      ...publicAgentRun(entry.agentRun)
     })),
-    delivery: state.recentEvents.filter((receipt) => ['candidate', 'verification', 'approval', 'queue', 'forge-plan'].includes(receipt.type)).map((receipt) => ({
-      sequence: receipt.sequence,
-      packageId: receipt.packageId,
-      ...(receipt.runId ? { runId: receipt.runId } : {}),
-      ...(receipt.candidate ? { candidate: publicDeliveryReceipt(receipt.candidate) } : {}),
-      ...(receipt.verification ? { verification: publicDeliveryReceipt(receipt.verification) } : {}),
-      ...(receipt.approval ? { approval: publicDeliveryReceipt(receipt.approval) } : {}),
-      ...(receipt.queue ? { queue: publicDeliveryReceipt(receipt.queue) } : {}),
-      ...(receipt.forge ? { forge: publicDeliveryReceipt(receipt.forge) } : {})
+    delivery: state.receipts.delivery.map((entry) => ({
+      sequence: entry.sequence,
+      packageId: entry.packageId,
+      ...(entry.runId ? { runId: entry.runId } : {}),
+      ...(entry.candidate ? { candidate: publicDeliveryReceipt(entry.candidate) } : {}),
+      ...(entry.verification ? { verification: publicDeliveryReceipt(entry.verification) } : {}),
+      ...(entry.approval ? { approval: publicDeliveryReceipt(entry.approval) } : {}),
+      ...(entry.queue ? { queue: publicDeliveryReceipt(entry.queue) } : {}),
+      ...(entry.forge ? { forge: publicDeliveryReceipt(entry.forge) } : {})
     })),
     warnings,
     ...(recovered ? { recovered } : {})
@@ -951,11 +1022,10 @@ export function initializeRuntime({ missionFile, projectDir = '.', policy = defa
 export function runtimeStatus({ missionFile, projectDir = '.', now } = {}) {
   const context = runtimeContext({ missionFile, projectDir, requireCurrent: false });
   const { state } = readLedger(context.paths);
-  const warnings = [];
-  const timestamp = nowIso(now);
-  const expired = state.packages.filter((entry) => entry.lease && new Date(entry.lease.expiresAt).getTime() <= new Date(timestamp).getTime()).map((entry) => entry.id);
-  if (expired.length) warnings.push(`${expired.length} lease(s) are expired; run vld runtime recover`);
-  return reportRuntime(context, state, { warnings });
+  // A caller-provided clock is part of the status contract. Pass it through to
+  // the one warning producer rather than mixing it with wall-clock time or
+  // appending an identical expiry warning twice.
+  return reportRuntime(context, state, { now: nowIso(now) });
 }
 
 /**

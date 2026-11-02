@@ -10,7 +10,7 @@
  *   vld module|bundle|agent|workflow manage opt-in delivery extensions
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { adoptRepo, isRemoteRepo, writeAdoptedProfile } from './lib/adopt.mjs';
 import { artifactStatus, initArtifact, listArtifacts, validateArtifact, verifyArtifacts } from './lib/artifacts.mjs';
@@ -35,9 +35,12 @@ import { buildPlan, loadPolicy } from './lib/planner.mjs';
 import { loadProfile, KINDS, STAGES, SCALES, TRAITS, RISK_FLAGS } from './lib/profile.mjs';
 import { completeWorkflowStep, getWorkflow, listWorkflows, runWorkflow, workflowStatus } from './lib/workflows.mjs';
 import { verifyPacket } from './lib/verify.mjs';
+import { writeAbsoluteManagedFileAtomic } from './lib/extension-utils.mjs';
+import { PACKAGE_VERSION } from './lib/version.mjs';
 
-// Single source of truth for the version: a literal here drifted once already.
-const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+// The package manifest, loaded through the shared metadata authority, is the
+// version advertised by every CLI surface.
+const VERSION = PACKAGE_VERSION;
 
 const argv = process.argv.slice(2);
 const command = argv[0];
@@ -61,8 +64,8 @@ Usage
   vld init <dir>                     write profile.json to fill in
   vld adopt <repo-or-url> [-o <file>] [--name <slug>] [--idea <text>] [--force] [--json]
                                      infer a profile from a local path or Git repository URL
-  vld plan <profile.json> [--json]   show selection and reasoning, write nothing
-  vld compile <profile.json> -o <dir> [--force]
+  vld plan <profile.json> [--json] [--strict]   show selection and reasoning, write nothing; --strict refuses an adopted TODO idea
+  vld compile <profile.json> -o <dir> [--force] [--strict]
                                      render the specification packet
   vld verify <packet-dir> [--repo <path>] [--strict] [--require-assertions] [--json]
                                      check a packet, optionally against code; --require-assertions rejects hollow anchored tests
@@ -179,13 +182,73 @@ function fail(message, error = null) {
   process.exit(2);
 }
 
+// A misspelled option used to be silently ignored because every command read the
+// shared argv array opportunistically. Reject it before a command can perform a
+// side effect; command-specific arity is checked by the command handlers below.
+const BOOLEAN_FLAGS = new Set(['--apply', '--check', '--debug', '--discard', '--dry-run', '--execute', '--force', '--json', '--require-assertions', '--reset', '--strict', '--help', '-h']);
+function validateCliTokens() {
+  const seen = new Set();
+  const canonical = (flag) => flag === '-o' ? '--out' : flag;
+  for (let index = 0; index < rest.length; index += 1) {
+    const token = rest[index];
+    if (!token.startsWith('-')) continue;
+    const flag = canonical(token);
+    if (seen.has(flag)) fail(`option supplied more than once: ${flag}`);
+    seen.add(flag);
+    if (VALUE_FLAGS.has(token)) {
+      const value = rest[index + 1];
+      // Mission init gives --target a more precise public diagnostic ("ref value").
+      // Preserve that command contract while every other value flag fails here.
+      if (!value || value.startsWith('-')) {
+        if (token === '--target') continue;
+        fail(`requires ${token} value`);
+      }
+      index += 1;
+    } else if (!BOOLEAN_FLAGS.has(token)) {
+      fail(`unknown option: ${token}. Usage: vld ${command ?? '<command>'} …`);
+    }
+  }
+}
+
+function requirePositionals(usage, { min = 0, max = min } = {}) {
+  if (positional.length < min || positional.length > max) fail(`Usage: ${usage}`);
+}
+
+// Command-specific allowlists cover the public compiler commands whose output is
+// routinely piped by people and automation. Extension families retain their own
+// subcommand validation while this parser rejects every unknown token globally.
+const TOP_LEVEL_FLAGS = {
+  init: new Set(),
+  adopt: new Set(['-o', '--out', '--name', '--idea', '--force', '--json']),
+  plan: new Set(['--json', '--strict']),
+  compile: new Set(['-o', '--out', '--force', '--strict']),
+  verify: new Set(['--repo', '--strict', '--require-assertions', '--json']),
+  index: new Set(['--check']),
+  mcp: new Set()
+};
+function validateTopLevelFlags() {
+  const allowed = TOP_LEVEL_FLAGS[command];
+  if (!allowed) return;
+  for (const token of rest) if (token.startsWith('-') && !allowed.has(token)) fail(`option is not supported by vld ${command}: ${token}`);
+}
+
 /** Requirement ids already handed out by an existing packet, so they survive a catalog change. */
 function previousRequirementIds(packetDir) {
   if (!packetDir || !existsSync(path.join(packetDir, 'spec.json'))) return {};
   try {
     const previous = JSON.parse(readFileSync(path.join(packetDir, 'spec.json'), 'utf8'));
-    return Object.fromEntries((previous.requirements ?? []).map((requirement) => [requirement.key, requirement.id]));
+    const ids = Object.fromEntries((previous.requirements ?? []).map((requirement) => [requirement.key, requirement.id]));
+    const historyFile = path.join(packetDir, 'changes', 'history.json');
+    if (existsSync(historyFile)) {
+      const history = JSON.parse(readFileSync(historyFile, 'utf8'));
+      for (const entry of history.retiredRequirementIds ?? []) {
+        if (/^REQ-\d{3,}$/.test(String(entry?.id ?? ''))) ids[`__retired__${entry.id}`] = entry.id;
+      }
+    }
+    return ids;
   } catch {
+    // Preserve the existing non-destructive behavior for a malformed predecessor;
+    // packet verification still reports it, while an absent history is harmless.
     return {};
   }
 }
@@ -302,14 +365,17 @@ function printPlan(plan) {
 }
 
 function runInit(dir) {
+  requirePositionals('vld init <dir>', { min: 1 });
   if (!dir) fail('Missing directory. Usage: vld init <dir>');
   const target = path.resolve(dir);
-  mkdirSync(target, { recursive: true });
   const file = path.join(target, 'profile.json');
 
-  if (existsSync(file)) fail(`${file} already exists; refusing to overwrite`);
-
-  writeFileSync(file, `${JSON.stringify(PROFILE_TEMPLATE, null, 2)}\n`, 'utf8');
+  try {
+    writeAbsoluteManagedFileAtomic(file, `${JSON.stringify(PROFILE_TEMPLATE, null, 2)}\n`, { overwrite: false, label: 'initial profile' });
+  } catch (error) {
+    if (error.code === 'MANAGED_FILE_EXISTS') fail(`${file} already exists; refusing to overwrite`);
+    fail(error.message);
+  }
   console.log(`
 ✓ wrote ${file}
 
@@ -319,6 +385,7 @@ Fill in name, idea, kind and stage. Then:
 }
 
 function runAdopt(repoPath) {
+  requirePositionals('vld adopt <repo-or-url> [--name <slug>] [--idea <text>]', { min: 0, max: 1 });
   const repo = repoPath ?? '.';
   const remote = isRemoteRepo(repo);
   if (!remote && !existsSync(repo)) fail(`No such repository: ${repo}`);
@@ -329,7 +396,7 @@ function runAdopt(repoPath) {
   try {
     report = adoptRepo(repo, { name: explicitName, idea: explicitIdea });
   } catch (error) {
-    if (error.code === 'INVALID_REMOTE_URL' || error.code === 'REMOTE_CLONE_FAILED') fail(error.message);
+    if (error.code === 'INVALID_REMOTE_URL' || error.code === 'REMOTE_CLONE_FAILED') fail(error.message, error);
     throw error;
   }
 
@@ -383,19 +450,37 @@ Next
 `);
 }
 
+function adoptedIdeaWarning(plan) {
+  return /^TODO\b/i.test(String(plan.profile?.idea ?? ''))
+    ? 'Adopted profile idea is still a TODO draft. Replace it with the product purpose before relying on this packet.'
+    : null;
+}
+
+function enforceAdoptedIdea(plan) {
+  const warning = adoptedIdeaWarning(plan);
+  if (warning && hasFlag('--strict')) fail(`${warning} Remove TODO from profile.idea or run without --strict for an explicitly advisory draft.`);
+  return warning;
+}
+
 function runPlan(profilePath) {
+  requirePositionals('vld plan <profile.json>', { min: 1 });
   const plan = loadPlanOrFail(profilePath);
+  const warning = enforceAdoptedIdea(plan);
   if (hasFlag('--json')) {
-    console.log(JSON.stringify(plan, null, 2));
+    console.log(JSON.stringify(warning ? { ...plan, warnings: [...(plan.warnings ?? []), warning] } : plan, null, 2));
     return;
   }
+  if (warning) console.error(`\n! ${warning}\n`);
   printPlan(plan);
 }
 
 function runCompile(profilePath) {
+  requirePositionals('vld compile <profile.json> -o <dir>', { min: 1 });
   const out = option('-o', option('--out', null));
   if (!out) fail('Missing output directory. Usage: vld compile <profile.json> -o <dir>');
   const plan = loadPlanOrFail(profilePath, { previousIds: previousRequirementIds(out) });
+  const adoptedWarning = enforceAdoptedIdea(plan);
+  if (adoptedWarning) console.error(`\n! ${adoptedWarning}\n`);
 
   let result;
   try {
@@ -443,6 +528,7 @@ Next
 }
 
 function runVerify(packetDir) {
+  requirePositionals('vld verify <packet-dir> [--repo <path>]', { min: 1 });
   if (!packetDir) fail('Missing packet directory. Usage: vld verify <packet-dir> [--repo <path>]');
   if (!existsSync(packetDir)) fail(`No such packet: ${packetDir}`);
 
@@ -479,10 +565,13 @@ function runChange() {
 
   if (first === 'init') {
     const dir = second ?? 'changes';
-    mkdirSync(dir, { recursive: true });
     const file = path.join(dir, 'change.json');
-    if (existsSync(file) && !hasFlag('--force')) fail(`${file} already exists; pass --force to replace it`);
-    writeFileSync(file, `${JSON.stringify(CHANGE_TEMPLATE, null, 2)}\n`, 'utf8');
+    try {
+      writeAbsoluteManagedFileAtomic(file, `${JSON.stringify(CHANGE_TEMPLATE, null, 2)}\n`, { overwrite: hasFlag('--force'), label: 'change template' });
+    } catch (error) {
+      if (error.code === 'MANAGED_FILE_EXISTS') fail(`${file} already exists; pass --force to replace it`);
+      fail(error.message);
+    }
     console.log(`\n✓ wrote ${file}\n\nFill in id, title, why and at least one of add/modify/remove. Then:\n  vld change specs ${file} -o changes/<id>\n`);
     return;
   }
@@ -1541,6 +1630,9 @@ function runIndex() {
       : `✓ index ${result.changed ? 'written' : 'unchanged'} (${result.count} primitives)`
   );
 }
+
+validateCliTokens();
+validateTopLevelFlags();
 
 switch (command) {
   case 'init':

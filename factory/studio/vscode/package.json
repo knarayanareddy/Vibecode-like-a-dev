@@ -2,7 +2,7 @@
   "name": "vld-studio",
   "displayName": "VLD Studio",
   "description": "A local, Runtime-authoritative VLD Studio entry point.",
-  "version": "0.16.0",
+  "version": "0.19.0",
   "publisher": "vld-local",
   "license": "MIT",
   "engines": { "vscode": "^1.85.0" },

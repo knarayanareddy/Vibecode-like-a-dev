@@ -240,10 +240,16 @@ test('the secret scan finds a committed key and tolerates a placeholder', () => 
     const secrets = bad.results.find((entry) => entry.id === 'G1-SECRETS');
     assert.equal(secrets.status, 'fail');
     assert.match(secrets.detail, /src\/config\.ts/);
+    assert.doesNotMatch(secrets.detail, new RegExp(fakeKey), 'gate reports the location, never the secret value');
 
     write(repo, 'src/config.ts', 'export const apiKey = process.env.API_KEY ?? "changeme-placeholder";\n');
     const good = JSON.parse(run(p.outDir, ['--repo', repo, '--json']).stdout);
     assert.equal(good.results.find((entry) => entry.id === 'G1-SECRETS').status, 'pass');
+
+    write(repo, 'src/config.ts', `const cfg = { token: "changeme-placeholder", gh: "${fakeKey}" };\n`);
+    const mixed = JSON.parse(run(p.outDir, ['--repo', repo, '--json']).stdout).results.find((entry) => entry.id === 'G1-SECRETS');
+    assert.equal(mixed.status, 'fail', 'a placeholder field cannot excuse a real same-line credential');
+    assert.doesNotMatch(mixed.detail, new RegExp(fakeKey));
 
     // An unrelated explanatory word no longer excuses a realistic token on the same line.
     write(repo, 'src/config.ts', `// example configuration\nexport const apiKey = "${fakeKey}";\n`);
@@ -313,7 +319,7 @@ test('every gate the planner can emit has a registered mechanism', () => {
     const mechanism = gateMechanism(id);
     assert.ok(mechanism.how, `${id} does not say what it checks`);
     assert.ok(mechanism.mechanism, `${id} does not say what the check cannot see`);
-    assert.ok(['exists', 'contains', 'ci', 'anchors', 'drift', 'attest', 'no-secrets'].includes(mechanism.check.kind), `${id} uses an unknown check kind`);
+    assert.ok(['exists', 'contains', 'mutation', 'ci', 'anchors', 'drift', 'attest', 'no-secrets'].includes(mechanism.check.kind), `${id} uses an unknown check kind`);
   }
   assert.ok(loadGateRegistry().gates);
 });
@@ -410,6 +416,33 @@ test('every attestation gate ships a starter template, rejects unfilled placehol
     }
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('the mutation gate accepts current Stryker config names or configured Python mutation tools', () => {
+  const p = packet({
+    stage: 'scale',
+    traits: ['auth', 'persistence', 'payments'],
+    risks: { pii: true, payments: true, regulated: true, multiTenant: true, publicFacing: true, destructiveWrites: true }
+  });
+  try {
+    const repo = satisfyingRepo(p, path.join(p.root, 'repo'));
+    let summary = JSON.parse(run(p.outDir, ['--repo', repo, '--json']).stdout);
+    let mutation = summary.results.find((entry) => entry.id === 'G3-MUTATION');
+    assert.equal(mutation?.status, 'fail', `mutation gate should require configuration: ${JSON.stringify(mutation)}`);
+
+    write(repo, 'stryker.config.mjs', 'export default { mutate: ["src/**/*.ts"] };\n');
+    summary = JSON.parse(run(p.outDir, ['--repo', repo, '--json']).stdout);
+    mutation = summary.results.find((entry) => entry.id === 'G3-MUTATION');
+    assert.equal(mutation?.status, 'pass', `Stryker config was not recognised: ${JSON.stringify(mutation)}`);
+
+    rmSync(path.join(repo, 'stryker.config.mjs'));
+    write(repo, 'pyproject.toml', '[tool.mutmut]\npaths_to_mutate = "src"\n');
+    summary = JSON.parse(run(p.outDir, ['--repo', repo, '--json']).stdout);
+    mutation = summary.results.find((entry) => entry.id === 'G3-MUTATION');
+    assert.equal(mutation?.status, 'pass', `mutmut pyproject config was not recognised: ${JSON.stringify(mutation)}`);
+  } finally {
+    p.cleanup();
   }
 });
 

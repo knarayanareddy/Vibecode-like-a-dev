@@ -13,6 +13,7 @@ import { Readable, Writable } from 'node:stream';
 import path from 'node:path';
 import { client, methods, ndJsonStream } from '@agentclientprotocol/sdk';
 import { digest, extensionError } from '../../lib/extension-utils.mjs';
+import { PACKAGE_VERSION } from '../../lib/version.mjs';
 import { redactAgentOutput } from '../../lib/agent-adapters.mjs';
 import { acpV1Prompt, negotiateAcpV1, normalizeAcpV1Stop, normalizeAcpV1Update } from './contract.mjs';
 
@@ -119,7 +120,7 @@ export async function runAcpV1Adapter({ spec, policy, signal = null, onEvent = n
       const initialized = await connection.agent.request(methods.agent.initialize, {
         protocolVersion: 1,
         clientCapabilities: {},
-        clientInfo: { name: 'VLD', version: '0.19.0' }
+        clientInfo: { name: 'VLD', version: PACKAGE_VERSION }
       });
       negotiateAcpV1(initialized, { requireReconnect: policy.capabilities.reconnect === true });
       const session = await connection.agent.buildSession(spec.workspace).start(); sessionId = session.sessionId;

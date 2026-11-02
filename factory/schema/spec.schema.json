@@ -211,7 +211,7 @@
         "properties": {
           "id": {
             "type": "string",
-            "pattern": "^REQ-\\d{3}$"
+            "pattern": "^REQ-\\d{3,}$"
           },
           "key": {
             "type": "string"
@@ -241,7 +241,7 @@
               "properties": {
                 "id": {
                   "type": "string",
-                  "pattern": "^AC-\\d{2}$"
+                  "pattern": "^AC-\\d{2,}$"
                 },
                 "text": {
                   "type": "string",

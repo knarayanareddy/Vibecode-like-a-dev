@@ -381,7 +381,7 @@ vld runtime delivery queue missions/report-export/mission.json export-api \
 
 ### Local Studio — a visual Runtime client, not a second authority
 
-M6 adds a local browser dashboard at the same loopback Runtime process and a lightweight VS Code command entry (`factory/studio/vscode`). It displays packet/policy digests, a mission board with dependencies/resource claims/lease health, bounded recent agent-event evidence, exact delivery receipts and degraded Runtime warnings. It can request only the already typed `allocate` and `recover` Runtime operations; Runtime still validates the caller role and every state transition.
+M6 adds a local browser dashboard at the same loopback Runtime process and a lightweight VS Code command entry (`factory/studio/vscode`). The browser dashboard displays packet/policy digests, a mission board with dependencies/resource claims/lease health, bounded recent agent-event evidence, exact delivery receipts, and forge-plan receipts as provider/repository/ref/check/merge-disabled fields. The VS Code inspector intentionally remains a read-only raw Runtime-status JSON view; it is not a second structured forge renderer. It can request only the already typed `allocate` and `recover` Runtime operations; Runtime still validates the caller role and every state transition.
 
 ```bash
 # This starts the existing loopback-only Runtime API plus Studio.
@@ -574,7 +574,7 @@ The most useful test of this tool is whether it can describe the tool. `profile.
 ```bash
 npm run dogfood    # compile profile.json -> specs/, then guard this repo with its own checker
 npm run stress     # ten product ideas through the pipeline, judged on more than exit codes
-npm run check      # index + tests + example packet + self-guard + stress
+npm run check      # deterministic local CI baseline: lint, index, core + Studio extension tests, packet guards, evaluation and stress
 ```
 
 What it produces today:
@@ -755,7 +755,7 @@ docs/                  research notes, authoring guide, stress test, landscape s
 ```
 
 ```bash
-npm test        # complete Node test suite
+npm test        # complete Node suite, including the deterministic VS Code Studio extension tests
 npm run eval    # library health + packet specificity + 75-prompt routing + 24-task outcome calibration
 npm run stress  # 10 representative + 24 hostile ideas, and 6 refusals; scored on soundness
 npm run check   # lint + index + tests + verify + self-guard + gates + eval + stress
