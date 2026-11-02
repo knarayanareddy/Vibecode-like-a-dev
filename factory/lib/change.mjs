@@ -15,7 +15,8 @@
  * over a backup.
  */
 
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, renameSync, rmSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { ARTIFACTS, validateArtifact } from './artifacts.mjs';
 import { earsError } from './ears.mjs';
@@ -23,6 +24,7 @@ import { emitPacket } from './emit/index.mjs';
 import { buildIndex, loadIndex } from './indexer.mjs';
 import { buildPlan } from './planner.mjs';
 import { normalizeProfile } from './profile.mjs';
+import { ensureSafeManagedDirectory, safeManagedDirectory, safeManagedFile, writeManagedFileAtomic } from './extension-utils.mjs';
 
 const ID_PATTERN = /^[a-z0-9][a-z0-9-]{1,60}$/;
 // Keys are namespaced like the catalog: "feature.export", not "feature-export".
@@ -523,18 +525,21 @@ export function emitChange(plan, outDir, { force = false } = {}) {
     throw error;
   }
 
-  const target = path.resolve(outDir);
-  if (existsSync(target) && !force) {
-    const error = new Error(`${target} already exists. Pass --force to replace it.`);
+  const requestedTarget = path.resolve(outDir);
+  const parent = ensureRealDirectory(path.dirname(requestedTarget), 'change output parent directory');
+  const targetName = path.basename(requestedTarget);
+  safeManagedDirectory(parent, targetName, 'change output directory');
+  if (existsSync(requestedTarget) && !force) {
+    const error = new Error(`${requestedTarget} already exists. Pass --force to replace it.`);
     error.code = 'OUTPUT_EXISTS';
     throw error;
   }
+  const target = ensureRealDirectory(requestedTarget, 'change output directory');
 
-  mkdirSync(target, { recursive: true });
   const files = renderChange(plan);
   const written = [];
   for (const [name, content] of files) {
-    writeFileSync(path.join(target, name), content, 'utf8');
+    writeManagedFileAtomic(target, name, content, { label: 'change output file' });
     written.push({ name, lines: content.split('\n').length });
   }
   return { outDir: target, written };
@@ -542,16 +547,33 @@ export function emitChange(plan, outDir, { force = false } = {}) {
 
 /** Copy the post-change manifest into the packet, keeping a backup. */
 export function applyChange(plan, { force = false } = {}) {
-  const specPath = path.join(plan.packet.dir, 'spec.json');
-  const backupPath = path.join(plan.packet.dir, 'spec.json.bak');
+  const packetRoot = ensureRealDirectory(plan.packet.dir, 'change packet directory');
+  const specPath = path.join(packetRoot, 'spec.json');
+  const backupPath = path.join(packetRoot, 'spec.json.bak');
+  safeManagedFile(packetRoot, 'spec.json.bak', 'change packet backup');
   if (existsSync(backupPath) && !force) {
     const error = new Error(`${backupPath} already exists from an earlier apply. Restore or remove it first.`);
     error.code = 'OUTPUT_EXISTS';
     throw error;
   }
-  writeFileSync(backupPath, readFileSync(specPath, 'utf8'), 'utf8');
-  writeFileSync(specPath, `${JSON.stringify(plan.afterSpec, null, 2)}\n`, 'utf8');
+  const current = readFileSync(safeManagedFile(packetRoot, 'spec.json', 'change packet manifest'), 'utf8');
+  writeManagedFileAtomic(packetRoot, 'spec.json.bak', current, { overwrite: force, label: 'change packet backup' });
+  writeManagedFileAtomic(packetRoot, 'spec.json', `${JSON.stringify(plan.afterSpec, null, 2)}\n`, { label: 'change packet manifest' });
   return { specPath, backupPath };
+}
+
+function ensureRealDirectory(directory, label) {
+  const resolved = path.resolve(directory);
+  const parsed = path.parse(resolved);
+  return ensureSafeManagedDirectory(parsed.root, resolved.slice(parsed.root.length), label);
+}
+
+function relativeManaged(root, file, label) {
+  const relative = path.relative(root, file);
+  if (!relative || relative.startsWith(`..${path.sep}`) || relative === '..' || path.isAbsolute(relative)) {
+    throw new Error(`${label} escapes its managed root`);
+  }
+  return relative;
 }
 
 
@@ -603,24 +625,13 @@ function canonicalJson(value) {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
 
-function writeAtomic(file, content) {
-  const parent = path.dirname(file);
-  mkdirSync(parent, { recursive: true });
-  const temporary = path.join(parent, `.${path.basename(file)}.${process.pid}.${Date.now()}.tmp`);
-  try {
-    writeFileSync(temporary, content, 'utf8');
-    renameSync(temporary, file);
-  } finally {
-    rmSync(temporary, { force: true });
-  }
-}
-
-function restoreFile(file, previous) {
+function restoreManagedFile(root, relative, previous, label) {
+  const target = safeManagedFile(root, relative, label);
   if (previous === null) {
-    rmSync(file, { force: true });
+    rmSync(target, { force: true });
     return;
   }
-  writeAtomic(file, previous);
+  writeManagedFileAtomic(root, relative, previous, { label });
 }
 
 /**
@@ -632,8 +643,8 @@ function restoreFile(file, previous) {
  * fails (including a planner/emitter failure), callers observe the original bytes.
  */
 export async function archiveChange({ packetDir, changeDir, profilePath = null, force = false, recompile = true, recompileFn = recompilePacket }) {
-  const resolvedPacket = path.resolve(packetDir);
-  const specPath = path.join(resolvedPacket, 'spec.json');
+  const resolvedPacket = ensureRealDirectory(packetDir, 'archive packet directory');
+  const specPath = safeManagedFile(resolvedPacket, 'spec.json', 'archive packet manifest');
   if (!existsSync(specPath)) throw new Error(`no spec.json in ${packetDir}`);
   const spec = readJson(specPath);
   const deltaPath = path.join(changeDir, 'delta.json');
@@ -645,7 +656,10 @@ export async function archiveChange({ packetDir, changeDir, profilePath = null, 
   const delta = readJson(deltaPath);
 
   const profileFile = resolveProfileFile({ profilePath, spec, packetDir: resolvedPacket });
-  const evidenceCheck = verifyChange(changeDir, { projectDir: path.dirname(profileFile) });
+  const profileRoot = ensureRealDirectory(path.dirname(profileFile), 'archive profile directory');
+  const profileRelative = relativeManaged(profileRoot, profileFile, 'archive profile');
+  safeManagedFile(profileRoot, profileRelative, 'archive profile');
+  const evidenceCheck = verifyChange(changeDir, { projectDir: profileRoot });
   if (!evidenceCheck.ok) {
     const error = new Error(`change evidence is not ready to archive:\n${evidenceCheck.errors.map((issue) => `- ${issue}`).join('\n')}`);
     error.code = 'CHANGE_EVIDENCE_INVALID';
@@ -654,8 +668,15 @@ export async function archiveChange({ packetDir, changeDir, profilePath = null, 
   const evidence = readJson(path.join(changeDir, 'evidence.json'));
   const profile = readJson(profileFile);
   const overlayId = `change-${delta.id}`;
-  const overlayDir = path.join(path.dirname(profileFile), 'overlays');
+  const overlayDir = path.join(profileRoot, 'overlays');
   const overlayPath = path.join(overlayDir, `${overlayId}.json`);
+  const overlayRelative = path.join('overlays', `${overlayId}.json`);
+  // Reject both dangling and resolved final links before reading or replacing an
+  // overlay/history/archive destination. A profile can be user-authored; it is
+  // not permission to redirect a managed archive write outside its project.
+  safeManagedFile(profileRoot, overlayRelative, 'archive overlay');
+  safeManagedFile(resolvedPacket, path.join('changes', 'history.json'), 'archive history');
+  safeManagedDirectory(resolvedPacket, path.join('changes', 'archive', delta.id), 'archive change destination');
 
   const addRequirements = (delta.added ?? []).map((requirement) => ({
     key: requirement.key,
@@ -697,8 +718,8 @@ export async function archiveChange({ packetDir, changeDir, profilePath = null, 
   if (!overlays.includes(overlayId)) nextProfile.overlays = [...overlays, overlayId];
   const overlayText = canonicalJson(overlay);
   const profileText = canonicalJson(nextProfile);
-  const previousOverlay = existsSync(overlayPath) ? readFileSync(overlayPath, 'utf8') : null;
-  const previousProfile = readFileSync(profileFile, 'utf8');
+  const previousOverlay = existsSync(overlayPath) ? readFileSync(safeManagedFile(profileRoot, overlayRelative, 'archive overlay'), 'utf8') : null;
+  const previousProfile = readFileSync(safeManagedFile(profileRoot, profileRelative, 'archive profile'), 'utf8');
   const overlayChanged = previousOverlay !== overlayText;
   const profileChanged = previousProfile !== profileText;
 
@@ -716,11 +737,11 @@ export async function archiveChange({ packetDir, changeDir, profilePath = null, 
 
   try {
     cpSync(resolvedPacket, stagedPacket, { recursive: true, force: true });
-    writeFileSync(stagedProfile, profileText, 'utf8');
+    writeManagedFileAtomic(stageRoot, path.basename(profileFile), profileText, { label: 'staged archive profile' });
     if (existsSync(overlayDir)) cpSync(overlayDir, stagedOverlayDir, { recursive: true, force: true });
-    mkdirSync(stagedOverlayDir, { recursive: true });
-    writeFileSync(path.join(stagedOverlayDir, `${overlayId}.json`), overlayText, 'utf8');
-    mkdirSync(path.dirname(stagedArchiveDir), { recursive: true });
+    ensureSafeManagedDirectory(stageRoot, 'overlays', 'staged archive overlay directory');
+    writeManagedFileAtomic(stageRoot, path.join('overlays', `${overlayId}.json`), overlayText, { label: 'staged archive overlay' });
+    ensureSafeManagedDirectory(stageRoot, path.join('packet', 'changes', 'archive'), 'staged archive directory');
     if (path.resolve(changeDir) !== path.resolve(archiveDir)) cpSync(changeDir, stagedArchiveDir, { recursive: true, force: true });
 
     const stagedHistoryPath = path.join(stagedPacket, 'changes', 'history.json');
@@ -737,7 +758,7 @@ export async function archiveChange({ packetDir, changeDir, profilePath = null, 
     if (compiled && stagedSpec.history) {
       entry.compile = stagedSpec.history;
       delete stagedSpec.history;
-      writeFileSync(stagedSpecPath, canonicalJson(stagedSpec), 'utf8');
+      writeManagedFileAtomic(stagedPacket, 'spec.json', canonicalJson(stagedSpec), { label: 'staged archive manifest' });
     }
     const activeKeys = new Set((stagedSpec.requirements ?? []).map((requirement) => requirement.key));
     const invalidAdded = entry.added.find((key) => !activeKeys.has(key));
@@ -753,24 +774,29 @@ export async function archiveChange({ packetDir, changeDir, profilePath = null, 
     for (const retired of entry.retired) retiredById.set(retired.id, { ...retired, change: delta.id });
     history.retiredRequirementIds = [...retiredById.values()].sort((a, b) => a.id.localeCompare(b.id));
     history.entries = history.entries.map((item, index) => ({ ...item, n: index + 1 }));
-    writeFileSync(stagedHistoryPath, canonicalJson(history), 'utf8');
+    writeManagedFileAtomic(stagedPacket, path.join('changes', 'history.json'), canonicalJson(history), { label: 'staged archive history' });
 
     // Promote profile inputs first, with original bytes retained for rollback; the
     // final packet swap is a same-filesystem directory rename. No fallible work is
     // left after that swap other than deleting private staging/backup directories.
     const hadOverlayDir = existsSync(overlayDir);
-    const packetBackup = path.join(path.dirname(resolvedPacket), `.${path.basename(resolvedPacket)}.vld-archive-backup-${process.pid}-${Date.now()}`);
+    const packetParent = ensureRealDirectory(path.dirname(resolvedPacket), 'archive packet parent directory');
+    const packetName = path.basename(resolvedPacket);
+    const packetBackupName = `.${packetName}.vld-archive-backup-${process.pid}-${randomUUID()}`;
+    const packetBackup = path.join(packetParent, packetBackupName);
+    safeManagedDirectory(packetParent, packetName, 'archive packet directory');
+    safeManagedDirectory(packetParent, packetBackupName, 'archive packet backup');
+    if (existsSync(packetBackup)) throw new Error('archive packet backup path already exists; inspect it before retrying');
     let profilePromoted = false;
     let overlayPromoted = false;
     let packetBackedUp = false;
     try {
       if (overlayChanged) {
-        mkdirSync(overlayDir, { recursive: true });
-        writeAtomic(overlayPath, overlayText);
+        writeManagedFileAtomic(profileRoot, overlayRelative, overlayText, { label: 'archive overlay' });
         overlayPromoted = true;
       }
       if (profileChanged) {
-        writeAtomic(profileFile, profileText);
+        writeManagedFileAtomic(profileRoot, profileRelative, profileText, { label: 'archive profile' });
         profilePromoted = true;
       }
       renameSync(resolvedPacket, packetBackup);
@@ -782,8 +808,8 @@ export async function archiveChange({ packetDir, changeDir, profilePath = null, 
       if (packetBackedUp) {
         try { renameSync(packetBackup, resolvedPacket); } catch {}
       }
-      try { if (profilePromoted) restoreFile(profileFile, previousProfile); } catch {}
-      try { if (overlayPromoted) restoreFile(overlayPath, previousOverlay); } catch {}
+      try { if (profilePromoted) restoreManagedFile(profileRoot, profileRelative, previousProfile, 'archive profile'); } catch {}
+      try { if (overlayPromoted) restoreManagedFile(profileRoot, overlayRelative, previousOverlay, 'archive overlay'); } catch {}
       try { if (!hadOverlayDir && existsSync(overlayDir)) rmSync(overlayDir, { recursive: true, force: true }); } catch {}
       throw error;
     }

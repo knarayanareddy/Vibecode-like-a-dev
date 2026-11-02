@@ -6,11 +6,11 @@
  * into .vld/stores.json so a team can review, pin and detect local drift.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
-import { digest, ensureProjectDir, extensionError, ID_PATTERN, readJson, stableJson, vldDir, writeJsonAtomic } from './extension-utils.mjs';
+import { digest, ensureProjectDir, ensureSafeManagedDirectory, extensionError, ID_PATTERN, readJson, safeManagedDirectory, safeManagedFile, stableJson, vldDir, writeManagedFileAtomic, writeManagedJsonAtomic } from './extension-utils.mjs';
 
 const STATE_VERSION = 1;
 const STORE_VERSION = 1;
@@ -88,43 +88,22 @@ function assetPath(root, relative) {
   return resolved;
 }
 
-function createOutputParents(project, target) {
-  const base = path.resolve(project);
-  regularDirectory(base, 'store asset project root');
-  let cursor = base;
-  for (const part of path.relative(base, path.dirname(target)).split(path.sep).filter(Boolean)) {
-    cursor = path.join(cursor, part);
-    try {
-      const stats = lstatSync(cursor);
-      if (stats.isSymbolicLink() || !stats.isDirectory()) throw extensionError('store asset output has an unsafe parent path', 'INVALID_STORE_OUTPUT');
-    } catch (error) {
-      if (error?.code !== 'ENOENT') throw error;
-      mkdirSync(cursor, { mode: 0o700 });
-      regularDirectory(cursor, 'store asset output parent');
+function writeOutput(project, target, content, force) {
+  const relative = path.relative(project, target);
+  try {
+    return writeManagedFileAtomic(project, relative, content, {
+      overwrite: force,
+      mode: 0o600,
+      label: 'store asset output'
+    });
+  } catch (error) {
+    if (error?.code === 'UNSAFE_MANAGED_PATH' || error?.code === 'MANAGED_FILE_EXISTS') {
+      throw extensionError(error.message, error.code === 'MANAGED_FILE_EXISTS' ? 'STORE_ASSET_EXISTS' : 'INVALID_STORE_OUTPUT');
     }
+    throw error;
   }
 }
 
-function writeOutput(target, content, force) {
-  let existing = null;
-  try { existing = lstatSync(target); } catch (error) { if (error?.code !== 'ENOENT') throw error; }
-  if (existing?.isSymbolicLink() || (existing && !existing.isFile())) throw extensionError('store asset output is not a regular file', 'INVALID_STORE_OUTPUT');
-  if (existing && !force) throw extensionError(`${target} exists; pass --force to replace it`, 'STORE_ASSET_EXISTS');
-  if (!force) {
-    // O_EXCL refuses a racing final symlink/file rather than following it.
-    writeFileSync(target, content, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
-    return;
-  }
-  // Rename replaces a final symlink itself rather than following it. The temp
-  // file is created in the vetted output directory so it cannot cross devices.
-  const temporary = path.join(path.dirname(target), `.${path.basename(target)}.${process.pid}.${randomUUID()}.tmp`);
-  try {
-    writeFileSync(temporary, content, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
-    renameSync(temporary, target);
-  } finally {
-    rmSync(temporary, { force: true });
-  }
-}
 
 /** Validate a manifest and return only data safe to record in a project lock. */
 export function readStoreManifest(root, expectedId = null) {
@@ -165,6 +144,7 @@ export function readStoreManifest(root, expectedId = null) {
 export function readStoreState(projectDir = '.') {
   const project = ensureProjectDir(projectDir);
   const file = stateFile(project);
+  try { safeManagedFile(project, path.relative(project, file), 'store state'); } catch (error) { return { project, file, exists: existsSync(file), state: null, errors: [error.message] }; }
   if (!existsSync(file)) return { project, file, exists: false, state: { schemaVersion: STATE_VERSION, stores: [] }, errors: [] };
   let state;
   try { state = readJson(file); } catch (error) { return { project, file, exists: true, state: null, errors: [`${file}: invalid JSON (${error.message})`] }; }
@@ -272,10 +252,18 @@ export function addStore({ projectDir = '.', id, repository, ref = null, refresh
   if (expectedCommit !== null && !COMMIT.test(String(expectedCommit))) {
     throw extensionError('store refresh acknowledgement must be the full 40-character commit shown by "vld store diff"', 'INVALID_STORE_ACKNOWLEDGEMENT');
   }
-  const root = storesDir(project); mkdirSync(root, { recursive: true });
+  const root = storesDir(project);
+  const rootRelative = path.relative(project, root);
+  ensureSafeManagedDirectory(project, rootRelative, 'store cache directory');
   const destination = storeDir(project, id);
-  const temporary = path.join(root, `.${id}.${process.pid}.fetching`);
-  const backup = path.join(root, `.${id}.${process.pid}.backup`);
+  const destinationRelative = path.relative(project, destination);
+  const temporary = path.join(root, `.${id}.${process.pid}.${randomUUID()}.fetching`);
+  const temporaryRelative = path.relative(project, temporary);
+  const backup = path.join(root, `.${id}.${process.pid}.${randomUUID()}.backup`);
+  const backupRelative = path.relative(project, backup);
+  safeManagedDirectory(project, destinationRelative, 'store cache destination');
+  safeManagedDirectory(project, temporaryRelative, 'store cache temporary directory');
+  safeManagedDirectory(project, backupRelative, 'store cache backup directory');
   if (existsSync(temporary) || existsSync(backup)) throw extensionError('a previous store update did not finish; remove its temporary directory after inspection', 'STORE_TEMPORARY_EXISTS');
   let lockWritten = false;
   try {
@@ -289,7 +277,7 @@ export function addStore({ projectDir = '.', id, repository, ref = null, refresh
     const next = loaded.state.stores.filter((store) => store.id !== id);
     next.push(stateEntry({ id, repository, ref, snapshot: checked, acknowledgedCommit: prior ? expectedCommit : null }));
     next.sort((a, b) => a.id.localeCompare(b.id));
-    writeJsonAtomic(loaded.file, { schemaVersion: STATE_VERSION, stores: next });
+    writeManagedJsonAtomic(project, path.relative(project, loaded.file), { schemaVersion: STATE_VERSION, stores: next }, { label: 'store state' });
     lockWritten = true;
     rmSync(backup, { recursive: true, force: true });
     return { project, file: loaded.file, refreshed: Boolean(prior), store: next.find((entry) => entry.id === id) };
@@ -371,21 +359,32 @@ export function copyStoreAsset({ projectDir = '.', storeId, assetId, out = null,
     throw extensionError('store asset output must be a non-state path inside the project', 'INVALID_STORE_OUTPUT');
   }
   if (!target.endsWith('.md')) throw extensionError('store asset output must be a Markdown file', 'INVALID_STORE_OUTPUT');
-  createOutputParents(loaded.project, target);
-  writeOutput(target, loaded.content, force);
+  writeOutput(loaded.project, target, loaded.content, force);
   return { ...loaded, output: target };
 }
 
 /** Create an authoring skeleton. Git initialization and publication are deliberate user actions. */
 export function initStore({ directory, id = null, title = null, force = false }) {
   if (!directory) throw extensionError('store directory is required', 'STORE_DIRECTORY_REQUIRED');
-  const root = path.resolve(directory); const inferred = id ?? path.basename(root); requireId(inferred);
+  let requestedRoot = path.resolve(directory); const inferred = id ?? path.basename(requestedRoot); requireId(inferred);
+  // macOS may expose its OS-selected temporary root through `/var`, an early
+  // system symlink. Canonicalize that trusted anchor only; every requested
+  // descendant is still walked with lstat below, so a user-created link is never
+  // accepted as a store root.
+  const temporary = path.resolve(os.tmpdir());
+  const temporaryRelative = path.relative(temporary, requestedRoot);
+  if (temporaryRelative === '' || (!temporaryRelative.startsWith(`..${path.sep}`) && temporaryRelative !== '..' && !path.isAbsolute(temporaryRelative))) {
+    try { requestedRoot = path.resolve(realpathSync(temporary), temporaryRelative); } catch {}
+  }
+  const parsed = path.parse(requestedRoot);
+  const root = ensureSafeManagedDirectory(parsed.root, requestedRoot.slice(parsed.root.length), 'store root directory');
   const manifestFile = path.join(root, 'vld-store.json');
+  safeManagedFile(root, 'vld-store.json', 'store manifest');
   if (existsSync(manifestFile) && !force) throw extensionError(`${manifestFile} exists; pass --force to replace it`, 'STORE_MANIFEST_EXISTS');
-  mkdirSync(root, { recursive: true });
   const manifest = { schemaVersion: STORE_VERSION, id: inferred, title: title ?? `${inferred} shared delivery store`, assets: [] };
-  writeJsonAtomic(manifestFile, manifest);
+  writeManagedJsonAtomic(root, 'vld-store.json', manifest, { label: 'store manifest' });
   const readme = path.join(root, 'README.md');
-  if (!existsSync(readme) || force) writeFileSync(readme, `# ${manifest.title}\n\nA versioned VLD shared store. Add reviewed text assets, list them in \`vld-store.json\`, commit with Git, then let consuming projects run \`vld store add ${inferred} <repository>\`.\n\nStores distribute advisory templates and guidance only. They do not alter VLD's deterministic compiler or execute commands.\n`, 'utf8');
+  safeManagedFile(root, 'README.md', 'store README');
+  if (!existsSync(readme) || force) writeManagedFileAtomic(root, 'README.md', `# ${manifest.title}\n\nA versioned VLD shared store. Add reviewed text assets, list them in \`vld-store.json\`, commit with Git, then let consuming projects run \`vld store add ${inferred} <repository>\`.\n\nStores distribute advisory templates and guidance only. They do not alter VLD's deterministic compiler or execute commands.\n`, { label: 'store README' });
   return { directory: root, manifest: manifestFile, manifest };
 }

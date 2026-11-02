@@ -23,6 +23,16 @@ function makeStore(root, id = 'team-playbook') {
   return source;
 }
 
+test('store initialization rejects a final manifest symlink even under explicit force', (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'vld-store-final-link-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const store = path.join(root, 'store'); const outside = path.join(root, 'outside.json');
+  mkdirSync(store); writeFileSync(outside, '{"outside":true}\n');
+  symlinkSync(outside, path.join(store, 'vld-store.json'), 'file');
+  assert.throws(() => initStore({ directory: store, id: 'team-playbook', force: true }), (error) => error.code === 'UNSAFE_MANAGED_PATH');
+  assert.equal(readFileSync(outside, 'utf8'), '{"outside":true}\n');
+});
+
 test('Git-backed stores pin a validated snapshot and detect cached asset drift without contacting a remote', (t) => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'vld-store-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));

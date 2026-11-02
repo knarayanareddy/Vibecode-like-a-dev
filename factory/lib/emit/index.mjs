@@ -1,10 +1,10 @@
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { derive } from './derive.mjs';
 import { enforcementFiles } from '../enforcement.mjs';
-import { ensureSafeManagedDirectory, extensionError, safeManagedFile } from '../extension-utils.mjs';
+import { ensureSafeManagedDirectory, extensionError, safeManagedFile, writeManagedFileAtomic } from '../extension-utils.mjs';
 import {
   agentsMd,
   agentHandoff,
@@ -172,8 +172,7 @@ export function emitPacket(plan, outDir, { force = false } = {}) {
   for (const [name, content] of files) {
     const parent = path.dirname(name);
     ensureSafeManagedDirectory(target, parent === '.' ? '' : parent, 'packet output directory');
-    const filePath = safeManagedFile(target, name, 'packet output file');
-    writeFileSync(filePath, content, 'utf8');
+    writeManagedFileAtomic(target, name, content, { label: 'packet output file' });
     const lines = content.split('\n').length;
     totalLines += lines;
     written.push({ name, lines });

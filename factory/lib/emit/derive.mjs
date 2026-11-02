@@ -189,10 +189,42 @@ export function groupRequirements(requirements) {
   }));
 }
 
+/**
+ * The transport-neutral stack contract consumed by both packet emission and
+ * callers such as MCP. Keep syntax decisions here: a recommendation must not
+ * call a Python test TypeScript merely because it arrived over a different API.
+ */
+export function stackContract(profile) {
+  const stack = stackFor(profile);
+  const kind = isPythonStack(profile) ? 'python' : isGoStack(profile) ? 'go' : 'typescript';
+  return {
+    kind,
+    language: stack.stack.language,
+    fenceLanguage: kind === 'python' ? 'python' : kind === 'go' ? 'go' : 'ts',
+    testExtension: kind === 'python' ? 'py' : kind === 'go' ? 'go' : 'ts',
+    anchorComment: kind === 'python' ? '#' : '//',
+    recognised: stack.recognised,
+    commands: commandsFor(profile)
+  };
+}
+
+/** One public projection for selected practice and stack hints across emitters. */
+export function planContract(plan) {
+  const selectedPractices = plan.primitives.map((primitive) => ({
+    id: primitive.id,
+    title: primitive.title,
+    gates: (primitive.gates ?? []).map((gate) => typeof gate === 'string' ? gate : gate?.id).filter(Boolean)
+  }));
+  return {
+    stack: stackContract(plan.profile),
+    selectedPracticeIds: selectedPractices.map((primitive) => primitive.id),
+    selectedPractices
+  };
+}
+
 export function anchorPath(profile, requirement) {
   const name = slugOf(requirement.key);
-  const ext = isPythonStack(profile) ? 'py' : isGoStack(profile) ? 'go' : 'ts';
-  return `tests/${requirement.render}/${name}.test.${ext}`;
+  return `tests/${requirement.render}/${name}.test.${stackContract(profile).testExtension}`;
 }
 
 // ---------- non-goals and questions ----------
@@ -797,6 +829,7 @@ export function derive(plan) {
     nonGoals: nonGoalsFor(plan.profile, [vocab.primary, vocab.secondary]),
     questions: openQuestionsFor(plan.profile, plan.rigor, [vocab.primary, vocab.secondary]),
     stack: stackFor(plan.profile),
+    contract: planContract(plan),
     commands: commandsFor(plan.profile),
     phases: buildPhases(plan, phrases),
     brief: copyBrief(plan),

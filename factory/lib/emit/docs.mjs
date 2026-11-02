@@ -476,7 +476,7 @@ export function architecture(plan, d) {
     ...(hasUi ? [['Token usage', 'No raw colour or spacing literal in a component', 'token lint', 'A hex colour appears in a component']] : []),
     ['Contract agreement', 'Implementation matches the shapes in 04-contracts.md', 'contract test', 'A response field is added or removed silently'],
     ['Requirement coverage', `${plan.requirements.filter((requirement) => requirement.verify === 'automated').length} anchored requirements have a passing test`, '`node specs/spec-check.mjs`', 'A test is deleted or renamed'],
-    [plan.primitives.some((primitive) => primitive.id === 'testing.mutation-testing') ? 'Test quality' : 'Assertion density', plan.primitives.some((primitive) => primitive.id === 'testing.mutation-testing') ? 'Mutation score on the domain layer' : 'Every test asserts an outcome, not just absence of a throw', plan.primitives.some((primitive) => primitive.id === 'testing.mutation-testing') ? 'mutation run in CI' : 'review', 'A test would pass if the behaviour were wrong']
+    [d.contract.selectedPracticeIds.includes('testing.mutation-testing') ? 'Test quality' : 'Assertion density', d.contract.selectedPracticeIds.includes('testing.mutation-testing') ? 'Mutation score on the domain layer' : 'Every test asserts an outcome, not just absence of a throw', d.contract.selectedPracticeIds.includes('testing.mutation-testing') ? 'mutation run in CI' : 'review', 'A test would pass if the behaviour were wrong']
   ];
 
   return [
@@ -679,7 +679,7 @@ export function contracts(plan, d) {
     '',
     h2('3. Conventions that bind you'),
     '',
-    'Only the conventions this profile makes load-bearing are listed. The rest are in the library practice `engineering.api-conventions`, which this packet selected at compile time.',
+    'Only the conventions this profile makes load-bearing are listed. The selected-practice table in 00-constitution.md names every additional obligation this packet actually selected; no unselected library practice is implied.',
     '',
     table(['Concern', 'Rule'], conventions),
     '',
@@ -773,12 +773,12 @@ export function verification(plan, d) {
       [
         ['Domain unit', 'Invariants and state transitions, with no IO', d.stack.stack.unitRunner, 'most tests live here'],
         ['Application', 'Use case orchestration, authorization, transaction boundaries', 'same runner, fake adapters', 'a few per use case'],
-        ['Contract', 'Interface shapes and error envelopes', plan.primitives.some((p) => p.id === 'testing.contract-tests') ? 'contract tests + fixtures' : 'deferred', plan.primitives.some((p) => p.id === 'testing.contract-tests') ? 'one per endpoint' : 'n/a'],
+        ['Contract', 'Interface shapes and error envelopes', d.contract.selectedPracticeIds.includes('testing.contract-tests') ? 'contract tests + fixtures' : 'deferred', d.contract.selectedPracticeIds.includes('testing.contract-tests') ? 'one per endpoint' : 'n/a'],
         ['Acceptance', 'The requirement criteria, end to end through the public surface', 'integration harness', 'one per criterion'],
         hasUi
           ? ['Journey', 'The primary user path in a real browser', 'Playwright', 'one, maybe two']
           : ['Journey', 'Not applicable: this product has no browser interface, so the acceptance layer carries the end-to-end claim', 'n/a', 'none'],
-        ['Property', 'Invariants across generated inputs', plan.primitives.some((p) => p.id === 'testing.property-based-testing') ? 'fast-check / hypothesis' : 'deferred', plan.primitives.some((p) => p.id === 'testing.property-based-testing') ? 'per core invariant' : 'n/a']
+        ['Property', 'Invariants across generated inputs', d.contract.selectedPracticeIds.includes('testing.property-based-testing') ? 'fast-check / hypothesis' : 'deferred', d.contract.selectedPracticeIds.includes('testing.property-based-testing') ? 'per core invariant' : 'n/a']
       ]
     ),
     '',
@@ -787,7 +787,7 @@ export function verification(plan, d) {
     `Every automated requirement carries one anchor line in the test that proves it. The example below is ${d.start.id}, so it is the one you will write first.`,
     '',
     code(
-      d.stack.stack.language === 'Python' ? 'python' : d.stack.stack.language === 'Go' ? 'go' : 'ts',
+      d.contract.stack.fenceLanguage,
       [
         `// @req ${d.start.id}  // @req-ignore: example inside a spec document`,
         `test('${startSlug} (${startAcId})', async () => {`,

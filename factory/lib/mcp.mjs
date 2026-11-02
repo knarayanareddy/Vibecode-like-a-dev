@@ -16,6 +16,7 @@ import path from 'node:path';
 import { ROOT, buildIndex, loadIndex } from './indexer.mjs';
 import { buildPlan, loadCatalog, loadPolicy, loadRouting } from './planner.mjs';
 import { normalizeProfile, validateProfile } from './profile.mjs';
+import { anchorPath, planContract } from './emit/derive.mjs';
 
 const PROTOCOL_VERSION = '2024-11-05';
 // MCP clients display this in their server list, so it must be the package version
@@ -316,6 +317,7 @@ const TOOLS = [
         kind: { type: 'string', enum: ['web-app', 'api', 'cli', 'library', 'data-pipeline', 'mobile', 'agent', 'automation'] },
         stage: { type: 'string', enum: ['prototype', 'mvp', 'internal-tool', 'production'] },
         name: { type: 'string', description: 'kebab-case project name (optional here)' },
+        stack: { type: 'string', description: 'Optional declared implementation stack; normalizes test-anchor extension, fenced examples, and command hints.' },
         scale: { type: 'string', enum: ['small', 'medium', 'large'] },
         traits: { type: 'array', items: { type: 'string' }, description: 'e.g. auth, payments, realtime, webhooks, ai, persistence' },
         risks: {
@@ -339,6 +341,7 @@ const TOOLS = [
         kind: { type: 'string', enum: ['web-app', 'api', 'cli', 'library', 'data-pipeline', 'mobile', 'agent', 'automation'] },
         stage: { type: 'string', enum: ['prototype', 'mvp', 'internal-tool', 'production'] },
         name: { type: 'string' },
+        stack: { type: 'string', description: 'Optional declared implementation stack; normalizes test-anchor extension, fenced examples, and command hints.' },
         scale: { type: 'string', enum: ['small', 'medium', 'large'] },
         traits: { type: 'array', items: { type: 'string' } },
         risks: { type: 'object', additionalProperties: { type: 'boolean' } },
@@ -386,6 +389,7 @@ const TOOLS = [
         kind: { type: 'string', enum: ['web-app', 'api', 'cli', 'library', 'data-pipeline', 'mobile', 'agent', 'automation'] },
         stage: { type: 'string', enum: ['prototype', 'mvp', 'internal-tool', 'production'] },
         name: { type: 'string' },
+        stack: { type: 'string', description: 'Optional declared implementation stack; normalizes test-anchor extension, fenced examples, and command hints.' },
         scale: { type: 'string', enum: ['small', 'medium', 'large'] },
         traits: { type: 'array', items: { type: 'string' } },
         risks: { type: 'object', additionalProperties: { type: 'boolean' } },
@@ -414,6 +418,7 @@ const TOOLS = [
         kind: { type: 'string', enum: ['web-app', 'api', 'cli', 'library', 'data-pipeline', 'mobile', 'agent', 'automation'] },
         stage: { type: 'string', enum: ['prototype', 'mvp', 'internal-tool', 'production'] },
         name: { type: 'string' },
+        stack: { type: 'string', description: 'Optional declared implementation stack; normalizes test-anchor extension, fenced examples, and command hints.' },
         scale: { type: 'string', enum: ['small', 'medium', 'large'] },
         traits: { type: 'array', items: { type: 'string' } },
         risks: { type: 'object', additionalProperties: { type: 'boolean' } },
@@ -437,6 +442,7 @@ function profileFrom(args) {
     users: { scale: args.scale ?? 'small' },
     traits: args.traits ?? [],
     risks: args.risks ?? {},
+    ...(args.stack === undefined ? {} : { constraints: { stack: args.stack } }),
     ...(args.discoverability === undefined ? {} : { discoverability: args.discoverability })
   });
 }
@@ -475,6 +481,7 @@ const HANDLERS = {
     const plan = requirePlan(args);
     return {
       tier: plan.rigor.tier,
+      contract: planContract(plan),
       selected: plan.primitives.map((primitive) => ({
         id: primitive.id,
         title: primitive.title,
@@ -561,7 +568,7 @@ const HANDLERS = {
         failurePath: requirement.failurePath,
         acceptance: requirement.acceptance,
         verify: requirement.verify,
-        anchor: requirement.verify === 'automated' ? `tests/${requirement.render}/${requirement.key.replace(/\./g, '-')}.test.ts` : null,
+        anchor: requirement.verify === 'automated' ? anchorPath(plan.profile, requirement) : null,
         status: 'todo'
       })),
       note: 'Copy these ids and criteria into the packet. Do not renumber them: anchors cite them.'
@@ -589,6 +596,7 @@ const HANDLERS = {
       profile: plan.profile,
       rigor: plan.rigor,
       packet: plan.packet,
+      contract: planContract(plan),
       docs: plan.docs,
       primitives: plan.primitives.map((primitive) => ({ id: primitive.id, title: primitive.title, why: primitive.why })),
       requirements: plan.requirements.map((requirement) => ({
@@ -634,7 +642,10 @@ const HANDLERS = {
 
 // -------------------------------------------------------------- JSON-RPC
 
-const MAX_REQUEST_BYTES = 1_000_000;
+// One request and any undecoded transport residue share this cap. Keeping both
+// bounded means a peer cannot make the MCP process retain an unbounded partial line.
+export const MAX_MCP_REQUEST_BYTES = 1_000_000;
+export const MAX_MCP_BUFFER_BYTES = MAX_MCP_REQUEST_BYTES;
 const isPlainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 
 function invalidParams(id, message) {
@@ -744,17 +755,17 @@ export function serve({ input = process.stdin, output = process.stdout } = {}) {
       buffer = buffer.slice(newline + 1);
       discardingOversizeLine = false;
     }
-    if (Buffer.byteLength(buffer, 'utf8') > MAX_REQUEST_BYTES && buffer.indexOf('\n') === -1) {
+    if (Buffer.byteLength(buffer, 'utf8') > MAX_MCP_BUFFER_BYTES && buffer.indexOf('\n') === -1) {
       buffer = '';
       discardingOversizeLine = true;
-      send(rpcError(null, -32600, `Invalid Request: line exceeds ${MAX_REQUEST_BYTES} bytes`));
+      send(rpcError(null, -32600, `Invalid Request: line exceeds ${MAX_MCP_REQUEST_BYTES} bytes`));
       return;
     }
     let newline = buffer.indexOf('\n');
     while (newline !== -1) {
       const line = buffer.slice(0, newline);
       buffer = buffer.slice(newline + 1);
-      if (Buffer.byteLength(line, 'utf8') > MAX_REQUEST_BYTES) send(rpcError(null, -32600, `Invalid Request: line exceeds ${MAX_REQUEST_BYTES} bytes`));
+      if (Buffer.byteLength(line, 'utf8') > MAX_MCP_REQUEST_BYTES) send(rpcError(null, -32600, `Invalid Request: line exceeds ${MAX_MCP_REQUEST_BYTES} bytes`));
       else processLine(line);
       newline = buffer.indexOf('\n');
     }

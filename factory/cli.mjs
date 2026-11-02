@@ -25,11 +25,12 @@ import { createMission, missionStatus, readMission, validateMission } from './li
 import { addCatalog, catalogStatus, copyCatalogPayload, previewCatalogRefresh, readCatalogState, refreshCatalog, trustCatalogRoot } from './lib/catalog.mjs';
 import { addStore, copyStoreAsset, initStore, previewStoreRefresh, readStoreState, refreshStore, storeStatus } from './lib/stores.mjs';
 import { createWorkspace, recoverWorkspaces, removeWorkspace, workspaceStatus } from './lib/workspaces.mjs';
-import { allocateRuntimePackage, heartbeatRuntimeLease, initializeRuntime, recoverRuntime, runtimeStatus, transitionRuntimePackage } from './lib/runtime.mjs';
+import { allocateRuntimePackage, heartbeatRuntimeLease, initializeRuntime, recoverRuntime, runtimeEventHistory, runtimeStatus, transitionRuntimePackage } from './lib/runtime.mjs';
 import { exportRuntimeForgePlan, prepareRuntimeForgePlan, writeRuntimeForgePlan } from './lib/runtime-forge.mjs';
 import { runRuntimeAgent, runtimeAgentStatus } from './lib/runtime-agent.mjs';
 import { approveRuntimeDeliveryCandidate, queueRuntimeDeliveryCandidate, runtimeDeliveryStatus, submitRuntimeDeliveryCandidate, verifyRuntimeDeliveryCandidate } from './lib/runtime-delivery.mjs';
 import { createRuntimeServer, listenRuntimeServer } from './lib/runtime-server.mjs';
+import { createRuntimeClient } from './lib/runtime-client.mjs';
 import { buildPlan, loadPolicy } from './lib/planner.mjs';
 import { loadProfile, KINDS, STAGES, SCALES, TRAITS, RISK_FLAGS } from './lib/profile.mjs';
 import { completeWorkflowStep, getWorkflow, listWorkflows, runWorkflow, workflowStatus } from './lib/workflows.mjs';
@@ -50,7 +51,7 @@ const option = (name, fallback) => {
 const VALUE_FLAGS = new Set([
   '-o', '--out', '--repo', '--name', '--idea', '--profile', '--packet',
   '--project', '--modules', '--evidence', '--file', '--ref', '--title', '--from-store', '--types', '--acknowledge', '--target',
-  '--assignee', '--lease-ms', '--run', '--lease-token', '--to', '--actor', '--expected-version', '--port', '--token', '--policy', '--sha', '--adapter-run', '--candidate', '--reason', '--repository', '--head-ref', '--base-ref', '--checks'
+  '--assignee', '--lease-ms', '--run', '--lease-token', '--to', '--actor', '--expected-version', '--port', '--token', '--policy', '--sha', '--adapter-run', '--candidate', '--reason', '--repository', '--head-ref', '--base-ref', '--checks', '--id', '--runtime-url', '--runtime-token', '--request-id', '--after', '--limit', '--max-bytes'
 ]);
 const positional = rest.filter((item, index) => !item.startsWith('-') && !(index > 0 && VALUE_FLAGS.has(rest[index - 1])));
 
@@ -76,7 +77,7 @@ Usage
                                      generate, validate and cross-check product, architecture, delivery, review and QA artifacts
   vld export <spec-kit|kiro> <packet-dir> -o <dir> [--force]
                                      generate a bounded interoperability view; the VLD packet remains authoritative
-  vld store init <dir> [--id <id>] | add <id> <git-url> | diff <id> | update <id> --acknowledge <commit>
+  vld store init <directory> [--id <store-id>] | add <id> <git-url> | diff <id> | update <id> --acknowledge <commit>
                                      fetch, review, pin and verify read-only Git-backed shared delivery stores
   vld catalog trust <root.json> | add <id> <git-url> | diff <id> | update <id> --acknowledge <commit>
   vld catalog status [id] | copy <id> <package> <payload> --out <file>
@@ -97,6 +98,7 @@ Usage
   vld workspace remove <mission.json> <package> [--discard --acknowledge <workspace-id>] [--project <dir>]
                                      allocate, inspect, reconcile or safely remove one Git worktree; no agent is run
   vld runtime init|status|recover <mission.json> [--project <dir>] [--json]
+  vld runtime events <mission.json> --actor <role:id> [--after <sequence>] [--limit <1-100>] [--max-bytes <1024-65536>] [--project <dir>] [--json]
   vld runtime allocate <mission.json> <package> --assignee <implementer-id> [--lease-ms <ms>] [--project <dir>] [--json]
   vld runtime heartbeat <mission.json> <package> --run <run-id> --lease-token <token> --actor implementer:<id> [--lease-ms <ms>]
   vld runtime transition <mission.json> <package> --to <state> --actor <role:id> --expected-version <n> [--lease-token <token>]
@@ -112,6 +114,8 @@ Usage
   vld runtime forge plan-export <mission.json> <package> --candidate <id> --actor release-approver:<id> --repository <owner/repo> --head-ref <branch> [--base-ref <branch>] [--checks <name,...>] [--title <text>] [--out <file>] [--dry-run] [--json]
                                      derive a durable, offline GitHub v1 plan; never reads credentials, invokes gh, pushes, changes a PR, or requests merge
   vld runtime serve <mission.json> [--port <0-65535>] [--token <local-token>] [--project <dir>]
+  vld runtime status|events|allocate|heartbeat|transition|recover [package] --runtime-url <https-url> --runtime-token <token> [--request-id <id>]
+                                     explicit typed remote client; https required except loopback development
                                      loopback-only Runtime API plus the local Studio dashboard; never starts an agent
   vld studio serve <mission.json> [--port <0-65535>] [--token <local-token>] [--project <dir>]
                                      launch the same loopback Runtime API and accessible browser Studio; token stays in browser memory only
@@ -682,6 +686,7 @@ function runStore() {
   const project = option('--project', '.');
   try {
     if (action === 'init') {
+      if (!id || third) fail('Usage: vld store init <directory> [--id <store-id>] [--title <text>] [--force]');
       const result = initStore({ directory: id, id: option('--id', null), title: option('--title', null), force: hasFlag('--force') });
       if (hasFlag('--json')) console.log(JSON.stringify(result, null, 2));
       else console.log(`\n✓ wrote ${result.manifest}\n\nCommit the manifest and its declared Markdown assets before another project consumes it.\n`);
@@ -1231,7 +1236,44 @@ async function runRuntime() {
   const [action, missionFile, packageId] = positional;
   const project = option('--project', '.');
   const json = hasFlag('--json');
+  const remoteUrl = option('--runtime-url', null);
   try {
+    if (remoteUrl) {
+      const remoteToken = option('--runtime-token', null);
+      if (!remoteToken) fail('remote Runtime client requires --runtime-token');
+      if (!['status', 'events', 'allocate', 'heartbeat', 'transition', 'recover'].includes(action)) fail('remote Runtime client supports status, events, allocate, heartbeat, transition, and recover only');
+      const client = createRuntimeClient({ endpoint: remoteUrl, token: remoteToken });
+      // Remote Runtime owns its mission selection. The second positional is a
+      // package only for package-scoped remote methods; a local mission path is
+      // never sent over the network or interpreted by the remote endpoint.
+      let params = {};
+      if (action === 'allocate') {
+        if (!missionFile) fail('Usage: vld runtime allocate <package> --assignee <implementer-id> --runtime-url <url> --runtime-token <token>');
+        const assignee = option('--assignee', null); if (!assignee) fail('runtime allocate requires --assignee <implementer-id>');
+        params = { packageId: missionFile, assignee: { role: 'implementer', id: assignee }, leaseMs: integerOption('--lease-ms', 5 * 60 * 1_000), ...(option('--lease-token', null) ? { leaseToken: option('--lease-token', null) } : {}) };
+      } else if (action === 'heartbeat') {
+        if (!missionFile) fail('Usage: vld runtime heartbeat <package> --run <run-id> --lease-token <token> --runtime-url <url> --runtime-token <token>');
+        const runId = option('--run', null); const leaseToken = option('--lease-token', null); if (!runId || !leaseToken) fail('runtime heartbeat requires --run and --lease-token');
+        params = { packageId: missionFile, runId, leaseToken, leaseMs: integerOption('--lease-ms', 5 * 60 * 1_000) };
+      } else if (action === 'events') {
+        if (missionFile) fail('remote runtime events has no mission-file positional; the endpoint owns the frozen mission');
+        const after = integerOption('--after', 0); const limit = integerOption('--limit', 50); const maxBytes = integerOption('--max-bytes', 64 * 1024);
+        params = { after, limit, maxBytes };
+      } else if (action === 'transition') {
+        if (!missionFile) fail('Usage: vld runtime transition <package> --to <state> --expected-version <n> --runtime-url <url> --runtime-token <token>');
+        const to = option('--to', null); const expectedVersion = integerOption('--expected-version', null); if (!to || expectedVersion === null) fail('runtime transition requires --to and --expected-version');
+        params = { packageId: missionFile, to, expectedVersion, ...(option('--lease-token', null) ? { leaseToken: option('--lease-token', null) } : {}), ...(option('--reason', null) ? { reason: option('--reason', null) } : {}) };
+      } else if (action === 'status' && missionFile) {
+        fail('remote runtime status has no mission-file positional; the endpoint owns the frozen mission');
+      } else if (action === 'recover' && missionFile) {
+        fail('remote runtime recover has no mission-file positional; the endpoint owns the frozen mission');
+      }
+      const result = await client.request(action, params, { ...(option('--request-id', null) ? { requestId: option('--request-id', null) } : {}) });
+      if (json) console.log(JSON.stringify(result, null, 2));
+      else printRuntimeReport(`remote ${action}`, result.status ?? result);
+      if (action === 'status' || action === 'recover') process.exit(result.ok ? 0 : 1);
+      return;
+    }
     if (action === 'delivery') {
       const [_, deliveryAction, deliveryMissionFile, deliveryPackageId] = positional;
       if (deliveryAction === 'status') {
@@ -1373,12 +1415,24 @@ async function runRuntime() {
       else printRuntimeReport('status', result);
       process.exit(result.ok ? 0 : 1);
     }
+    if (action === 'events') {
+      if (!missionFile) fail('Usage: vld runtime events <mission.json> --actor <role:id> [--after <sequence>] [--limit <1-100>] [--max-bytes <1024-65536>]');
+      const actor = runtimeActor(option('--actor', null));
+      const result = runtimeEventHistory({ missionFile, projectDir: project, actor, after: integerOption('--after', 0), limit: integerOption('--limit', 50), maxBytes: integerOption('--max-bytes', 64 * 1024) });
+      if (json) console.log(JSON.stringify(result, null, 2));
+      else {
+        console.log(`\nruntime events · ${result.page.returned} event(s)${result.page.truncated ? ` · next cursor ${result.page.nextCursor}` : ''}\n`);
+        for (const event of result.events) console.log(`  #${event.sequence} ${event.type.padEnd(14)} ${event.packageId ?? '-'} · ${event.actor.role}:${event.actor.id}`);
+        console.log('');
+      }
+      return;
+    }
     if (action === 'allocate') {
       if (!missionFile || !packageId) fail('Usage: vld runtime allocate <mission.json> <package> --assignee <implementer-id> [--lease-ms <ms>]');
       const assignee = option('--assignee', null);
       if (!assignee) fail('runtime allocate requires --assignee <implementer-id>');
       const leaseMs = integerOption('--lease-ms', 5 * 60 * 1_000);
-      const result = allocateRuntimePackage({ missionFile, projectDir: project, packageId, assignee: { role: 'implementer', id: assignee }, leaseMs });
+      const result = allocateRuntimePackage({ missionFile, projectDir: project, packageId, assignee: { role: 'implementer', id: assignee }, leaseMs, idempotencyKey: option('--request-id', null) });
       if (json) console.log(JSON.stringify({ ok: true, ...result }, null, 2));
       else {
         printRuntimeReport('allocate', result.status);
@@ -1394,7 +1448,7 @@ async function runRuntime() {
       const runId = option('--run', null); const leaseToken = option('--lease-token', null);
       if (!runId || !leaseToken) fail('runtime heartbeat requires --run and --lease-token');
       const actor = runtimeActor(option('--actor', null));
-      const result = heartbeatRuntimeLease({ missionFile, projectDir: project, packageId, runId, leaseToken, actor, leaseMs: integerOption('--lease-ms', 5 * 60 * 1_000) });
+      const result = heartbeatRuntimeLease({ missionFile, projectDir: project, packageId, runId, leaseToken, actor, leaseMs: integerOption('--lease-ms', 5 * 60 * 1_000), idempotencyKey: option('--request-id', null) });
       if (json) console.log(JSON.stringify({ ok: true, ...result }, null, 2));
       else printRuntimeReport('heartbeat', result.status);
       return;
@@ -1406,7 +1460,7 @@ async function runRuntime() {
       const actor = runtimeActor(option('--actor', null));
       const expectedVersion = integerOption('--expected-version', null);
       if (expectedVersion === null) fail('runtime transition requires --expected-version <n>');
-      const result = transitionRuntimePackage({ missionFile, projectDir: project, packageId, to, actor, expectedVersion, leaseToken: option('--lease-token', null) });
+      const result = transitionRuntimePackage({ missionFile, projectDir: project, packageId, to, actor, expectedVersion, leaseToken: option('--lease-token', null), idempotencyKey: option('--request-id', null) });
       if (json) console.log(JSON.stringify({ ok: true, ...result }, null, 2));
       else printRuntimeReport('transition', result.status);
       return;
@@ -1424,7 +1478,7 @@ async function runRuntime() {
       startStudioServer({ missionFile, project, label: 'Runtime' });
       return;
     }
-    fail('Usage: vld runtime init|status|allocate|heartbeat|transition|delivery|recover|serve <mission.json> [package]');
+    fail('Usage: vld runtime init|status|events|allocate|heartbeat|transition|delivery|recover|serve <mission.json> [package]');
   } catch (error) {
     fail(error.message);
   }

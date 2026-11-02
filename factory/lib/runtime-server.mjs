@@ -18,6 +18,7 @@ import {
   allocateRuntimePackage,
   heartbeatRuntimeLease,
   recoverRuntime,
+  runtimeEventHistory,
   runtimeStatus,
   transitionRuntimePackage
 } from './runtime.mjs';
@@ -142,6 +143,10 @@ function dispatch({ request, actor, missionFile, projectDir, close }) {
           ...(catalog.exists ? { catalog: studioCatalogProjection(catalogStatus(projectDir), projectDir) } : {})
         }
       };
+    }
+    case 'events': {
+      closedParams(params, new Set(['after', 'limit', 'maxBytes']), 'events');
+      return runtimeEventHistory({ missionFile, projectDir, actor, after: params.after ?? null, limit: params.limit ?? 50, maxBytes: params.maxBytes ?? 64 * 1024 });
     }
     case 'allocate': {
       closedParams(params, new Set(['packageId', 'assignee', 'leaseMs', 'leaseToken']), 'allocate');

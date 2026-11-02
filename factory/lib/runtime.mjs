@@ -519,7 +519,7 @@ function applyEvent(state, event) {
       mission: event.mission,
       policy: event.policy,
       packages: initialPackages(event.packages),
-      receipts: [],
+      recentEvents: [],
       sequence: event.sequence,
       eventDigest: null
     };
@@ -532,37 +532,37 @@ function applyEvent(state, event) {
     if (event.actor.role !== 'runtime' || workPackage.state !== 'running' || workPackage.run?.id !== event.runId) {
       throw extensionError('runtime agent receipt does not match a running package', 'INVALID_RUNTIME_LEDGER');
     }
-    if (next.receipts.some((receipt) => receipt.agentRun?.id === event.agentRun.id)) throw extensionError('runtime agent receipt repeats', 'INVALID_RUNTIME_LEDGER');
+    if (next.recentEvents.some((receipt) => receipt.agentRun?.id === event.agentRun.id)) throw extensionError('runtime agent receipt repeats', 'INVALID_RUNTIME_LEDGER');
   } else if (event.type === 'candidate') {
     if (workPackage.state !== 'changes_ready' || workPackage.run?.id !== event.runId || event.actor.role !== 'implementer' || event.actor.id !== workPackage.run.holderId || event.candidate.missionId !== next.mission.id || event.candidate.packageId !== event.packageId) {
       throw extensionError('runtime candidate does not match an implementer changes-ready package', 'INVALID_RUNTIME_LEDGER');
     }
-    if (next.receipts.some((receipt) => receipt.candidate?.id === event.candidate.id)) throw extensionError('runtime candidate receipt repeats', 'INVALID_RUNTIME_LEDGER');
+    if (next.recentEvents.some((receipt) => receipt.candidate?.id === event.candidate.id)) throw extensionError('runtime candidate receipt repeats', 'INVALID_RUNTIME_LEDGER');
   } else if (event.type === 'verification') {
-    const candidate = next.receipts.find((receipt) => receipt.candidate?.id === event.verification.candidateId)?.candidate;
+    const candidate = next.recentEvents.find((receipt) => receipt.candidate?.id === event.verification.candidateId)?.candidate;
     if (workPackage.state !== 'verifying' || !candidate || candidate.candidateSha !== event.verification.candidateSha || candidate.targetSha !== event.verification.targetSha || candidate.policyDigest !== event.verification.policyDigest) {
       throw extensionError('runtime verification does not match its frozen candidate', 'INVALID_RUNTIME_LEDGER');
     }
-    if (next.receipts.some((receipt) => receipt.verification?.id === event.verification.id)) throw extensionError('runtime verification receipt repeats', 'INVALID_RUNTIME_LEDGER');
+    if (next.recentEvents.some((receipt) => receipt.verification?.id === event.verification.id)) throw extensionError('runtime verification receipt repeats', 'INVALID_RUNTIME_LEDGER');
   } else if (event.type === 'approval') {
-    const candidate = next.receipts.find((receipt) => receipt.candidate?.id === event.approval.candidateId)?.candidate;
-    const verification = next.receipts.find((receipt) => receipt.verification?.candidateId === event.approval.candidateId)?.verification;
+    const candidate = next.recentEvents.find((receipt) => receipt.candidate?.id === event.approval.candidateId)?.candidate;
+    const verification = next.recentEvents.find((receipt) => receipt.verification?.candidateId === event.approval.candidateId)?.verification;
     if (workPackage.state !== 'in_review' || event.actor.role !== 'reviewer' || event.actor.id !== event.approval.reviewerId || event.actor.id === workPackage.run?.holderId || !candidate || !verification || verification.outcome !== 'passed' || candidate.candidateSha !== event.approval.candidateSha || candidate.targetSha !== event.approval.targetSha || candidate.policyDigest !== event.approval.policyDigest) {
       throw extensionError('runtime approval does not satisfy independent verified review', 'INVALID_RUNTIME_LEDGER');
     }
-    if (next.receipts.some((receipt) => receipt.approval?.id === event.approval.id)) throw extensionError('runtime approval receipt repeats', 'INVALID_RUNTIME_LEDGER');
+    if (next.recentEvents.some((receipt) => receipt.approval?.id === event.approval.id)) throw extensionError('runtime approval receipt repeats', 'INVALID_RUNTIME_LEDGER');
   } else if (event.type === 'queue') {
-    const candidate = next.receipts.find((receipt) => receipt.candidate?.id === event.queue.candidateId)?.candidate;
-    const approval = next.receipts.find((receipt) => receipt.approval?.candidateId === event.queue.candidateId)?.approval;
+    const candidate = next.recentEvents.find((receipt) => receipt.candidate?.id === event.queue.candidateId)?.candidate;
+    const approval = next.recentEvents.find((receipt) => receipt.approval?.candidateId === event.queue.candidateId)?.approval;
     if (workPackage.state !== 'approved' || event.actor.role !== 'release-approver' || !candidate || !approval || candidate.candidateSha !== event.queue.candidateSha || candidate.targetSha !== event.queue.targetSha || candidate.policyDigest !== event.queue.policyDigest) {
       throw extensionError('runtime queue receipt does not match an approved candidate', 'INVALID_RUNTIME_LEDGER');
     }
-    if (next.receipts.some((receipt) => receipt.queue?.id === event.queue.id)) throw extensionError('runtime queue receipt repeats', 'INVALID_RUNTIME_LEDGER');
+    if (next.recentEvents.some((receipt) => receipt.queue?.id === event.queue.id)) throw extensionError('runtime queue receipt repeats', 'INVALID_RUNTIME_LEDGER');
   } else if (event.type === 'forge-plan') {
-    const candidate = next.receipts.find((receipt) => receipt.candidate?.id === event.forge.candidateId)?.candidate;
-    const verification = next.receipts.find((receipt) => receipt.verification?.candidateId === event.forge.candidateId)?.verification;
-    const approval = next.receipts.find((receipt) => receipt.approval?.candidateId === event.forge.candidateId)?.approval;
-    const queue = next.receipts.find((receipt) => receipt.queue?.candidateId === event.forge.candidateId)?.queue;
+    const candidate = next.recentEvents.find((receipt) => receipt.candidate?.id === event.forge.candidateId)?.candidate;
+    const verification = next.recentEvents.find((receipt) => receipt.verification?.candidateId === event.forge.candidateId)?.verification;
+    const approval = next.recentEvents.find((receipt) => receipt.approval?.candidateId === event.forge.candidateId)?.approval;
+    const queue = next.recentEvents.find((receipt) => receipt.queue?.candidateId === event.forge.candidateId)?.queue;
     const exactTuple = candidate && verification && approval && queue
       && verification.outcome === 'passed'
       && digest(candidate) === event.forge.candidateDigest && candidate.candidateSha === event.forge.candidateSha && candidate.targetSha === event.forge.targetSha && candidate.packetDigest === event.forge.packetDigest && candidate.policyDigest === event.forge.policyDigest
@@ -570,7 +570,7 @@ function applyEvent(state, event) {
       && queue.id === event.forge.queueId && queue.candidateSha === event.forge.candidateSha && queue.targetSha === event.forge.targetSha && queue.policyDigest === event.forge.policyDigest
       && verification.id === event.forge.verificationId && digest(verification) === event.forge.verificationDigest && digest(approval) === event.forge.approvalDigest && digest(queue) === event.forge.queueDigest;
     if (workPackage.state !== 'queued' || !exactTuple) throw extensionError('runtime forge receipt does not match a passed, independently approved queued tuple', 'INVALID_RUNTIME_LEDGER');
-    if (next.receipts.some((receipt) => receipt.forge?.id === event.forge.id)) throw extensionError('runtime forge receipt repeats', 'INVALID_RUNTIME_LEDGER');
+    if (next.recentEvents.some((receipt) => receipt.forge?.id === event.forge.id)) throw extensionError('runtime forge receipt repeats', 'INVALID_RUNTIME_LEDGER');
   } else if (event.type === 'allocated') {
     assertCanAllocate(event.actor);
     if (workPackage.state !== 'ready' || workPackage.run || workPackage.lease) throw extensionError('runtime allocation event is not valid for package state', 'INVALID_RUNTIME_LEDGER');
@@ -598,7 +598,7 @@ function applyEvent(state, event) {
     }
     if (event.to === 'merged') workPackage.lease = null;
   }
-  next.receipts = [...next.receipts, {
+  next.recentEvents = [...next.recentEvents, {
     sequence: event.sequence,
     type: event.type,
     packageId: event.packageId,
@@ -724,6 +724,78 @@ function currentMissionMatches(state, context) {
     && state.mission.policyDigest === context.mission.corePolicyDigest;
 }
 
+const EVENT_READ_ROLES = new Set(['operator', 'runtime', 'reviewer', 'release-approver', 'forge']);
+const MAX_EVENT_PAGE_SIZE = 100;
+const MAX_EVENT_PAGE_BYTES = 64 * 1024;
+
+function assertEventReader(actor) {
+  const checked = assertRuntimeActor(actor);
+  if (!EVENT_READ_ROLES.has(checked.role)) throw extensionError('Runtime historic event access requires an operator, runtime, reviewer, release-approver, or forge identity', 'RUNTIME_EVENT_FORBIDDEN');
+  return checked;
+}
+
+function publicRuntimeEvent(event) {
+  // Events have already passed ledger validation. Keep this explicit projection so
+  // future internal bookkeeping cannot silently become remote history output.
+  const { schemaVersion, sequence, at, type, actor, packageId } = event;
+  return {
+    schemaVersion, sequence, at, type, actor: { ...actor },
+    ...(packageId ? { packageId } : {}),
+    ...(event.from ? { from: event.from, to: event.to } : {}),
+    ...(event.runId ? { runId: event.runId } : {}),
+    ...(event.expiresAt ? { expiresAt: event.expiresAt } : {}),
+    ...(event.reason ? { reason: event.reason } : {}),
+    ...(event.agentRun ? { agentRun: publicAgentRun(event.agentRun) } : {}),
+    ...(event.candidate ? { candidate: publicDeliveryReceipt(event.candidate) } : {}),
+    ...(event.verification ? { verification: publicDeliveryReceipt(event.verification) } : {}),
+    ...(event.approval ? { approval: publicDeliveryReceipt(event.approval) } : {}),
+    ...(event.queue ? { queue: publicDeliveryReceipt(event.queue) } : {}),
+    ...(event.forge ? { forge: publicDeliveryReceipt(event.forge) } : {})
+  };
+}
+
+function validateEventPage({ after = null, limit = 50, maxBytes = MAX_EVENT_PAGE_BYTES } = {}) {
+  if (after !== null && after !== undefined && (!Number.isSafeInteger(after) || after < 0)) throw extensionError('event cursor must be a non-negative integer sequence', 'INVALID_RUNTIME_EVENT_CURSOR');
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_EVENT_PAGE_SIZE) throw extensionError(`event page limit must be an integer from 1 to ${MAX_EVENT_PAGE_SIZE}`, 'INVALID_RUNTIME_EVENT_LIMIT');
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1024 || maxBytes > MAX_EVENT_PAGE_BYTES) throw extensionError(`event page byte limit must be an integer from 1024 to ${MAX_EVENT_PAGE_BYTES}`, 'INVALID_RUNTIME_EVENT_LIMIT');
+  return { after: after ?? 0, limit, maxBytes };
+}
+
+/** Read one bounded, durable ledger page. Status only exposes a recent window. */
+export function runtimeEventHistory({ missionFile, projectDir = '.', actor, after = null, limit = 50, maxBytes = MAX_EVENT_PAGE_BYTES } = {}) {
+  const context = runtimeContext({ missionFile, projectDir, requireCurrent: false });
+  assertEventReader(actor);
+  const page = validateEventPage({ after, limit, maxBytes });
+  const { events } = readLedger(context.paths);
+  const candidates = events.filter((event) => event.sequence > page.after);
+  const selected = [];
+  let bytes = 2; // JSON array brackets; the server envelope adds a separate bounded layer.
+  for (const event of candidates) {
+    if (selected.length >= page.limit) break;
+    const publicEvent = publicRuntimeEvent(event);
+    const size = Buffer.byteLength(JSON.stringify(publicEvent), 'utf8') + (selected.length ? 1 : 0);
+    if (bytes + size > page.maxBytes) {
+      if (selected.length === 0) throw extensionError('one Runtime event exceeds the requested history byte limit', 'RUNTIME_EVENT_TOO_LARGE');
+      break;
+    }
+    selected.push(publicEvent);
+    bytes += size;
+  }
+  const nextCandidate = candidates[selected.length];
+  return {
+    events: selected,
+    page: {
+      after: page.after,
+      limit: page.limit,
+      maxBytes: page.maxBytes,
+      bytes,
+      returned: selected.length,
+      nextCursor: nextCandidate ? selected.at(-1).sequence : null,
+      truncated: Boolean(nextCandidate)
+    }
+  };
+}
+
 function publicPackage(workPackage) {
   return {
     id: workPackage.id,
@@ -755,13 +827,16 @@ function reportRuntime(context, state, { warnings = [], recovered = null } = {})
     },
     mission: { id: context.mission.id, current: context.missionReport.ok, stale: context.missionReport.stale },
     packages: state.packages.map(publicPackage),
-    agentRuns: state.receipts.filter((receipt) => receipt.type === 'agent-run' && receipt.agentRun).map((receipt) => ({
+    // A bounded status convenience window, not durable history. Use
+    // runtimeEventHistory / the `events` API for cursor-paged evidence.
+    recentEvents: state.recentEvents.map((receipt) => ({ ...receipt, actor: { ...receipt.actor } })),
+    agentRuns: state.recentEvents.filter((receipt) => receipt.type === 'agent-run' && receipt.agentRun).map((receipt) => ({
       sequence: receipt.sequence,
       packageId: receipt.packageId,
       runId: receipt.runId,
       ...publicAgentRun(receipt.agentRun)
     })),
-    delivery: state.receipts.filter((receipt) => ['candidate', 'verification', 'approval', 'queue', 'forge-plan'].includes(receipt.type)).map((receipt) => ({
+    delivery: state.recentEvents.filter((receipt) => ['candidate', 'verification', 'approval', 'queue', 'forge-plan'].includes(receipt.type)).map((receipt) => ({
       sequence: receipt.sequence,
       packageId: receipt.packageId,
       ...(receipt.runId ? { runId: receipt.runId } : {}),
@@ -928,16 +1003,31 @@ export function allocateRuntimePackage({ missionFile, packageId, projectDir = '.
   if (holder.role !== 'implementer') throw extensionError('runtime assignee must have implementer role', 'INVALID_RUNTIME_ASSIGNEE');
   const duration = assertLeaseDuration(leaseMs, policy);
   const suppliedToken = suppliedLeaseToken(leaseToken);
-  if (idempotencyKey && !suppliedToken) throw extensionError('idempotent allocation requires a caller-held lease token', 'RUNTIME_LEASE_TOKEN_REQUIRED');
+  // A client cannot know the lease capability before its first allocation. Its
+  // idempotency key is therefore valid without a token, but that first response
+  // is the only time a host-generated capability can be disclosed. A caller that
+  // needs replayable delivery supplies its own validated capability on attempt 1.
   const token = suppliedToken ?? `lease-${randomUUID()}`;
   const at = nowIso(now);
   return withRuntimeLock(context.paths, () => {
     const { events, state } = readLedger(context.paths);
     assertCurrentRuntime(context, state, policy);
-    const request = { operation: 'allocate', packageId, actor: requestedActor, assignee: holder, leaseMs: duration, leaseTokenDigest: digest(token) };
+    const request = {
+      operation: 'allocate', packageId, actor: requestedActor, assignee: holder, leaseMs: duration,
+      ...(suppliedToken ? { leaseTokenDigest: digest(suppliedToken) } : {})
+    };
     const idempotency = normalizeIdempotency(idempotencyKey, request);
     const replay = idempotentResult(events, idempotency, state, context, { leaseToken: suppliedToken });
-    if (replay) return replay;
+    if (replay) {
+      const allocation = state.packages.find((entry) => entry.id === packageId);
+      return {
+        ...replay,
+        allocation: allocation ? publicPackage(allocation) : null,
+        ...(suppliedToken
+          ? {}
+          : { leaseToken: null, leaseTokenRecovery: 'unavailable: the initial allocation generated a one-time capability; do not retry mutations without the token returned by its first response' })
+      };
+    }
     const workPackage = state.packages.find((entry) => entry.id === packageId);
     if (!workPackage) throw extensionError(`runtime mission has no work package "${packageId}"`, 'UNKNOWN_WORK_PACKAGE');
     if (workPackage.state !== 'ready') throw extensionError(`work package "${packageId}" is ${workPackage.state}, not ready`, 'RUNTIME_PACKAGE_NOT_READY');

@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { generateKeyPairSync, sign } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync, mkdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -63,6 +63,15 @@ function reviseCatalog(source, signingKey, payload) {
   unsignedIndex.version += 1; unsignedIndex.packages = [{ ...unsignedIndex.packages[0], manifestDigest: digest(readFileSync(manifestFile, 'utf8')) }]; writeJson(path.join(source, 'catalog-index.json'), signed(unsignedIndex, signingKey.privateKey));
   git(source, ['add', '.']); git(source, ['-c', 'user.name=VLD Catalog Test', '-c', 'user.email=vld@example.test', 'commit', '-m', 'signed catalog refresh']);
 }
+
+test('catalog trust refuses a final managed root symlink without following it', (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'vld-catalog-final-link-')); t.after(() => rmSync(root, { recursive: true, force: true }));
+  const signer = key(); const trust = rootFixture(root, signer); const project = path.join(root, 'consumer'); const outside = path.join(root, 'outside-root.json');
+  mkdirSync(project); mkdirSync(path.join(project, '.vld')); writeFileSync(outside, '{"outside":true}\n');
+  symlinkSync(outside, path.join(project, '.vld', 'catalog-root.json'), 'file');
+  assert.throws(() => trustCatalogRoot({ projectDir: project, rootFile: trust.file, now: FUTURE }), (error) => error.code === 'UNSAFE_MANAGED_PATH');
+  assert.equal(readFileSync(outside, 'utf8'), '{"outside":true}\n');
+});
 
 test('M7 trusts an explicit root, verifies a signed content-only Git catalog offline, pins identity and copies with provenance', (t) => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'vld-catalog-')); t.after(() => rmSync(root, { recursive: true, force: true }));

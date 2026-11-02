@@ -96,6 +96,17 @@ test('packet emission rejects symlinked output roots and generated descendants',
   symlinkSync(externalEnforcement, path.join(output, 'enforcement'), 'dir');
   assert.throws(() => emitPacket(plan, output, { force: true }), (error) => error.code === 'UNSAFE_MANAGED_PATH');
   assert.equal(readdirSync(externalEnforcement).length, 0, 'no regenerated enforcement file escapes through the link');
+
+  // A final generated file must be rejected too; direct writes would dereference
+  // this link and overwrite a file that packet emission does not own.
+  rmSync(path.join(output, 'enforcement'), { recursive: true, force: true });
+  mkdirSync(path.join(output, 'enforcement'));
+  const outsideManifest = path.join(outside, 'manifest.json');
+  writeFileSync(outsideManifest, '{"outside":true}\n');
+  rmSync(path.join(output, 'spec.json'));
+  symlinkSync(outsideManifest, path.join(output, 'spec.json'), 'file');
+  assert.throws(() => emitPacket(plan, output, { force: true }), (error) => error.code === 'UNSAFE_MANAGED_PATH');
+  assert.equal(readFileSync(outsideManifest, 'utf8'), '{"outside":true}\n');
 });
 
 test('compile refuses to overwrite an existing packet without --force', (t) => {
