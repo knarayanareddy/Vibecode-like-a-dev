@@ -15,7 +15,7 @@ import path from 'node:path';
 import { validateBundle } from './bundles.mjs';
 import { validateModule } from './modules.mjs';
 import { validateWorkflow } from './workflows.mjs';
-import { digest, ensureProjectDir, ensureSafeManagedDirectory, extensionError, ID_PATTERN, readJson, safeManagedDirectory, safeManagedFile, SEMVER_PATTERN, stableJson, vldDir, writeManagedFileAtomic, writeManagedJsonAtomic } from './extension-utils.mjs';
+import { digest, ensureProjectDir, ensureSafeManagedDirectory, extensionError, externalOperationError, ID_PATTERN, readJson, safeManagedDirectory, safeManagedFile, SEMVER_PATTERN, stableJson, vldDir, writeManagedFileAtomic, writeManagedJsonAtomic } from './extension-utils.mjs';
 import { validateRepository } from './stores.mjs';
 
 const CATALOG_VERSION = 1;
@@ -48,7 +48,6 @@ function catalogCache(project, id) { return path.join(catalogDir(project), id); 
 function statePath(project) { return path.join(vldDir(project), STATE_FILE); }
 function rootPath(project) { return path.join(vldDir(project), ROOT_FILE); }
 function copiesPath(project) { return path.join(vldDir(project), COPY_FILE); }
-function errorText(error) { return String(error?.stderr || error?.message || error || '').replace(/[\r\n\0]/g, ' ').slice(0, 500); }
 function requireId(value, label) {
   if (!ID_PATTERN.test(String(value ?? ''))) throw extensionError(`${label} must be lowercase kebab-case`, 'INVALID_CATALOG_METADATA');
   return value;
@@ -66,7 +65,7 @@ function canonicalSigned(value) {
 function ensureKnown(value, allowed, label, errors) { for (const key of Object.keys(value ?? {})) if (!allowed.has(key)) errors.push(`${label}.${key} is not allowed`); }
 function git(args) {
   try { return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim(); }
-  catch (error) { throw extensionError(`git ${args[0]} failed: ${errorText(error)}`, 'GIT_CATALOG_FAILED'); }
+  catch (error) { throw externalOperationError(`Git ${args[0]}`, error, 'GIT_CATALOG_FAILED'); }
 }
 function cloneCatalog(repository, ref, destination) {
   // Catalog digests bind exact Git blob bytes. Ignore a user's checkout-only

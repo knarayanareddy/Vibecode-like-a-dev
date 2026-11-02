@@ -52,14 +52,14 @@ Anything relevant falls into one of six groups. This project only competes in th
 | **Superpowers** (~270k★) | ~14 core skills, deep inner loop | skills chained into one disciplined loop | Pressure-testing, eval suite in a separate repo | Chain depth: our practices are independent, not sequenced |
 | **mattpocock/skills** (~243k★) | 25 skills for a daily loop | alignment, domain language, TDD, debugging, module design | Author states there is no automated eval | — |
 | **Karpathy `CLAUDE.md`** | one file | always-on pitfalls | none | Nothing; this is the antidote to us, not a competitor |
-| **This project** | 34 practices, 2,187 lines (median 64), 198 checklist items | failure mode → when → practice → checklist → anti-patterns → why it works → cost | **none** | — |
+| **This project** | Generated library inventory (`primitives/index.json`; checked by `npm run index`) | failure mode → when → practice → checklist → anti-patterns → why it works → cost | **none** | — |
 
 Two additions from the best of these are cheap and high-value:
 
 - **Anti-rationalization tables.** A row per excuse an agent will make ("the change is too small for a test", "I'll add tests after"), with the counter. This attacks the exact failure our anchor system catches after the fact.
 - **Red flags.** A short list of things that mean *stop*, written in the imperative.
 
-Neither exists in our 34 practices. Both are prose, and both fit inside the 500-line guidance we already follow.
+Neither exists in the current library. Both are prose, and both fit inside the 500-line guidance the index/lint checks enforce.
 
 ---
 
@@ -74,7 +74,7 @@ Neither exists in our 34 practices. Both are prose, and both fit inside the 500-
 
 A 2026 essay names the gap exactly: *"the missing product is an architecture compiler… one architectural rule might become a dependency rule, a CodeQL query, an OPA policy and a runtime observability check"* ([bencoding](https://bencoding.com/2026/10/19/the-bottleneck-has-moved-why-ai-engineering-needs-to-grow-up/)). Their point and ours are the same, from the other direction: they start from enforcement and lack the selection layer; we start from selection and lack the enforcement targets.
 
-Our `enforces:` field is a *pointer* to that idea. It is not an implementation, and 13 of our 34 practices point at nothing.
+Our `enforces:` field is a *pointer* to that idea. It is not an implementation; the generated library evaluation reports current enforcement coverage.
 
 ---
 
@@ -101,15 +101,15 @@ Run `node scripts/eval-library.mjs`, `node scripts/eval-specificity.mjs` and the
 
 | Metric | Value | Verdict |
 | --- | --- | --- |
-| Practices | 34, 3,293 lines, median 98 | Each practice is a page an agent can act on, not a paragraph |
-| Checklist items | 203 (6 per practice), **170 red flags**, **170 anti-rationalization rows** | The anatomy that was missing is now the largest section of every skill |
+| Practices | Generated from `primitives/index.json` | Each practice is a page an agent can act on, not a paragraph |
+| Checklist items | Generated from the current primitive corpus | The anatomy that was missing is now the largest section of every skill |
 | Practices with a consequence | **34 of 34**: 22 declare `enforces`, 8 bind a policy gate, 4 are `advisory: true` with a written reason | `eval-library` fails on a practice with no consequence and no reason |
 | Catalog requirements | 27, **all 27** enforced by a practice | The 6 orphans (`core.primary-journey`, `core.domain-invariants`, `ai.guardrails`, `delivery.audit-trail`, `data.uploads`, `mobile.offline`) were assigned to the practices that actually teach them |
 | Per-practice obligations | **821 of 821** selected practice/state pairs carry a filled, product-specific sentence inside the compiled packet | Checked by compiling every profile, not by reading the library |
 | Routing rules | 34, of which 12 are `always: true` | The packet skeleton is unconditional; the rest discriminate |
-| Library discoverability | **self-recall@1 100%** (34/34 practices rank first for their own title via the real MCP search) | Works |
+| Library discoverability | **self-recall@1 100%** (reported by `node scripts/eval-library.mjs` against the current index) | Works |
 | Trigger collisions | **8 → 0** after this pass | Two practices claiming "rollback" or "coverage" is a routing bug, now fixed |
-| Dead weight | 0 practices never selected across 36 profiles | Works |
+| Dead weight | None reported by `eval-library` across its generated profile matrix | Works |
 | **Packet specificity** | **31% mean shared prose** across 31 full packets and 157 same-tier pairs; worst pair 47%; 3 documents under 26%. Was **84%** → **53%** → **32%** → **31%**. Target was 35% | **Target met on the mean and on the worst pair**, which is now under the old 50% floor |
 
 That last row was the whole argument in one number: a physiotherapy booking service and an insurance claims API used to receive the same 847 lines, and the 94 that differed carried only the requirement set, the gates and the stack.
@@ -151,10 +151,10 @@ Ordered by value per unit of work. Each has an acceptance test, because that is 
    *Acceptance:* two unrelated tier-3 packets share <35% of lines, and `verify` still passes for both. **Status: met on the mean and on the worst pair — 31% overall, worst pair 47%, `verify` green.** The worst pair remains two tier-1 web apps with identical traits sharing their gate checklist; see §6 for why that remainder is kind-level rather than prose-level.
 2. **Per-practice specificity obligations.** ✅ *done, 2026-10-30.* Every `SKILL.md` carries an `obligation:` template with product slots (`{project}`, `{primary}`, `{aSecondary}`, `{db}`); `derive.templateFiller` fills it once per packet, and it appears in the constitution's practice table and in the practices section of every single-file packet.  
    *Acceptance:* a packet contains at least one product-specific sentence per selected practice, checked mechanically. **Met: `eval-library` compiles all 36 profiles and asserts 821 of 821 selected practice/packet pairs contain the filled sentence, with no unfilled slot.**
-3. **Anti-rationalization and red flags in all 34 practices.** ✅ *done, 2026-10-30.* Every practice now has `## In this product` (the filled obligation), `## Red flags` (5 observable signals) and `## Anti-rationalization` (5 excuses × what is actually true × what to do instead): 170 red flags and 170 rows in total, median skill length 64 → 98 lines.  
+3. **Anti-rationalization and red flags in every active practice.** ✅ *done, 2026-10-30; inventory checked continuously.* Every practice has `## In this product` (the filled obligation), `## Red flags`, and `## Anti-rationalization`; use the generated index and library evaluation for the current totals rather than this historical snapshot.
    *Acceptance:* every `SKILL.md` has both; the eval checks for them. **Met: `validatePrimitives` fails on a missing section or fewer than three entries, and `eval-library` reports a per-practice `skill depth` count.**
 4. **Close the enforcement gap.** ✅ *done, 2026-10-30.* Six orphan requirements were assigned to the practices that teach them; eight practices that only advised now bind the policy gate they make real; four that cannot be machine-checked declare `advisory: true` with a reason. Finding a typo in a gate id is now a failing test, and a nested YAML block (which the flat parser used to drop silently, hiding a declared gate) is a validation error.  
-   *Acceptance:* `eval-library` reports 0 practices with no consequence, or an explicit `advisory: true` with a reason. **Met: 34/34 have a consequence — 22 `enforces`, 8 gates, 4 advisory — and the four advisory reasons are printed in the eval output.**
+   *Acceptance:* `eval-library` reports no practices with no consequence, or an explicit `advisory: true` with a reason. **Met: the generated library evaluation reports every active practice has a consequence and prints every advisory reason.**
 
 ### Tier 2 — makes the library a system rather than a list
 
@@ -171,14 +171,14 @@ Ordered by value per unit of work. Each has an acceptance test, because that is 
 
 9. **The evaluation harness.** ✅ *done, 2026-10-30.* Two axes, both shipped and wired into CI: *library + routing* (`eval-library.mjs`, `eval-specificity.mjs`, `eval-routing.mjs`) and *multi-arm outcome* (`factory/lib/outcome-eval.mjs` + `scripts/eval-outcome.mjs` across **24 executable tasks** in `factory/evals/tasks/` — 6 greenfield, 6 brownfield with `vld change` deltas, 4 bugfix, 4 refactor, 4 systems across tiers 0–3). Each task runs identically across three arms (`no-spec`, `generic-spec`, `vld-packet`) against hidden acceptance oracles, hidden review-defect probes, and three post-merge drift mutations (`anchor-drop`, `gate-regression`, `semantic-weaken`), supporting both deterministic CI `--runner calibration` and live `--runner cmd|openai|anthropic` agent execution.  
    *Acceptance:* the outcome harness runs on ≥20 tasks, reports with/without deltas, and `README` quotes its numbers or stops making claims. **Met: 24 tasks × 3 arms run in `npm run eval` and CI, reporting paired `vld-packet` minus `no-spec` and `generic-spec` deltas (+100.0pp pre-review naive-patch gate block, +63.9pp post-merge drift catch — 100.0% anchor-drop, 91.7% credential/gate regression, 0.0% co-mutated semantic weakening — at +15,088 markdown context tokens over a generic spec), and `README.md` separates deterministic calibration proof from live-agent runs rather than claiming unmeasured model lift.**
-10. **Model-in-the-loop routing eval** for the MCP layer: labelled prompts → expected practices, precision and recall with CI thresholds (recall ≥0.7, precision ≥0.9), because metadata changes move recall by ~20 points. ✅ *done, 2026-10-30.* `factory/evals/routing-cases.json` ships 74 practitioner prompts (single-practice, distractor-laden, multi-practice, colloquial and negative off-topic queries) covering all 34 practices; `factory/lib/mcp.mjs` exposes calibrated `search_primitives({ activate: true })` alongside exploratory search; `scripts/eval-routing.mjs` supports both deterministic `mcp` routing in CI and live `--driver openai|anthropic|cmd` LLM tool selection, plus a title-only metadata ablation check and a mutation regression test in `factory/test/routing-eval.test.mjs`.  
+10. **Model-in-the-loop routing eval** for the MCP layer: labelled prompts → expected practices, precision and recall with CI thresholds (recall ≥0.7, precision ≥0.9), because metadata changes move recall by ~20 points. ✅ *done, 2026-10-30; inventory checked continuously.* `factory/evals/routing-cases.json` covers the active index; `factory/lib/mcp.mjs` exposes calibrated `search_primitives({ activate: true })` alongside exploratory search; `scripts/eval-routing.mjs` supports deterministic `mcp` routing in CI and live `--driver openai|anthropic|cmd` selection, plus title-only metadata ablation and mutation regression coverage.
     *Acceptance:* a change to a practice description that breaks routing fails CI. **Met: CI enforces micro-precision ≥0.90 and micro-recall ≥0.70 (measured: 94.7% precision, 100.0% recall, 97.3% F1, 8/8 negative prompts quiet; stripping `summary + triggers + tags` drops precision 94.7% → 58.2% and recall 100.0% → 63.9%), and `routing-eval.test.mjs` proves a corrupted practice metadata entry flips `ok: false`.**
 
 ### What I would *not* build
 
 - A prettier document renderer, until tier 1 is done.
 - Guidance-mode hooks or an IDE.
-- More than ~40 practices. The ceiling is the point; depth beats breadth.
+- More than roughly forty active practices. The ceiling is the point; depth beats breadth.
 - Spec-as-source codegen.
 
 ---
@@ -202,6 +202,6 @@ Stress-testing this system across three realistic polyglot domains (`trialbridge
 
 **"Thin and boilerplate": originally fair about the artefacts, wrong about the mechanism — and now measured and stress-hardened on every claim it makes.**
 
-- **No longer thin:** all 34 practices carry filled product obligations, 170 red flags, 170 anti-rationalization rows and an explicit consequence (22 enforce requirements, 8 bind gates, 4 declared advisory); layered `org → domain → team` overlays, `vld change archive`, EARS requirement parsing and `enforcement/gates.mjs` + tool config fragments (`gitleaks.toml`, Rego, contract-test skeletons, mutation config) + starter attestation templates (guarded against unfilled copy-paste) are shipped and self-hosted in CI.
+- **No longer thin:** every active practice carries a filled product obligation, red flags, anti-rationalization guidance, and an explicit consequence; use the generated index/library evaluation for current totals. Layered `org → domain → team` overlays, `vld change archive`, EARS requirement parsing and `enforcement/gates.mjs` + tool config fragments (`gitleaks.toml`, Rego, contract-test skeletons, mutation config) + starter attestation templates (guarded against unfilled copy-paste) are shipped and self-hosted in CI.
 - **No longer boilerplate:** mean shared prose across 157 same-tier packet pairs dropped from **84% → 31%** (worst pair **47%**, ratcheted in CI by `eval-specificity.mjs`).
 - **Measured — with the boundary stated plainly:** MCP skill activation hits **94.7% micro-precision / 100.0% micro-recall** across 74 prompts (+36.5pp precision and +36.1pp recall from practice metadata over title-only), and the 24-task × 3-arm outcome harness proves **100.0% vs 0.0%** pre-review gate rejection of naive patches and **63.9% vs 0.0%** post-merge structural drift detection (`100.0%` anchor loss, `91.7%` secret/gate regression, **`0.0%` semantic test weakening**), at a measured context cost of **~15,813 markdown tokens** vs **~728** for a generic spec. Whether a given live model converts those obligations into higher first-try merge rates on your codebase is measured by running `scripts/eval-outcome.mjs --runner cmd|openai|anthropic` with credentials — never assumed from deterministic calibration alone.

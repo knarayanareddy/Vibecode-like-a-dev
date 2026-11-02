@@ -280,6 +280,12 @@ test('public platform failures are clean usage/input errors, not agent invocatio
   assert.equal(JSON.parse(noArtifacts.stdout).ok, false);
   assert.equal(noArtifacts.stderr, '');
 
+  const debugStore = await cli(['store', 'add', 'broken-store', 'file:///tmp/cli-secret-path/no-store.git', '--project', project, '--debug']);
+  assert.equal(debugStore.code, 2);
+  assert.match(debugStore.stderr, /re-run with --debug/);
+  assert.match(debugStore.stderr, /debug:.*<path>/);
+  assert.doesNotMatch(debugStore.stderr, /cli-secret-path|file:\/\//);
+
   const missingAdapter = await cli(['agent', 'install', 'invented-agent', '--project', project]);
   assert.equal(missingAdapter.code, 2);
   assert.match(missingAdapter.stderr, /unknown agent adapter/);

@@ -103,7 +103,7 @@ If a payload changes, tell the reader what changed rather than quietly regenerat
 
 ## 6. If you change the guard or the emit path
 
-The drift guard exists twice on purpose — `factory/lib/verify.mjs` for `vld verify` and `factory/templates/spec-check.mjs` for the copy shipped inside a packet, which may not import anything from this repository. Use a same-line `@req REQ-<three-or-more digits>` marker in a test; repeat the marker for each additional requirement ID. `@req-ignore` suppresses every marker on that line. Any change to anchor scanning, suppression or the exit-code contract must land in both, with a test that would fail if they diverge.
+The drift guard exists twice on purpose — `factory/lib/verify.mjs` for `vld verify` and `factory/templates/spec-check.mjs` for the copy shipped inside a packet, which may not import anything from this repository. Use a same-line `@req REQ-<three-or-more digits>` marker in a test; repeat the marker for each additional requirement ID. A preceding-line ID is deliberately not associated with an `@req` marker. `@req-ignore` suppresses every marker on that line. Use `vld verify <packet> --repo . --require-assertions` or the emitted guard’s matching `--require-assertions` flag to reject hollow anchored tests. Any change to anchor scanning, suppression, EARS, assertion, or exit-code behavior must land in both, with a test that would fail if they diverge.
 
 Two invariants hold the packet together, and both have tests:
 

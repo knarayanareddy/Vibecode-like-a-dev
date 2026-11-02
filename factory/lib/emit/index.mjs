@@ -34,20 +34,29 @@ const FULL_PACKET = [
   ['07-agent-handoff.md', agentHandoff]
 ];
 
+function packetPlan(plan) {
+  if (plan.profile?.discoverability?.enabled !== false) return plan;
+  const skipped = plan.skipped.filter((entry) => entry.id !== 'product.public-web-discoverability');
+  return { ...plan, skipped, stats: { ...plan.stats, skipped: skipped.length } };
+}
+
 export function renderPacket(plan) {
-  const d = derive(plan);
+  // An explicit `enabled: false` remains visible to `vld plan`, but an opt-out
+  // must not alter the emitted packet relative to a profile where the opt-in is absent.
+  const emitted = packetPlan(plan);
+  const d = derive(emitted);
   const files = new Map();
 
-  if (plan.packet === 'single-file') {
-    files.set('spec.md', singleFileSpec(plan, d));
+  if (emitted.packet === 'single-file') {
+    files.set('spec.md', singleFileSpec(emitted, d));
   } else {
     for (const [name, build] of FULL_PACKET) {
-      files.set(name, build(plan, d));
+      files.set(name, build(emitted, d));
     }
   }
 
-  files.set('spec.json', manifest(plan, d));
-  files.set('AGENTS.md', agentsMd(plan, d));
+  files.set('spec.json', manifest(emitted, d));
+  files.set('AGENTS.md', agentsMd(emitted, d));
 
   const checker = path.join(TEMPLATES, 'spec-check.mjs');
   if (existsSync(checker)) {
@@ -57,7 +66,7 @@ export function renderPacket(plan) {
   // One runnable mechanism per gate, plus the config fragments for the gates whose
   // real check belongs to another tool. Written under `enforcement/` so the packet's
   // top level stays the readable part.
-  for (const [name, content] of enforcementFiles(plan)) files.set(name, content);
+  for (const [name, content] of enforcementFiles(emitted)) files.set(name, content);
 
   return { files, derived: d };
 }
