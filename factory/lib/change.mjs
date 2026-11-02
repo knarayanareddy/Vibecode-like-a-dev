@@ -563,7 +563,7 @@ export function applyChange(plan, { force = false } = {}) {
   return { specPath, backupPath };
 }
 
-function ensureRealDirectory(directory, label) {
+function canonicalTemporaryPath(directory) {
   let resolved = path.resolve(directory);
   // macOS presents its OS-owned temporary hierarchy through a `/var` alias.
   // Canonicalize that trusted anchor before walking descendants so a system alias
@@ -574,6 +574,11 @@ function ensureRealDirectory(directory, label) {
   if (temporaryRelative === '' || (!temporaryRelative.startsWith(`..${path.sep}`) && temporaryRelative !== '..' && !path.isAbsolute(temporaryRelative))) {
     try { resolved = path.resolve(realpathSync(temporary), temporaryRelative); } catch {}
   }
+  return resolved;
+}
+
+function ensureRealDirectory(directory, label) {
+  const resolved = canonicalTemporaryPath(directory);
   const parsed = path.parse(resolved);
   return ensureSafeManagedDirectory(parsed.root, resolved.slice(parsed.root.length), label);
 }
@@ -665,7 +670,7 @@ export async function archiveChange({ packetDir, changeDir, profilePath = null, 
   }
   const delta = readJson(deltaPath);
 
-  const profileFile = resolveProfileFile({ profilePath, spec, packetDir: resolvedPacket });
+  const profileFile = canonicalTemporaryPath(resolveProfileFile({ profilePath, spec, packetDir: resolvedPacket }));
   const profileRoot = ensureRealDirectory(path.dirname(profileFile), 'archive profile directory');
   const profileRelative = relativeManaged(profileRoot, profileFile, 'archive profile');
   safeManagedFile(profileRoot, profileRelative, 'archive profile');
