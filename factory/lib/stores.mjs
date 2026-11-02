@@ -10,7 +10,7 @@ import { existsSync, lstatSync, mkdtempSync, readFileSync, renameSync, rmSync } 
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
-import { canonicalTemporaryPath, digest, ensureProjectDir, ensureSafeManagedDirectory, extensionError, ID_PATTERN, readJson, safeManagedDirectory, safeManagedFile, stableJson, vldDir, writeManagedFileAtomic, writeManagedJsonAtomic } from './extension-utils.mjs';
+import { canonicalTemporaryPath, digest, ensureProjectDir, ensureSafeManagedDirectory, extensionError, externalOperationError, ID_PATTERN, readJson, safeManagedDirectory, safeManagedFile, stableJson, vldDir, writeManagedFileAtomic, writeManagedJsonAtomic } from './extension-utils.mjs';
 
 const STATE_VERSION = 1;
 const STORE_VERSION = 1;
@@ -27,12 +27,11 @@ function requireId(id, label = 'store id') {
   if (!ID_PATTERN.test(String(id ?? ''))) throw extensionError(`${label} must be lowercase kebab-case`, 'INVALID_STORE_ID');
   return id;
 }
-function cloneError(error) { return String(error?.stderr || error?.message || error).trim(); }
 function git(args, options = {}) {
   try {
     return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...options }).trim();
   } catch (error) {
-    throw extensionError(`git ${args[0]} failed: ${cloneError(error)}`, 'GIT_STORE_FAILED');
+    throw externalOperationError(`Git ${args[0]}`, error, 'GIT_STORE_FAILED');
   }
 }
 

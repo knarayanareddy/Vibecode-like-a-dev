@@ -247,6 +247,30 @@ export function parseIdList(value) {
   return value.split(',').map((id) => id.trim()).filter(Boolean);
 }
 
+/**
+ * Bound diagnostics from a subprocess or remote transport before they can cross a
+ * normal user-facing boundary. Keep the class in normal output; only `--debug`
+ * may display this scrubbed detail. This is a redactor, not an authority claim.
+ */
+export function safeExternalDiagnostic(error, { maxBytes = 500 } = {}) {
+  const raw = String(error?.stderr || error?.message || error || 'unknown external failure');
+  return raw
+    .replace(/[\r\n\0]+/g, ' ')
+    .replace(/([a-z][a-z0-9+.-]*:\/\/)[^/\s@]+@/gi, '$1')
+    .replace(/\b(?:ghp|gho|ghu|ghs|github_pat)_[A-Za-z0-9_\-]+\b/g, '[REDACTED]')
+    .replace(/\b(?:token|password|secret|api[_-]?key)\s*[:=]\s*[^\s,;]+/gi, '$1=[REDACTED]')
+    .replace(/(?:[A-Z]:\\|\/)(?:[^\s:'"\\]+[\\/])*[^\s:'"\\]*/g, '<path>')
+    .trim()
+    .slice(0, maxBytes);
+}
+
+/** Attach bounded redacted detail for an explicit local CLI --debug request. */
+export function externalOperationError(operation, error, code = 'EXTERNAL_OPERATION_FAILED') {
+  const wrapped = extensionError(`${operation} failed; re-run with --debug for bounded redacted detail`, code);
+  wrapped.debug = safeExternalDiagnostic(error);
+  return wrapped;
+}
+
 export function extensionError(message, code = 'INVALID_EXTENSION') {
   const error = new Error(message);
   error.code = code;

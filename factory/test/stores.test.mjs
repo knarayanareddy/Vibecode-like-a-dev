@@ -72,6 +72,22 @@ test('store validation refuses unsafe remotes and invalid manifests without writ
   assert.equal(readStoreState(project).exists, false, 'a rejected clone must not create a project lock');
 });
 
+test('store Git failures expose only a stable class with bounded redacted debug detail', (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'vld-store-diagnostic-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const project = path.join(root, 'consumer'); mkdirSync(project);
+  let failure;
+  try {
+    addStore({ projectDir: project, id: 'broken-store', repository: 'file:///tmp/super-secret-path/does-not-exist.git' });
+  } catch (error) { failure = error; }
+  assert.equal(failure?.code, 'GIT_STORE_FAILED');
+  assert.match(failure.message, /re-run with --debug/);
+  assert.doesNotMatch(failure.message, /super-secret-path|fatal:|file:\/\//);
+  assert.ok(failure.debug.length <= 500);
+  assert.doesNotMatch(failure.debug, /super-secret-path|file:\/\//);
+  assert.match(failure.debug, /<path>/);
+});
+
 test('store refresh is a non-mutating reviewed preview followed by an exact commit acknowledgement', (t) => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'vld-store-refresh-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));

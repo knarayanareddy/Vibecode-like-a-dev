@@ -26,8 +26,13 @@ const SOURCE_FILE = /\.(ts|tsx|js|jsx|mjs|cjs|py|go|rb|java|kt|cs|php|rs|sh|feat
 const TEST_FILE = /(^|\/)(tests?|__tests__|specs?)\//;
 const TEST_NAME = /\.(test|spec)\.[a-z]+$|(^|\/)test_[^/]+\.py$|_test\.(py|go|rb|rs|exs)$|Tests?\.(java|kt|cs|php)$/;
 const ANCHOR_LINE = /@req\s+(REQ-\d{3,})/g;
+const REQUIREMENT_ID = /^REQ-\d{3,}$/;
 const SUPPRESSED = /@req-ignore/i;
 const CLARIFY_MARKER = /\[(?:CLARIFY|NEEDS CLARIFICATION)(?::[^\]]*)?\]/i;
+// Keep this deliberately lexical and mirror it in the dependency-free checker
+// emitted into packets. It detects a hollow anchored test; it does not claim a
+// mutation score or semantic proof.
+const ASSERTION_SIGNAL = /\b(?:assert[A-Za-z0-9_.]*|expect\s*\(|should\b|require\.[A-Z]\w*|t\.(?:Fatal|Fatalf|Error|Errorf|Fail|FailNow)|pytest\.raises|raises\s*\(|rejects\b|throws\b)\b|!==|===|!=|==|<=|>=/;
 
 function globToRegExp(glob) {
   const escaped = glob.replace(/[.+^${}()|[\]\\]/g, '\\$&');
@@ -63,6 +68,7 @@ function walk(dir, root, out = []) {
 
 export function scanAnchors(repoDir, { exclude = [] } = {}) {
   const anchors = new Map();
+  const hollow = [];
   const stray = [];
   let scanned = 0;
   let suppressed = 0;
@@ -82,6 +88,7 @@ export function scanAnchors(repoDir, { exclude = [] } = {}) {
     if (exclusionPatterns.some((pattern) => pattern.test(relative))) continue;
 
     const isTest = TEST_FILE.test(relative) || TEST_NAME.test(relative);
+    const fileIds = [];
     for (const line of source.split('\n')) {
       const matches = [...line.matchAll(ANCHOR_LINE)];
       if (matches.length === 0) continue;
@@ -93,16 +100,20 @@ export function scanAnchors(repoDir, { exclude = [] } = {}) {
       }
       for (const match of matches) {
         const id = match[1];
+        fileIds.push(id);
         if (!anchors.has(id)) anchors.set(id, []);
         anchors.get(id).push({ id, file: relative, isTest });
       }
     }
+    if (isTest && fileIds.length > 0 && !ASSERTION_SIGNAL.test(source)) {
+      hollow.push({ file: relative, ids: [...new Set(fileIds)] });
+    }
   }
 
-  return { anchors, stray, scanned, suppressed };
+  return { anchors, hollow, stray, scanned, suppressed };
 }
 
-export function verifyPacket(packetDir, { repo = null, strict = false, policy = loadPolicy() } = {}) {
+export function verifyPacket(packetDir, { repo = null, strict = false, requireAssertions = false, policy = loadPolicy() } = {}) {
   const errors = [];
   const warnings = [];
   const passes = [];
@@ -202,7 +213,7 @@ export function verifyPacket(packetDir, { repo = null, strict = false, policy = 
   const known = new Set(requirements.map((requirement) => requirement.id));
   let criteria = 0;
   for (const requirement of requirements) {
-    if (!/^REQ-\d{3}$/.test(requirement.id ?? '')) errors.push(`invalid requirement id "${requirement.id}"`);
+    if (!REQUIREMENT_ID.test(requirement.id ?? '')) errors.push(`invalid requirement id "${requirement.id}"`);
     if (!requirement.statement || String(requirement.statement).length < 40) {
       errors.push(`${requirement.id}: statement missing or too thin`);
     } else {
@@ -308,9 +319,16 @@ export function verifyPacket(packetDir, { repo = null, strict = false, policy = 
   // 6. anchors, when a repository is supplied
   let anchorStats = null;
   if (repo) {
-    const { anchors, scanned, suppressed } = scanAnchors(repo, { exclude: spec.anchors?.exclude ?? [] });
+    const { anchors, hollow, scanned, suppressed } = scanAnchors(repo, { exclude: spec.anchors?.exclude ?? [] });
     anchorStats = { scanned, anchored: anchors.size, suppressed };
     if (suppressed > 0) info.push(`${suppressed} anchor(s) ignored by @req-ignore or anchors.exclude`);
+    for (const entry of hollow) {
+      const ids = entry.ids.filter((id) => known.has(id));
+      if (ids.length === 0) continue;
+      const message = `${entry.file} carries @req anchor(s) (${ids.join(', ')}) with no visible assertion`;
+      if (requireAssertions) errors.push(message);
+      else warnings.push(`${message} (pass --require-assertions to fail on hollow tests)`);
+    }
 
     for (const [id, hits] of anchors) {
       if (!known.has(id)) {

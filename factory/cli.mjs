@@ -64,8 +64,8 @@ Usage
   vld plan <profile.json> [--json]   show selection and reasoning, write nothing
   vld compile <profile.json> -o <dir> [--force]
                                      render the specification packet
-  vld verify <packet-dir> [--repo <path>] [--strict] [--json]
-                                     check a packet, optionally against code
+  vld verify <packet-dir> [--repo <path>] [--strict] [--require-assertions] [--json]
+                                     check a packet, optionally against code; --require-assertions rejects hollow anchored tests
   vld change <packet-dir> <change.json> -o <dir> [--apply] [--force] [--json]
                                      render a delta spec for a brownfield change
   vld change verify <change-dir> [--project <dir>]
@@ -79,9 +79,9 @@ Usage
                                      locally link a human readiness record to an opted-in packet; advisory only, no crawler or provider claims
   vld export <spec-kit|kiro> <packet-dir> -o <dir> [--force]
                                      generate a bounded interoperability view; the VLD packet remains authoritative
-  vld store init <directory> [--id <store-id>] | add <id> <git-url> | diff <id> | update <id> --acknowledge <commit>
-                                     fetch, review, pin and verify read-only Git-backed shared delivery stores
-  vld catalog trust <root.json> | add <id> <git-url> | diff <id> | update <id> --acknowledge <commit>
+  vld store init <directory> [--id <store-id>] | add <id> <git-url> | diff <id> | update <id> --acknowledge <commit> [--debug]
+                                     fetch, review, pin and verify read-only Git-backed shared delivery stores; debug details are bounded and redacted
+  vld catalog trust <root.json> | add <id> <git-url> | diff <id> | update <id> --acknowledge <commit> [--debug]
   vld catalog status [id] | copy <id> <package> <payload> --out <file>
                                      verify a threshold-signed, content-only catalog; it cannot execute or enable content
   vld module list|enable|status|verify [ids] [--project <dir>] [--json]
@@ -173,8 +173,9 @@ function displayPath(target) {
   return relative && !relative.startsWith('..') ? relative : target;
 }
 
-function fail(message) {
-  console.error(`\n✗ ${message}\n`);
+function fail(message, error = null) {
+  const debug = hasFlag('--debug') && error?.debug ? `\n\n  debug: ${error.debug}` : '';
+  console.error(`\n✗ ${message}${debug}\n`);
   process.exit(2);
 }
 
@@ -446,7 +447,7 @@ function runVerify(packetDir) {
   if (!existsSync(packetDir)) fail(`No such packet: ${packetDir}`);
 
   const repo = hasFlag('--repo') ? path.resolve(option('--repo', '.')) : null;
-  const report = verifyPacket(path.resolve(packetDir), { repo, strict: hasFlag('--strict') });
+  const report = verifyPacket(path.resolve(packetDir), { repo, strict: hasFlag('--strict'), requireAssertions: hasFlag('--require-assertions') });
 
   if (hasFlag('--json')) {
     console.log(JSON.stringify(report, null, 2));
@@ -783,8 +784,8 @@ function runStore() {
       if (report.ok === false) process.exit(1);
       return;
     }
-    fail('Usage: vld store init|add|diff|update|list|status|assets|copy');
-  } catch (error) { fail(error.message); }
+    fail('Usage: vld store init|add|diff|update|list|status|assets|copy [--debug]');
+  } catch (error) { fail(error.message, error); }
 }
 
 function printCatalogRefreshPreview(report, { json = false } = {}) {
@@ -853,8 +854,8 @@ function runCatalog() {
       if (report.ok === false) process.exit(1);
       return;
     }
-    fail('Usage: vld catalog trust|add|diff|update|list|status|copy');
-  } catch (error) { fail(error.message); }
+    fail('Usage: vld catalog trust|add|diff|update|list|status|copy [--debug]');
+  } catch (error) { fail(error.message, error); }
 }
 
 function runModule() {

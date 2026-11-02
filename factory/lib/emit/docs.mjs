@@ -1304,7 +1304,10 @@ export function manifest(plan, d) {
         origin: primitive.when?.startsWith('overlay:') ? primitive.when : 'router'
       })),
       deferred: plan.deferred,
-      skipped: plan.skipped,
+      // Discoverability is an opt-in planning decision. Keep an explicit disabled
+      // choice visible in `vld plan`, but do not perturb an otherwise identical
+      // packet for profiles that do not enable the contract.
+      skipped: plan.skipped.filter((entry) => entry.id !== 'product.public-web-discoverability'),
       requirements: plan.requirements.map((requirement) => ({
         id: requirement.id,
         key: requirement.key,

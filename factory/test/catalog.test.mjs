@@ -101,6 +101,22 @@ test('M7 preview/update preserves the existing exact-commit acknowledgement flow
   assert.equal(refreshed.catalog.commit, preview.next.commit); assert.equal(refreshed.catalog.acknowledgedCommit, preview.next.commit);
 });
 
+test('catalog Git failures expose only a stable class with bounded redacted debug detail', (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'vld-catalog-diagnostic-')); t.after(() => rmSync(root, { recursive: true, force: true }));
+  const signer = key(); const trust = rootFixture(root, signer); const project = path.join(root, 'consumer'); mkdirSync(project);
+  trustCatalogRoot({ projectDir: project, rootFile: trust.file, now: FUTURE });
+  let failure;
+  try {
+    addCatalog({ projectDir: project, id: 'broken-catalog', repository: 'file:///tmp/catalog-secret-path/does-not-exist.git', now: FUTURE });
+  } catch (error) { failure = error; }
+  assert.equal(failure?.code, 'GIT_CATALOG_FAILED');
+  assert.match(failure.message, /re-run with --debug/);
+  assert.doesNotMatch(failure.message, /catalog-secret-path|fatal:|file:\/\//);
+  assert.ok(failure.debug.length <= 500);
+  assert.doesNotMatch(failure.debug, /catalog-secret-path|file:\/\//);
+  assert.match(failure.debug, /<path>/);
+});
+
 test('M7 rejects altered signed metadata, incompatible packages and digest drift without replacing locks', (t) => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'vld-catalog-invalid-')); t.after(() => rmSync(root, { recursive: true, force: true }));
   const signer = key(); const trust = rootFixture(root, signer); const source = makeCatalog(root, signer); const project = path.join(root, 'consumer'); mkdirSync(project);

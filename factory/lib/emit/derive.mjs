@@ -5,12 +5,14 @@
  * formatted" can be reviewed independently.
  */
 
+import { readFileSync } from 'node:fs';
 import { aggregatesFor, contextsFor, termsFor } from '../domain-hints.mjs';
 import { articleFor, ideaNouns, pluralOf, singularOf, vocabularyFor } from './vocabulary.mjs';
-import packageMetadata from '../../../package.json' with { type: 'json' };
 
 // The package manifest is the release authority; generated provenance must never
-// carry a hand-maintained second version.
+// carry a hand-maintained second version. Read it explicitly rather than through
+// a JSON module so all supported Node 22 releases keep ordinary CLI stderr clean.
+const packageMetadata = JSON.parse(readFileSync(new URL('../../../package.json', import.meta.url), 'utf8'));
 export const FACTORY_VERSION = packageMetadata.version;
 
 // ---------- text helpers ----------

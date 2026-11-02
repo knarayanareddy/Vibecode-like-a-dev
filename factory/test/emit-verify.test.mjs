@@ -77,6 +77,18 @@ test('the packet is byte-identical across compiles, so review diffs mean somethi
   }
 });
 
+test('discoverability absent and explicitly disabled profiles emit byte-identical non-opt-in packets', async () => {
+  const { renderPacket } = await import('../lib/emit/index.mjs');
+  const absent = makeProject('discoverability-byte-compat');
+  const disabled = makeProject('discoverability-byte-compat', { discoverability: { enabled: false } });
+  const absentPlan = buildPlan(absent, { index });
+  const disabledPlan = buildPlan(disabled, { index });
+  assert.ok(disabledPlan.skipped.some((entry) => entry.id === 'product.public-web-discoverability'), 'the explicit disabled decision stays reviewable in vld plan');
+  const first = renderPacket(absentPlan);
+  const second = renderPacket(disabledPlan);
+  assert.deepEqual([...first.files], [...second.files]);
+});
+
 test('packet emission rejects symlinked output roots and generated descendants', (t) => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'vld-emit-links-'));
   const outside = mkdtempSync(path.join(os.tmpdir(), 'vld-emit-outside-'));
@@ -382,9 +394,10 @@ test('an anchor outside a test file does not count as proof', (t) => {
  * runs it as a process and requires the same verdict as the factory verifier on
  * the same repository, in both directions.
  */
-function runShippedChecker(packetDir, repo, strict = false) {
+function runShippedChecker(packetDir, repo, { strict = false, requireAssertions = false } = {}) {
   const args = [path.join(packetDir, 'spec-check.mjs'), '--repo', repo];
   if (strict) args.push('--strict');
+  if (requireAssertions) args.push('--require-assertions');
   try {
     const stdout = execFileSync(process.execPath, args, { encoding: 'utf8' });
     return { code: 0, stdout };
@@ -427,7 +440,7 @@ test('the shipped checker and the factory verifier reach the same verdict', (t) 
 
   // Both agree when the work is proven.
   assert.equal(verifyPacket(project.outDir, { repo, strict: true }).ok, true);
-  const clean = runShippedChecker(project.outDir, repo, true);
+  const clean = runShippedChecker(project.outDir, repo, { strict: true });
   assert.equal(clean.code, 0, clean.stdout);
   assert.match(clean.stdout, /PASS/);
 
@@ -438,7 +451,7 @@ test('the shipped checker and the factory verifier reach the same verdict', (t) 
   assert.ok(existsSync(victimTest), 'the fixture wrote the test it is about to delete');
   rmSync(victimTest);
   const factoryVerdict = verifyPacket(project.outDir, { repo, strict: true });
-  const shippedVerdict = runShippedChecker(project.outDir, repo, true);
+  const shippedVerdict = runShippedChecker(project.outDir, repo, { strict: true });
   assert.equal(factoryVerdict.ok, false);
   assert.equal(shippedVerdict.code, 1);
   assert.match(shippedVerdict.stdout, new RegExp(victim.id), 'the shipped checker names the requirement it lost');
@@ -449,7 +462,48 @@ test('the shipped checker and the factory verifier reach the same verdict', (t) 
   const strayMarker = ['@', 'req '].join('');
   writeFileSync(path.join(repo, 'tests', 'stray.test.ts'), `// ${strayMarker}REQ-999\ntest('stray', () => {});\n`);
   assert.equal(verifyPacket(project.outDir, { repo, strict: true }).ok, false);
-  assert.equal(runShippedChecker(project.outDir, repo, true).code, 1);
+  assert.equal(runShippedChecker(project.outDir, repo, { strict: true }).code, 1);
+});
+
+test('factory verify and the shipped guard agree on hollow assertions and EARS failures', (t) => {
+  const project = compileTemp(makeProject('assertion-parity'));
+  t.after(project.cleanup);
+  const repo = path.join(project.root, 'repo');
+  mkdirSync(repo, { recursive: true });
+  const automated = anchorEverything(project.outDir, repo);
+  const victim = automated[0];
+  const testFile = path.join(repo, 'tests', `${victim.key.replace(/\\./g, '-')}.test.ts`);
+  writeFileSync(testFile, `// @req ${victim.id}\\ntest('hollow', () => {});\\n`);
+
+  const lenient = verifyPacket(project.outDir, { repo, strict: true });
+  assert.equal(lenient.ok, true, lenient.errors.join('\\n'));
+  assert.match(lenient.warnings.join('\\n'), /no visible assertion/);
+  assert.equal(runShippedChecker(project.outDir, repo, { strict: true }).code, 0);
+
+  const factoryHollow = verifyPacket(project.outDir, { repo, strict: true, requireAssertions: true });
+  const shippedHollow = runShippedChecker(project.outDir, repo, { strict: true, requireAssertions: true });
+  assert.equal(factoryHollow.ok, false);
+  assert.match(factoryHollow.errors.join('\\n'), /no visible assertion/);
+  assert.equal(shippedHollow.code, 1);
+  assert.match(shippedHollow.stdout, /no visible assertion/);
+
+  writeFileSync(testFile, `// @req ${victim.id}\\ntest('real', () => { expect(true).toBe(true); });\\n`);
+  patchRequirement(path.join(project.outDir, 'spec.json'), victim.key, { statement: 'The system shall behave appropriately for requests.' });
+  const factoryEars = verifyPacket(project.outDir, { repo, strict: true, requireAssertions: true });
+  const shippedEars = runShippedChecker(project.outDir, repo, { strict: true, requireAssertions: true });
+  assert.equal(factoryEars.ok, false);
+  assert.match(factoryEars.errors.join('\\n'), /not an EARS requirement/);
+  assert.equal(shippedEars.code, 1);
+  assert.match(shippedEars.stdout, /not EARS-shaped/);
+});
+
+test('preceding-line requirement IDs are deliberately not anchors', (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'vld-anchor-preceding-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(path.join(root, 'tests'), { recursive: true });
+  writeFileSync(path.join(root, 'tests', 'preceding.test.ts'), '// @req\\n// REQ-1000\\ntest("no anchor", () => {});\\n');
+  const scan = scanAnchors(root);
+  assert.equal(scan.anchors.size, 0, 'only same-line @req REQ-<id> markers are supported');
 });
 
 test('the shipped spec checker skips symlinked sources and directory loops', (t) => {
