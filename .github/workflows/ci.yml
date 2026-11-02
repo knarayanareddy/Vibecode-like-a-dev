@@ -84,16 +84,7 @@ jobs:
         with:
           node-version: 22.0.0
       - name: Full core Node test suite at the supported floor
-        run: |
-          set +e
-          npm test > /tmp/vld-minimum-node-test.log 2>&1
-          status=$?
-          if [ "$status" -ne 0 ]; then
-            summary=$(grep -E -A20 -B4 '^(not ok|# fail|# failureType|# error:)' /tmp/vld-minimum-node-test.log | tail -120 | sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')
-            echo "::error title=Minimum Node 22 test failure::$summary"
-            cat /tmp/vld-minimum-node-test.log
-            exit "$status"
-          fi
+        run: npm test
 
   integration:
     name: Linux integration fixtures
