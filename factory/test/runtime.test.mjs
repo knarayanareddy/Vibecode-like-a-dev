@@ -15,6 +15,7 @@ import {
   initializeRuntime,
   recoverRuntime,
   runtimeDebugPaths,
+  runtimeEventHistory,
   runtimeStatus,
   transitionRuntimePackage
 } from '../lib/runtime.mjs';
@@ -162,6 +163,62 @@ test('Runtime host enforces leases, expected versions, and receipt-only delivery
       (error) => error.code === 'RUNTIME_RECEIPT_REQUIRED'
     );
   }
+});
+
+test('Runtime accepts an initial idempotency key before a lease capability exists and never reconstructs a generated token', (t) => {
+  const value = fixture(t);
+  initializeRuntime({ missionFile: value.missionFile, projectDir: value.project, now: FUTURE });
+  const first = allocateRuntimePackage({
+    missionFile: value.missionFile, projectDir: value.project, packageId: 'export-api', actor: operator, assignee: implementer,
+    idempotencyKey: 'allocate-no-token-0001', now: FUTURE
+  });
+  assert.match(first.leaseToken, /^lease-/);
+  const replay = allocateRuntimePackage({
+    missionFile: value.missionFile, projectDir: value.project, packageId: 'export-api', actor: operator, assignee: implementer,
+    idempotencyKey: 'allocate-no-token-0001', now: FUTURE
+  });
+  assert.equal(replay.changed, false);
+  assert.equal(replay.leaseToken, null);
+  assert.match(replay.leaseTokenRecovery, /one-time capability/);
+  assert.equal(replay.allocation.run.id, first.allocation.run.id);
+  assert.throws(
+    () => heartbeatRuntimeLease({ missionFile: value.missionFile, projectDir: value.project, packageId: 'export-api', runId: first.allocation.run.id, actor: implementer, leaseToken: null, now: FUTURE }),
+    (error) => error.code === 'RUNTIME_LEASE_FORBIDDEN'
+  );
+});
+
+test('Runtime status labels only a bounded recent event window while authorized history pages remain durable and byte-bounded', (t) => {
+  const value = fixture(t);
+  initializeRuntime({ missionFile: value.missionFile, projectDir: value.project, now: FUTURE });
+  const allocation = allocateRuntimePackage({ missionFile: value.missionFile, projectDir: value.project, packageId: 'export-api', actor: operator, assignee: implementer, leaseMs: 600_000, now: FUTURE });
+  for (let index = 0; index < 205; index += 1) {
+    heartbeatRuntimeLease({ missionFile: value.missionFile, projectDir: value.project, packageId: 'export-api', runId: allocation.allocation.run.id, leaseToken: allocation.leaseToken, actor: implementer, leaseMs: 600_000, now: FUTURE });
+  }
+  const status = runtimeStatus({ missionFile: value.missionFile, projectDir: value.project, now: FUTURE });
+  assert.equal(status.recentEvents.length, 200);
+  assert.ok(status.recentEvents[0].sequence > 1, 'status reports a recent window rather than claiming full event history');
+
+  const first = runtimeEventHistory({ missionFile: value.missionFile, projectDir: value.project, actor: operator, limit: 3, maxBytes: 64 * 1024 });
+  assert.deepEqual(first.events.map((event) => event.sequence), [1, 2, 3]);
+  assert.doesNotMatch(JSON.stringify(first), /leaseToken|tokenDigest/, 'history is an explicit public projection rather than raw ledger state');
+  assert.equal(first.page.truncated, true);
+  const second = runtimeEventHistory({ missionFile: value.missionFile, projectDir: value.project, actor: operator, after: first.page.nextCursor, limit: 3, maxBytes: 64 * 1024 });
+  assert.deepEqual(second.events.map((event) => event.sequence), [4, 5, 6]);
+  const bounded = runtimeEventHistory({ missionFile: value.missionFile, projectDir: value.project, actor: operator, after: 1, limit: 100, maxBytes: 1024 });
+  assert.ok(bounded.page.bytes <= 1024);
+  assert.ok(bounded.events.length < 100, 'byte bound truncates an otherwise larger count page');
+  assert.throws(
+    () => runtimeEventHistory({ missionFile: value.missionFile, projectDir: value.project, actor: implementer }),
+    (error) => error.code === 'RUNTIME_EVENT_FORBIDDEN'
+  );
+  assert.throws(
+    () => runtimeEventHistory({ missionFile: value.missionFile, projectDir: value.project, actor: operator, after: -1 }),
+    (error) => error.code === 'INVALID_RUNTIME_EVENT_CURSOR'
+  );
+  assert.throws(
+    () => runtimeEventHistory({ missionFile: value.missionFile, projectDir: value.project, actor: operator, limit: 101, maxBytes: 64 * 1024 }),
+    (error) => error.code === 'INVALID_RUNTIME_EVENT_LIMIT'
+  );
 });
 
 test('Runtime recovery expires a lease safely and ledger corruption fails closed', (t) => {

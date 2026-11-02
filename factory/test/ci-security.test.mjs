@@ -49,7 +49,7 @@ test('CI pins every third-party action, has read-only permissions and keeps one 
 test('CI separates deterministic evaluations/stress work and validates the portable Node suite', () => {
   const ci = read('.github', 'workflows', 'ci.yml');
   mustMatch(ci, /^  node-22-minimum:/m);
-  mustMatch(ci, /name: Linux core suite — minimum Node 22[\s\S]*?node-version: 22\.0\.0[\s\S]*?run: npm test/);
+  mustMatch(ci, /name: Linux core suite — minimum Node 22[\s\S]*?node-version: 22\.0\.0[\s\S]*?log=\/tmp\/vld-minimum-node-test\.log[\s\S]*?npm test >"\$log"[\s\S]*?Minimum Node test failure/);
   mustMatch(ci, /node-version: 22\.x/);
   mustMatch(ci, /^  integration:/m);
   mustMatch(ci, /VS Code Studio extension package tests[\s\S]*?working-directory: factory\/studio\/vscode[\s\S]*?run: npm test/);
@@ -58,8 +58,8 @@ test('CI separates deterministic evaluations/stress work and validates the porta
   mustMatch(ci, /^  stress:/m);
   mustMatch(ci, /^  portable-smoke:/m);
   mustMatch(ci, /os: \[macos-latest, windows-latest\]/);
-  mustMatch(ci, /name: Full portable test suite[\s\S]*?shell: bash[\s\S]*?NODE_OPTIONS=--test-reporter=dot npm test/);
-  mustNotMatch(ci, /portable-test\.log|Portable npm test failure/);
+  mustMatch(ci, /name: Full portable test suite[\s\S]*?shell: bash[\s\S]*?log=\/tmp\/vld-portable-test\.log[\s\S]*?npm test >"\$log"[\s\S]*?Portable Node test failure/);
+  mustNotMatch(ci, /tee portable-test\.log|NODE_OPTIONS=--test-reporter=dot/);
   mustMatch(ci, /deterministic outcome calibration/);
   mustNotMatch(ci, /--runner cmd|--unsafe-command/);
   mustNotMatch(ci, /actions\/[\w-]+@v\d/);

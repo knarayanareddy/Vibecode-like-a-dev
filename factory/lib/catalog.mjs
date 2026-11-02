@@ -7,15 +7,15 @@
  * execute content, enable a module, alter compiler policy, or invoke a workflow.
  */
 
-import { createPublicKey, verify } from 'node:crypto';
+import { createPublicKey, randomUUID, verify } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync } from 'node:fs';
+import { existsSync, lstatSync, mkdtempSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { validateBundle } from './bundles.mjs';
 import { validateModule } from './modules.mjs';
 import { validateWorkflow } from './workflows.mjs';
-import { digest, ensureProjectDir, extensionError, ID_PATTERN, readJson, SEMVER_PATTERN, stableJson, vldDir, writeJsonAtomic } from './extension-utils.mjs';
+import { digest, ensureProjectDir, ensureSafeManagedDirectory, extensionError, ID_PATTERN, readJson, safeManagedDirectory, safeManagedFile, SEMVER_PATTERN, stableJson, vldDir, writeManagedFileAtomic, writeManagedJsonAtomic } from './extension-utils.mjs';
 import { validateRepository } from './stores.mjs';
 
 const CATALOG_VERSION = 1;
@@ -163,8 +163,9 @@ function readRootFile(file, now) {
 /** Trust the first locally supplied root, or rotate only through old-root signatures plus exact acknowledgement. */
 export function trustCatalogRoot({ projectDir = '.', rootFile, acknowledge = null, now } = {}) {
   const project = ensureProjectDir(projectDir); const timestamp = nowIso(now); const next = readRootFile(rootFile, timestamp); const destination = rootPath(project); const nextDigest = digest(next);
+  safeManagedFile(project, path.relative(project, destination), 'trusted catalog root');
   if (!existsSync(destination)) {
-    writeJsonAtomic(destination, next);
+    writeManagedJsonAtomic(project, path.relative(project, destination), next, { label: 'trusted catalog root' });
     return { project, file: destination, changed: true, root: { version: next.version, digest: nextDigest, expiresAt: next.expiresAt, threshold: next.threshold, keyIds: next.keys.map((key) => key.id) } };
   }
   let previous; try { previous = assertRoot(readJson(destination), { now: timestamp }); } catch (error) { throw extensionError(`trusted catalog root is invalid: ${error.message}`, 'INVALID_CATALOG_ROOT'); }
@@ -173,11 +174,12 @@ export function trustCatalogRoot({ projectDir = '.', rootFile, acknowledge = nul
   if (acknowledge !== nextDigest) throw extensionError(`catalog root rotation requires --acknowledge ${nextDigest}`, 'CATALOG_ROOT_ACKNOWLEDGEMENT_REQUIRED');
   if (next.version <= previous.version || next.previousRootDigest !== previousDigest) throw extensionError('catalog root rotation must increment version and bind the current root digest', 'CATALOG_ROOT_ROTATION_INVALID');
   verifySignatures(next, rootKeys(previous, 'root'), previous.threshold, 'catalog root rotation');
-  writeJsonAtomic(destination, next);
+  writeManagedJsonAtomic(project, path.relative(project, destination), next, { label: 'trusted catalog root' });
   return { project, file: destination, changed: true, root: { version: next.version, digest: nextDigest, expiresAt: next.expiresAt, threshold: next.threshold, keyIds: next.keys.map((key) => key.id) } };
 }
 function trustedRoot(project, now) {
   const file = rootPath(project);
+  try { safeManagedFile(project, path.relative(project, file), 'trusted catalog root'); } catch (error) { throw extensionError(error.message, 'INVALID_CATALOG_ROOT'); }
   if (!existsSync(file)) throw extensionError('no catalog root is trusted; run vld catalog trust <root.json> first', 'CATALOG_ROOT_NOT_TRUSTED');
   try { const root = assertRoot(readJson(file), { now }); return { file, root, digest: digest(root) }; } catch (error) { throw extensionError(`trusted catalog root is invalid: ${error.message}`, 'INVALID_CATALOG_ROOT'); }
 }
@@ -272,6 +274,7 @@ function entry({ id, repository, ref, snapshot: checked, rootDigest, acknowledge
 
 export function readCatalogState(projectDir = '.') {
   const project = ensureProjectDir(projectDir); const file = statePath(project);
+  try { safeManagedFile(project, path.relative(project, file), 'catalog state'); } catch (error) { return { project, file, exists: existsSync(file), state: null, errors: [error.message] }; }
   if (!existsSync(file)) return { project, file, exists: false, state: { schemaVersion: STATE_VERSION, catalogs: [] }, errors: [] };
   let state; try { state = readJson(file); } catch (error) { return { project, file, exists: true, state: null, errors: [`${file}: invalid JSON (${error.message})`] }; }
   const errors = [];
@@ -308,14 +311,20 @@ export function addCatalog({ projectDir = '.', id, repository, ref = null, refre
   const prior = loaded.state.catalogs.find((item) => item.id === id); if (prior && !refresh) throw extensionError(`catalog "${id}" is already locked; run vld catalog diff ${id} before refresh`, 'CATALOG_EXISTS');
   if (prior && refresh && !expectedCommit) throw extensionError(`catalog "${id}" needs the exact reviewed commit acknowledgement before refresh`, 'CATALOG_ACKNOWLEDGEMENT_REQUIRED');
   if (expectedCommit !== null && !COMMIT.test(String(expectedCommit))) throw extensionError('catalog acknowledgement must be a full 40-character commit', 'INVALID_CATALOG_ACKNOWLEDGEMENT');
-  const root = catalogDir(project); mkdirSync(root, { recursive: true }); const destination = catalogCache(project, id); const temporary = path.join(root, `.${id}.${process.pid}.fetching`); const backup = path.join(root, `.${id}.${process.pid}.backup`);
+  const root = catalogDir(project); const rootRelative = path.relative(project, root); ensureSafeManagedDirectory(project, rootRelative, 'catalog cache directory');
+  const destination = catalogCache(project, id); const destinationRelative = path.relative(project, destination);
+  const temporary = path.join(root, `.${id}.${process.pid}.${randomUUID()}.fetching`); const temporaryRelative = path.relative(project, temporary);
+  const backup = path.join(root, `.${id}.${process.pid}.${randomUUID()}.backup`); const backupRelative = path.relative(project, backup);
+  safeManagedDirectory(project, destinationRelative, 'catalog cache destination');
+  safeManagedDirectory(project, temporaryRelative, 'catalog cache temporary directory');
+  safeManagedDirectory(project, backupRelative, 'catalog cache backup directory');
   if (existsSync(temporary) || existsSync(backup)) throw extensionError('a prior catalog operation did not finish; inspect and remove its temporary directory', 'CATALOG_TEMPORARY_EXISTS');
   let lockWritten = false;
   try {
     cloneCatalog(repository, ref, temporary); const checked = snapshot(temporary, id, trust, timestamp);
     if (expectedCommit && checked.commit !== expectedCommit) throw extensionError(`catalog remote resolved to ${checked.commit}, not acknowledged ${expectedCommit}; run vld catalog diff ${id} again`, 'CATALOG_ACKNOWLEDGEMENT_MISMATCH');
     if (existsSync(destination)) renameSync(destination, backup); renameSync(temporary, destination);
-    const catalogs = loaded.state.catalogs.filter((item) => item.id !== id); catalogs.push(entry({ id, repository, ref, snapshot: checked, rootDigest: trust.digest, acknowledgedCommit: prior ? expectedCommit : null })); catalogs.sort((a, b) => a.id.localeCompare(b.id)); writeJsonAtomic(loaded.file, { schemaVersion: STATE_VERSION, catalogs }); lockWritten = true; rmSync(backup, { recursive: true, force: true });
+    const catalogs = loaded.state.catalogs.filter((item) => item.id !== id); catalogs.push(entry({ id, repository, ref, snapshot: checked, rootDigest: trust.digest, acknowledgedCommit: prior ? expectedCommit : null })); catalogs.sort((a, b) => a.id.localeCompare(b.id)); writeManagedJsonAtomic(project, path.relative(project, loaded.file), { schemaVersion: STATE_VERSION, catalogs }, { label: 'catalog state' }); lockWritten = true; rmSync(backup, { recursive: true, force: true });
     return { project, file: loaded.file, refreshed: Boolean(prior), catalog: catalogs.find((item) => item.id === id) };
   } catch (error) {
     if (!lockWritten && existsSync(backup)) { rmSync(destination, { recursive: true, force: true }); renameSync(backup, destination); }
@@ -345,12 +354,14 @@ export function catalogStatus(projectDir = '.', id = null, { now } = {}) {
   if (id && !catalogs.length) errors.push(`catalog "${id}" is not locked`);
   return { ...loaded, catalogs, errors, ok: errors.length === 0 && catalogs.every((item) => item.ok), trustedRoot: { version: trust.root.version, digest: trust.digest, expiresAt: trust.root.expiresAt, keyIds: trust.root.keys.map((key) => key.id) } };
 }
-function mkdirOutputParent(project, target) {
-  const relative = path.relative(project, path.dirname(target)); let cursor = project;
-  for (const segment of relative.split(path.sep).filter(Boolean)) {
-    cursor = path.join(cursor, segment);
-    if (existsSync(cursor)) { const details = lstatSync(cursor); if (details.isSymbolicLink() || !details.isDirectory()) throw extensionError('catalog output may not traverse a symbolic link', 'INVALID_CATALOG_OUTPUT'); }
-    else mkdirSync(cursor);
+function writeCatalogOutput(project, target, bytes, force) {
+  const relative = path.relative(project, target);
+  try {
+    return writeManagedFileAtomic(project, relative, bytes, { overwrite: force, mode: 0o600, label: 'catalog output' });
+  } catch (error) {
+    if (error?.code === 'UNSAFE_MANAGED_PATH') throw extensionError(error.message, 'INVALID_CATALOG_OUTPUT');
+    if (error?.code === 'MANAGED_FILE_EXISTS') throw extensionError(`${target} exists; pass --force to replace it`, 'CATALOG_OUTPUT_EXISTS');
+    throw error;
   }
 }
 
@@ -362,9 +373,11 @@ function readVerifiedPayload({ projectDir, catalogId, packageName, payloadId, no
 }
 export function copyCatalogPayload({ projectDir = '.', catalogId, packageName, payloadId, out, force = false, now } = {}) {
   if (typeof out !== 'string' || !out) throw extensionError('catalog payload copy requires --out inside the project', 'CATALOG_OUTPUT_REQUIRED'); const loaded = readVerifiedPayload({ projectDir, catalogId, packageName, payloadId, now }); const target = path.resolve(loaded.project, out); const relative = path.relative(loaded.project, target);
-  if (!relative || relative.startsWith('..') || path.isAbsolute(relative) || relative.split(path.sep)[0] === '.vld') throw extensionError('catalog payload output must be a non-state path inside the project', 'INVALID_CATALOG_OUTPUT'); if (path.extname(target) !== path.extname(loaded.payload.path)) throw extensionError('catalog payload output must retain the verified payload extension', 'INVALID_CATALOG_OUTPUT'); if (existsSync(target) && lstatSync(target).isSymbolicLink()) throw extensionError('catalog payload output may not be a symbolic link', 'INVALID_CATALOG_OUTPUT'); if (existsSync(target) && !force) throw extensionError(`${target} exists; pass --force to replace it`, 'CATALOG_OUTPUT_EXISTS');
-  mkdirOutputParent(loaded.project, target); copyFileSync(loaded.source.file, target);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative) || relative.split(path.sep)[0] === '.vld') throw extensionError('catalog payload output must be a non-state path inside the project', 'INVALID_CATALOG_OUTPUT'); if (path.extname(target) !== path.extname(loaded.payload.path)) throw extensionError('catalog payload output must retain the verified payload extension', 'INVALID_CATALOG_OUTPUT');
+  safeManagedFile(loaded.project, relative, 'catalog output');
+  if (existsSync(target) && !force) throw extensionError(`${target} exists; pass --force to replace it`, 'CATALOG_OUTPUT_EXISTS');
+  writeCatalogOutput(loaded.project, target, loaded.source.bytes, force);
   const copies = existsSync(copiesPath(loaded.project)) ? readJson(copiesPath(loaded.project)) : { schemaVersion: 1, copies: [] }; if (!object(copies) || copies.schemaVersion !== 1 || !Array.isArray(copies.copies)) throw extensionError('catalog copy provenance state is invalid', 'INVALID_CATALOG_STATE');
-  const provenance = { catalogId, catalogCommit: loaded.catalog.commit, rootDigest: loaded.catalog.rootDigest, packageName, packageVersion: loaded.packageInfo.version, publisher: loaded.packageInfo.publisher.id, payloadId, payloadDigest: loaded.payload.digest, output: relative.split(path.sep).join('/') }; const next = copies.copies.filter((item) => item.output !== provenance.output); next.push(provenance); next.sort((a, b) => a.output.localeCompare(b.output)); writeJsonAtomic(copiesPath(loaded.project), { schemaVersion: 1, copies: next });
+  const provenance = { catalogId, catalogCommit: loaded.catalog.commit, rootDigest: loaded.catalog.rootDigest, packageName, packageVersion: loaded.packageInfo.version, publisher: loaded.packageInfo.publisher.id, payloadId, payloadDigest: loaded.payload.digest, output: relative.split(path.sep).join('/') }; const next = copies.copies.filter((item) => item.output !== provenance.output); next.push(provenance); next.sort((a, b) => a.output.localeCompare(b.output)); writeManagedJsonAtomic(loaded.project, path.relative(loaded.project, copiesPath(loaded.project)), { schemaVersion: 1, copies: next }, { label: 'catalog copy provenance' });
   return { ...loaded, output: target, provenance };
 }

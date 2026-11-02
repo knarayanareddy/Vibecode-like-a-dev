@@ -6,8 +6,9 @@
  * tell whether a bundled module, adapter or workflow changed underneath it.
  */
 
-import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 export const ID_PATTERN = /^[a-z0-9][a-z0-9-]{1,60}$/;
@@ -65,6 +66,20 @@ function containedPath(root, candidate) {
   return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
 }
 
+/**
+ * Canonicalize only the OS-selected temporary-directory anchor. On macOS `/var`
+ * can be a system alias for `/private/var`; callers still validate every requested
+ * descendant with lstat, so this never treats a caller-created link as trusted.
+ */
+export function canonicalTemporaryPath(value) {
+  let resolved = path.resolve(value);
+  const temporary = path.resolve(os.tmpdir());
+  if (containedPath(temporary, resolved)) {
+    try { resolved = path.resolve(realpathSync(temporary), path.relative(temporary, resolved)); } catch {}
+  }
+  return resolved;
+}
+
 function lstatOrNull(target, label) {
   try {
     return lstatSync(target);
@@ -86,9 +101,14 @@ function realDirectory(target, label) {
  * The caller can use it for an existing file check before a later atomic write.
  */
 export function safeManagedFile(root, relative, label = 'managed file') {
-  const resolvedRoot = path.resolve(root);
-  const candidate = path.resolve(resolvedRoot, relative);
-  if (typeof relative !== 'string' || !relative || !containedPath(resolvedRoot, candidate) || candidate === resolvedRoot) {
+  const lexicalRoot = path.resolve(root);
+  const lexicalCandidate = path.resolve(lexicalRoot, relative);
+  if (typeof relative !== 'string' || !relative || !containedPath(lexicalRoot, lexicalCandidate) || lexicalCandidate === lexicalRoot) {
+    throw extensionError(`${label} escapes its managed root`, 'UNSAFE_MANAGED_PATH');
+  }
+  const resolvedRoot = canonicalTemporaryPath(lexicalRoot);
+  const candidate = canonicalTemporaryPath(lexicalCandidate);
+  if (!containedPath(resolvedRoot, candidate) || candidate === resolvedRoot) {
     throw extensionError(`${label} escapes its managed root`, 'UNSAFE_MANAGED_PATH');
   }
   realDirectory(resolvedRoot, 'managed root');
@@ -107,14 +127,19 @@ export function safeManagedFile(root, relative, label = 'managed file') {
   if (destination && (destination.isSymbolicLink() || !destination.isFile())) {
     throw extensionError(`${label} is a symbolic link or is not a regular file`, 'UNSAFE_MANAGED_PATH');
   }
-  return candidate;
+  return lexicalCandidate;
 }
 
 /** Create a managed directory one component at a time without traversing links. */
 export function ensureSafeManagedDirectory(root, relative, label = 'managed directory') {
-  const resolvedRoot = path.resolve(root);
-  const target = path.resolve(resolvedRoot, relative);
-  if (typeof relative !== 'string' || !containedPath(resolvedRoot, target)) {
+  const lexicalRoot = path.resolve(root);
+  const lexicalTarget = path.resolve(lexicalRoot, relative);
+  if (typeof relative !== 'string' || !containedPath(lexicalRoot, lexicalTarget)) {
+    throw extensionError(`${label} escapes its managed root`, 'UNSAFE_MANAGED_PATH');
+  }
+  const resolvedRoot = canonicalTemporaryPath(lexicalRoot);
+  const target = canonicalTemporaryPath(lexicalTarget);
+  if (!containedPath(resolvedRoot, target)) {
     throw extensionError(`${label} escapes its managed root`, 'UNSAFE_MANAGED_PATH');
   }
   realDirectory(resolvedRoot, 'managed root');
@@ -138,7 +163,38 @@ export function ensureSafeManagedDirectory(root, relative, label = 'managed dire
       throw extensionError(`${label} was replaced by an unsafe filesystem node`, 'UNSAFE_MANAGED_PATH');
     }
   }
-  return target;
+  return lexicalTarget;
+}
+
+/**
+ * Resolve a managed directory without creating it. Existing components,
+ * including the final destination, must be real directories rather than links.
+ * This is used before directory promotion/backup operations where a final
+ * symlink must never be treated as an ordinary cache directory.
+ */
+export function safeManagedDirectory(root, relative = '', label = 'managed directory') {
+  const lexicalRoot = path.resolve(root);
+  const lexicalTarget = path.resolve(lexicalRoot, relative);
+  if (typeof relative !== 'string' || !containedPath(lexicalRoot, lexicalTarget)) {
+    throw extensionError(`${label} escapes its managed root`, 'UNSAFE_MANAGED_PATH');
+  }
+  const resolvedRoot = canonicalTemporaryPath(lexicalRoot);
+  const target = canonicalTemporaryPath(lexicalTarget);
+  if (!containedPath(resolvedRoot, target)) {
+    throw extensionError(`${label} escapes its managed root`, 'UNSAFE_MANAGED_PATH');
+  }
+  realDirectory(resolvedRoot, 'managed root');
+  let cursor = resolvedRoot;
+  for (const part of path.relative(resolvedRoot, target).split(path.sep).filter(Boolean)) {
+    cursor = path.join(cursor, part);
+    const stats = lstatOrNull(cursor, label);
+    // A missing directory ends the walk: no descendant can exist below it.
+    if (!stats) break;
+    if (stats.isSymbolicLink() || !stats.isDirectory()) {
+      throw extensionError(`${label} has a symbolic-link or non-directory component`, 'UNSAFE_MANAGED_PATH');
+    }
+  }
+  return lexicalTarget;
 }
 
 /**
@@ -150,8 +206,20 @@ export function writeManagedFileAtomic(root, relative, content, { overwrite = tr
   const parent = path.dirname(relative);
   ensureSafeManagedDirectory(root, parent === '.' ? '' : parent, `${label} parent`);
   const target = safeManagedFile(root, relative, label);
-  if (existsSync(target) && !overwrite) throw extensionError(`${label} already exists`, 'MANAGED_FILE_EXISTS');
-  const temporaryRelative = path.join(parent === '.' ? '' : parent, `.${path.basename(relative)}.${process.pid}.${Date.now()}.tmp`);
+  if (!overwrite) {
+    if (existsSync(target)) throw extensionError(`${label} already exists`, 'MANAGED_FILE_EXISTS');
+    // There is no portable rename-no-replace primitive in Node. O_EXCL gives the
+    // non-destructive mode its required race resistance and refuses a final link
+    // inserted after the lstat above. Atomic replacement is used for overwrites.
+    try {
+      writeFileSync(target, content, { encoding: 'utf8', flag: 'wx', mode });
+    } catch (error) {
+      if (error?.code === 'EEXIST') throw extensionError(`${label} already exists`, 'MANAGED_FILE_EXISTS');
+      throw error;
+    }
+    return target;
+  }
+  const temporaryRelative = path.join(parent === '.' ? '' : parent, `.${path.basename(relative)}.${process.pid}.${randomUUID()}.tmp`);
   const temporary = safeManagedFile(root, temporaryRelative, `${label} temporary`);
   try {
     writeFileSync(temporary, content, { encoding: 'utf8', flag: 'wx', mode });
@@ -162,6 +230,11 @@ export function writeManagedFileAtomic(root, relative, content, { overwrite = tr
     rmSync(temporary, { force: true });
   }
   return target;
+}
+
+/** Serialize JSON through the same checked final-destination write path. */
+export function writeManagedJsonAtomic(root, relative, value, options = {}) {
+  return writeManagedFileAtomic(root, relative, `${JSON.stringify(value, null, 2)}\n`, options);
 }
 
 export function vldDir(projectDir) {

@@ -196,6 +196,13 @@ test('public store journey pins a file-backed Git snapshot and reports clean fai
   const source = path.join(workspace, 'source'); const consumer = path.join(workspace, 'consumer');
   const initialized = await cli(['store', 'init', source, '--id', 'team-playbook', '--title', 'Team playbook', '--json']);
   assert.equal(initialized.code, 0, initialized.stderr);
+  const reorderedSource = path.join(workspace, 'reordered-source');
+  const reordered = await cli(['store', 'init', '--id', 'reordered-playbook', reorderedSource, '--json']);
+  assert.equal(reordered.code, 0, reordered.stderr);
+  assert.equal(JSON.parse(readFileSync(path.join(reorderedSource, 'vld-store.json'), 'utf8')).id, 'reordered-playbook', '--id consumes only its option value, regardless of flag order');
+  const ambiguous = await cli(['store', 'init', path.join(workspace, 'bad-source'), 'unexpected']);
+  assert.equal(ambiguous.code, 2);
+  assert.match(ambiguous.stderr, /store init <directory>/);
   writeFileSync(path.join(source, 'review.md'), '# Review\n\nKeep evidence linked to the reviewed requirements.\n');
   const manifest = JSON.parse(readFileSync(path.join(source, 'vld-store.json'), 'utf8'));
   manifest.assets.push({ id: 'review-guidance', kind: 'guidance', file: 'review.md' });

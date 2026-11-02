@@ -88,7 +88,21 @@ jobs:
         with:
           node-version: 22.0.0
       - name: Full core Node test suite at the supported floor
-        run: npm test
+        # The pinned floor is intentionally retained; capture bounded TAP context
+        # because hosted logs for intermittent runner failures are not always retrievable.
+        shell: bash
+        run: |
+          log=/tmp/vld-minimum-node-test.log
+          set +e
+          npm test >"$log" 2>&1
+          status=$?
+          set -e
+          cat "$log"
+          if [ "$status" -ne 0 ]; then
+            failure=$(grep -m1 -A 14 '^not ok' "$log" | tr '\n' ' ' || true)
+            echo "::error title=Minimum Node test failure::${failure:-npm test failed without a TAP failure record}"
+            exit "$status"
+          fi
 
   integration:
     name: Linux integration fixtures
@@ -352,8 +366,21 @@ jobs:
       # each supported runner shell. Linux retains the shell-heavy pack journey.
       - name: Full portable test suite
         # Run the same Node suite under Bash on each supported portable runner.
+        # Preserve TAP on failure and surface the failing test in an annotation:
+        # hosted log blobs are not always retained/available to reviewers.
         shell: bash
-        run: NODE_OPTIONS=--test-reporter=dot npm test
+        run: |
+          log=/tmp/vld-portable-test.log
+          set +e
+          npm test >"$log" 2>&1
+          status=$?
+          set -e
+          cat "$log"
+          if [ "$status" -ne 0 ]; then
+            failure=$(grep -m1 -A 14 '^not ok' "$log" | tr '\n' ' ' || true)
+            echo "::error title=Portable Node test failure::${failure:-npm test failed without a TAP failure record}"
+            exit "$status"
+          fi
 
   # Keep this ID stable for branch protection. It only succeeds once every
   # complete-coverage job above has completed successfully.

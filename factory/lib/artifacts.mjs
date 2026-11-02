@@ -1,9 +1,9 @@
 /** Validated, human-authored delivery artifacts for optional VLD modules. */
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { requireVerifiedModules } from './modules.mjs';
 import { readStoreAsset } from './stores.mjs';
-import { ensureProjectDir, extensionError } from './extension-utils.mjs';
+import { ensureProjectDir, extensionError, writeManagedFileAtomic } from './extension-utils.mjs';
 
 export const ARTIFACTS = {
   'product-brief': { module: 'product', title: 'Product Brief', file: 'docs/product-brief.md', sections: ['Problem', 'Users', 'Goals', 'Non-goals', 'Success Measures', 'Assumptions', 'Open Questions', 'Requirement Links'] },
@@ -22,7 +22,15 @@ function fileFor(project, kind, id, explicit) {
   const type = typeOrThrow(kind);
   if (kind === 'architecture-decision' && !id) throw extensionError('architecture-decision needs a kebab-case decision id', 'ARTIFACT_ID_REQUIRED');
   if (id && !ID.test(id)) throw extensionError('artifact id must be lowercase kebab-case', 'INVALID_ARTIFACT_ID');
-  return path.resolve(explicit ?? path.join(project, typeof type.file === 'function' ? type.file(id) : type.file));
+  const file = path.resolve(explicit ?? path.join(project, typeof type.file === 'function' ? type.file(id) : type.file));
+  const relative = path.relative(project, file);
+  if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw extensionError('artifact output must remain inside the project directory', 'INVALID_ARTIFACT_OUTPUT');
+  }
+  return file;
+}
+function artifactRelative(project, file) {
+  return path.relative(project, file).split(path.sep).join('/');
 }
 function packetRequirements(packet) {
   const file = path.join(packet, 'spec.json');
@@ -71,7 +79,8 @@ export function initArtifact({ kind, projectDir='.', packetDir=null, profilePath
     source={ store: imported.store.id, asset: imported.asset.id, commit: imported.store.commit, digest: imported.asset.digest };
     content=`${imported.content.trimEnd()}\n\n<!-- VLD template source: ${source.store}/${source.asset} @ ${source.commit} · sha256 ${source.digest} -->\n`;
   }
-  mkdirSync(path.dirname(file),{recursive:true}); writeFileSync(file,content,'utf8'); return {project,kind,file,requirements:requirements.length,source};
+  writeManagedFileAtomic(project, artifactRelative(project, file), content, { overwrite: force, label: 'artifact output' });
+  return {project,kind,file,requirements:requirements.length,source};
 }
 export function validateArtifact({ kind, projectDir='.', packetDir=null, requirementsOverride=null, packetResult=null, includePacketAuthorityError=true, id=null, file=null, strict=false }) {
   const project=ensureProjectDir(projectDir), type=typeOrThrow(kind); requireVerifiedModules(project,[type.module]);

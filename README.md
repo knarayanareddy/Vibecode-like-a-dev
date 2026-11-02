@@ -317,6 +317,10 @@ vld runtime init missions/report-export/mission.json --project .
 vld runtime allocate missions/report-export/mission.json export-api \
   --assignee agent-alpha --lease-ms 300000 --project .
 vld runtime status missions/report-export/mission.json --project .
+# `status` deliberately exposes only a bounded recent-event window. Operators can
+# page the durable ledger with an authorized local identity.
+vld runtime events missions/report-export/mission.json --actor operator:operator-alpha \
+  --after 0 --limit 50 --max-bytes 65536 --project .
 
 # A local control/API host binds only to 127.0.0.1 and prints an in-memory operator token once.
 vld runtime serve missions/report-export/mission.json --project .
@@ -375,7 +379,7 @@ vld runtime delivery queue missions/report-export/mission.json export-api \
 
 ### Local Studio — a visual Runtime client, not a second authority
 
-M6 adds a local browser dashboard at the same loopback Runtime process and a lightweight VS Code command entry (`factory/studio/vscode`). It displays packet/policy digests, a mission board with dependencies/resource claims/lease health, bounded agent receipts, exact delivery receipts and degraded Runtime warnings. It can request only the already typed `allocate` and `recover` Runtime operations; Runtime still validates the caller role and every state transition.
+M6 adds a local browser dashboard at the same loopback Runtime process and a lightweight VS Code command entry (`factory/studio/vscode`). It displays packet/policy digests, a mission board with dependencies/resource claims/lease health, bounded recent agent-event evidence, exact delivery receipts and degraded Runtime warnings. It can request only the already typed `allocate` and `recover` Runtime operations; Runtime still validates the caller role and every state transition.
 
 ```bash
 # This starts the existing loopback-only Runtime API plus Studio.

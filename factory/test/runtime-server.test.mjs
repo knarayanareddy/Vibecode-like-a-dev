@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { cpSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import http from 'node:http';
@@ -7,12 +7,16 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { createMission } from '../lib/missions.mjs';
 import { initializeRuntime } from '../lib/runtime.mjs';
 import { createRuntimeServer, listenRuntimeServer } from '../lib/runtime-server.mjs';
+import { createRuntimeClient } from '../lib/runtime-client.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const PACKET = path.join(ROOT, 'examples', 'retro-board', 'spec');
+const CLI = path.join(ROOT, 'factory', 'cli.mjs');
+const run = promisify(execFile);
 
 function git(project, args) {
   return execFileSync('git', ['-C', project, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -108,17 +112,29 @@ test('loopback Runtime API requires a local token, rejects hostile origins and n
   assert.equal(status.headers['access-control-allow-origin'], `http://127.0.0.1:${address.port}`);
   assert.equal(JSON.stringify(status.body).includes(fixture.project), false, 'API status does not reveal host project paths');
   assert.equal(status.body.result.studio.actions.allocate, true, 'Studio receives advisory capabilities but Runtime stays authoritative');
+  const typedClient = createRuntimeClient({ endpoint: `http://127.0.0.1:${address.port}`, token: operatorProof });
+  const typedStatus = await typedClient.request('status', {}, { requestId: 'typed-status-0001' });
+  assert.deepEqual(typedStatus.runtime, status.body.result.runtime, 'the typed client and local HTTP transport expose the same Runtime status contract');
+  assert.ok(Array.isArray(typedStatus.recentEvents), 'status names its bounded window explicitly');
+  const historic = await typedClient.request('events', { limit: 1, maxBytes: 4096 }, { requestId: 'typed-events-0001' });
+  assert.equal(historic.events.length, 1);
+  assert.equal(historic.page.truncated, false);
+  const invalidEvents = await request('request-events-invalid-0001', 'events', { after: -1 });
+  assert.equal(invalidEvents.status, 400);
+  assert.equal(invalidEvents.body.error.code, 'INVALID_RUNTIME_EVENT_CURSOR');
+  const remoteCli = await run(process.execPath, [CLI, 'runtime', 'status', '--runtime-url', `http://127.0.0.1:${address.port}`, '--runtime-token', operatorProof, '--json']);
+  assert.deepEqual(JSON.parse(remoteCli.stdout).runtime, typedStatus.runtime, 'the CLI remote-client form has local HTTP parity without accepting a mission path');
+  const remoteEvents = await run(process.execPath, [CLI, 'runtime', 'events', '--runtime-url', `http://127.0.0.1:${address.port}`, '--runtime-token', operatorProof, '--limit', '1', '--json']);
+  assert.equal(JSON.parse(remoteEvents.stdout).events.length, 1, 'remote event history uses the endpoint identity and no mission positional');
 
-  const missingLeaseCapability = await request('request-0004-missing-capability', 'allocate', { packageId: 'api-work', assignee: { role: 'implementer', id: 'agent-alpha' }, leaseMs: 10_000 });
-  assert.equal(missingLeaseCapability.status, 400);
-  assert.equal(missingLeaseCapability.body.error.code, 'RUNTIME_LEASE_TOKEN_REQUIRED');
-  const capability = ['lease', '22222222-2222-4222-8222-222222222222'].join('-');
-  const allocated = await request('request-0004', 'allocate', { packageId: 'api-work', assignee: { role: 'implementer', id: 'agent-alpha' }, leaseMs: 10_000, leaseToken: capability });
-  assert.equal(allocated.status, 200);
-  assert.equal(allocated.body.result.leaseToken, capability);
-  const allocationReplay = await request('request-0004', 'allocate', { packageId: 'api-work', assignee: { role: 'implementer', id: 'agent-alpha' }, leaseMs: 10_000, leaseToken: capability });
+  const firstAllocation = await request('request-0004-first-allocation', 'allocate', { packageId: 'api-work', assignee: { role: 'implementer', id: 'agent-alpha' }, leaseMs: 10_000 });
+  assert.equal(firstAllocation.status, 200);
+  assert.match(firstAllocation.body.result.leaseToken, /^lease-/);
+  const allocationReplay = await request('request-0004-first-allocation', 'allocate', { packageId: 'api-work', assignee: { role: 'implementer', id: 'agent-alpha' }, leaseMs: 10_000 });
   assert.equal(allocationReplay.status, 200);
-  assert.equal(allocationReplay.body.result.leaseToken, capability, 'dropped allocation responses can be retried with the caller-held capability');
+  assert.equal(allocationReplay.body.result.changed, false);
+  assert.equal(allocationReplay.body.result.leaseToken, null, 'a generated capability is intentionally never recovered from the ledger');
+  assert.match(allocationReplay.body.result.leaseTokenRecovery, /one-time capability/);
 
   const impersonation = await request('request-0005', 'transition', { packageId: 'api-work', to: 'approved', expectedVersion: 1 });
   assert.equal(impersonation.status, 400);

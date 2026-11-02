@@ -12,7 +12,7 @@
  * Rules:
  *   - Every document listed in spec.json must exist.
  *   - Every requirement needs acceptance criteria and a verification method.
- *   - An `@req REQ-xxx` anchor pointing at an unknown requirement is an error.
+ *   - Each `@req REQ-<three-or-more digits>` marker pointing at an unknown requirement is an error; repeat the marker to cite more than one requirement on a line.
  *   - A line marked `@req-ignore` is not an anchor. Use it for fixtures and
  *     examples that quote the marker deliberately; the count is always reported,
  *     so suppression can never be silent. Whole paths can be excluded with
@@ -102,6 +102,7 @@ const requirements = Array.isArray(spec.requirements) ? spec.requirements : [];
 // dependency-free in the repository it is copied into. Returns null when valid.
 const CLAUSE = /^(Where|While|When|If) (.+?)(, then|,)(?=\s*(?:(?:Where|While|When|If)\s|the\s))/i;
 const CLAUSE_ORDER = { Where: 0, While: 1, When: 2, If: 3 };
+const VAGUE_RESPONSE = ['appropriately', 'as needed', 'as appropriate', 'properly', 'user-friendly', 'robust', 'reasonable', 'etc.', 'and so on', 'try to', 'should', 'may ', 'might', 'could ', 'TBD'];
 
 function earsError(statement) {
   const text = String(statement ?? '').replace(/\s+/g, ' ').trim();
@@ -122,7 +123,12 @@ function earsError(statement) {
     rest = rest.slice(match[0].length).trim();
   }
   if (!/^the [\w-]+(?: [\w-]+)*$/i.test(rest)) return 'it needs "the <system> shall ..." after the clauses';
-  if (parts[1].trim().length < 12) return 'the response is too short to implement';
+  const response = parts[1].trim();
+  if (response.length < 12) return 'the response is too short to implement';
+  const lower = ` ${response.toLowerCase()} `;
+  for (const word of VAGUE_RESPONSE) {
+    if (lower.includes(` ${word}`) || lower.includes(`${word} `)) return `the response contains "${word.trim()}", which no test can check`;
+  }
   return null;
 }
 
@@ -191,20 +197,22 @@ for (const file of walk(REPO)) {
   const fileReqIds = [];
   for (const line of source.split('\n')) {
     if (!line.includes('@req')) continue;
-    const match = line.match(/@req\s+(REQ-\d{3})/);
-    if (!match) continue;
+    const matches = [...line.matchAll(/@req\s+(REQ-\d{3,})/g)];
+    if (matches.length === 0) continue;
     if (SUPPRESSED.test(line)) {
-      suppressed += 1;
+      suppressed += matches.length;
       continue;
     }
-    const id = match[1];
-    if (!known.has(id)) {
-      strayAnchors.push(`${rel(file)} cites unknown requirement ${id}`);
-      continue;
+    for (const match of matches) {
+      const id = match[1];
+      if (!known.has(id)) {
+        strayAnchors.push(`${rel(file)} cites unknown requirement ${id}`);
+        continue;
+      }
+      fileReqIds.push(id);
+      if (!anchored.has(id)) anchored.set(id, []);
+      anchored.get(id).push({ file: rel(file), isTest });
     }
-    fileReqIds.push(id);
-    if (!anchored.has(id)) anchored.set(id, []);
-    anchored.get(id).push({ file: rel(file), isTest });
   }
   if (isTest && fileReqIds.length > 0 && !ASSERTION_SIGNAL.test(source)) {
     const hollowMsg = `${rel(file)} carries @req anchor(s) (${[...new Set(fileReqIds)].join(', ')}) with no visible assertion`;
@@ -229,13 +237,13 @@ for (const requirement of requirements) {
     continue;
   }
 
-  if (status === 'done' && inTests.length === 0) {
+  if (hits.length > 0 && inTests.length === 0) {
+    errors.push(`${requirement.id} is anchored only outside tests (${hits.map((hit) => hit.file).join(', ')})`);
+  } else if (status === 'done' && inTests.length === 0) {
     errors.push(`${requirement.id} is marked done but no test carries an @req anchor for it`);
   } else if (status !== 'done' && inTests.length === 0) {
     pending += 1;
     notices.push(`${requirement.id} ${requirement.title}: no test anchor yet`);
-  } else if (inTests.length > 0 && hits.every((hit) => !hit.isTest)) {
-    errors.push(`${requirement.id} is anchored only outside tests (${hits.map((hit) => hit.file).join(', ')})`);
   }
 }
 

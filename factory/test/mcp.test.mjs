@@ -7,11 +7,16 @@
 
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { PassThrough } from 'node:stream';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { TOOLS, handleMessage } from '../lib/mcp.mjs';
+import { MAX_MCP_REQUEST_BYTES, TOOLS, handleMessage, serve } from '../lib/mcp.mjs';
+import { renderPacket } from '../lib/emit/index.mjs';
+import { buildIndex } from '../lib/indexer.mjs';
+import { buildPlan } from '../lib/planner.mjs';
+import { normalizeProfile } from '../lib/profile.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -87,6 +92,34 @@ test('MCP preserves the explicit public-web discoverability decision used by CLI
 
   const disabled = payload(call('select_primitives', { ...profile, discoverability: { enabled: false } }));
   assert.ok(!disabled.selected.some((primitive) => primitive.id === 'product.public-web-discoverability'));
+});
+
+test('MCP and emitted packets share one normalized stack and selected-practice contract', () => {
+  const base = {
+    idea: 'A service tracks durable work and verifies every state transition before a release.',
+    kind: 'api',
+    stage: 'production',
+    name: 'stack-contract',
+    traits: ['persistence']
+  };
+  for (const [stack, extension, fenceLanguage] of [['Python 3.12', 'py', 'python'], ['Go 1.23', 'go', 'go'], ['TypeScript strict', 'ts', 'ts']]) {
+    const profile = { ...base, stack };
+    const selected = payload(call('select_primitives', profile));
+    const projected = payload(call('plan_project', profile));
+    const requirements = payload(call('get_requirements', profile));
+    const packet = renderPacket(buildPlan(normalizeProfile({ ...base, constraints: { stack } }), { index: buildIndex() }));
+    const manifest = JSON.parse(packet.files.get('spec.json'));
+
+    assert.equal(selected.contract.stack.testExtension, extension);
+    assert.equal(selected.contract.stack.fenceLanguage, fenceLanguage);
+    assert.deepEqual(selected.contract.selectedPracticeIds, selected.selected.map((entry) => entry.id));
+    assert.deepEqual(projected.contract, selected.contract);
+    assert.deepEqual(manifest.primitives.map((entry) => entry.id), selected.contract.selectedPracticeIds);
+    for (const requirement of requirements.requirements.filter((entry) => entry.verify === 'automated')) {
+      assert.ok(requirement.anchor.endsWith(`.test.${extension}`), `${stack}: ${requirement.anchor}`);
+    }
+    assert.match(packet.files.get('05-verification.md'), new RegExp('```' + fenceLanguage + '\n'));
+  }
 });
 
 test('a prototype selection stays small', () => {
@@ -244,6 +277,30 @@ test('MCP processes a complete final message at EOF without requiring a trailing
   const malformed = await runMcpUntilEof(invalid);
   assert.equal(malformed.length, 1);
   assert.equal(malformed[0].error.code, -32700);
+});
+
+test('MCP stdio rejects an oversized or malformed request and recovers for the next framed request', async () => {
+  const list = { jsonrpc: '2.0', id: 91, method: 'tools/list', params: {} };
+  const input = new PassThrough();
+  const output = new PassThrough();
+  serve({ input, output });
+  let raw = '';
+  output.setEncoding('utf8');
+  output.on('data', (chunk) => { raw += chunk; });
+
+  // Split the over-limit line before its terminator so the transport must enter
+  // discard mode rather than merely rejecting one conveniently complete chunk.
+  input.write('x'.repeat(MAX_MCP_REQUEST_BYTES + 1));
+  input.write(`\n{not-json\n${JSON.stringify(list)}\n`);
+  const ended = new Promise((resolve) => input.on('end', () => setImmediate(resolve)));
+  input.end();
+  await ended;
+  const messages = raw.trim().split('\n').map(JSON.parse);
+  assert.equal(messages.length, 3);
+  assert.equal(messages[0].error.code, -32600);
+  assert.equal(messages[1].error.code, -32700);
+  assert.equal(messages[2].id, 91);
+  assert.equal(messages[2].result.tools.length, TOOLS.length);
 });
 
 test('a real stdio session works end to end', async () => {

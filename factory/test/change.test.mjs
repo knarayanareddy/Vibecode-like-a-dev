@@ -7,7 +7,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -298,6 +298,19 @@ test('applying copies the manifest over a backup, and refuses twice', (t) => {
   assert.throws(() => applyChange(plan), /already exists from an earlier apply/);
 });
 
+test('change apply rejects a final backup symlink rather than colliding with or overwriting its target', (t) => {
+  const p = packet();
+  t.after(p.cleanup);
+  const plan = planChange({ packetDir: p.outDir, change: change() });
+  const outside = path.join(p.root, 'outside-backup.json');
+  writeFileSync(outside, '{"outside":true}\n');
+  symlinkSync(outside, path.join(p.outDir, 'spec.json.bak'), 'file');
+
+  assert.throws(() => applyChange(plan, { force: true }), (error) => error.code === 'UNSAFE_MANAGED_PATH');
+  assert.equal(readFileSync(outside, 'utf8'), '{"outside":true}\n');
+  assert.equal(JSON.parse(readFileSync(path.join(p.outDir, 'spec.json'), 'utf8')).requirements.some((requirement) => requirement.key === 'feature.export'), false);
+});
+
 test('verification catches a tampered delta and unbalanced arithmetic', (t) => {
   const p = packet();
   t.after(p.cleanup);
@@ -380,6 +393,31 @@ const snapshot = (root) => {
   walk(root);
   return files;
 };
+
+test('archive rejects final and intermediate managed symlinks before profile, history, or packet promotion', async (t) => {
+  const p = packetWithProfile();
+  t.after(p.cleanup);
+  const outside = path.join(p.root, 'outside');
+  mkdirSync(outside);
+  mkdirSync(path.join(p.root, 'overlays'));
+  symlinkSync(path.join(outside, 'overlay.json'), path.join(p.root, 'overlays', 'change-add-export.json'), 'file');
+
+  await assert.rejects(
+    () => archiveChange({ packetDir: p.outDir, changeDir: p.changeDir, profilePath: p.profileFile }),
+    (error) => error.code === 'UNSAFE_MANAGED_PATH'
+  );
+  assert.equal(existsSync(path.join(outside, 'overlay.json')), false);
+  assert.equal(JSON.parse(readFileSync(p.profileFile, 'utf8')).overlays, undefined);
+
+  rmSync(path.join(p.root, 'overlays'), { recursive: true, force: true });
+  mkdirSync(path.join(p.outDir, 'changes'), { recursive: true });
+  symlinkSync(outside, path.join(p.outDir, 'changes', 'archive'), 'dir');
+  await assert.rejects(
+    () => archiveChange({ packetDir: p.outDir, changeDir: p.changeDir, profilePath: p.profileFile }),
+    (error) => error.code === 'UNSAFE_MANAGED_PATH'
+  );
+  assert.equal(existsSync(path.join(outside, 'add-export', 'delta.json')), false);
+});
 
 test('archiving folds the delta into the profile, the history and the packet', async (t) => {
   const p = packetWithProfile();
