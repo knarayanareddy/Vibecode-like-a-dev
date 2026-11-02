@@ -356,10 +356,14 @@ jobs:
         # hosted log blobs are not always retained/available to reviewers.
         shell: bash
         run: |
-          npm test 2>&1 | tee portable-test.log
-          status=${PIPESTATUS[0]}
+          log=/tmp/vld-portable-test.log
+          set +e
+          npm test >"$log" 2>&1
+          status=$?
+          set -e
+          cat "$log"
           if [ "$status" -ne 0 ]; then
-            failure=$(grep -m1 -A 14 '^not ok' portable-test.log | tr '\n' ' ' || true)
+            failure=$(grep -m1 -A 14 '^not ok' "$log" | tr '\n' ' ' || true)
             echo "::error title=Portable Node test failure::${failure:-npm test failed without a TAP failure record}"
             exit "$status"
           fi
