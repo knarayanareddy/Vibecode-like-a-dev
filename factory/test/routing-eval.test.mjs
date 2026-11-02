@@ -96,6 +96,7 @@ test('model-in-the-loop cmd driver executes an external model process over stdio
 
     const report = await evaluateRouting({
       driver: 'cmd',
+      unsafeCommandAcknowledged: true,
       cmd: `${JSON.stringify(process.execPath)} ${JSON.stringify(stubPath)}`,
       cases: miniCases,
       thresholds: { minMicroRecall: 0.7, minMicroPrecision: 0.9, maxFalsePositivesPerPractice: 2, maxZeroRecallPractices: 99 },
@@ -116,6 +117,20 @@ test('model-in-the-loop cmd driver executes an external model process over stdio
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+test('routing cmd driver is opt-in and receives no inherited provider secrets', async () => {
+  await assert.rejects(() => evaluateRouting({ driver: 'cmd', cmd: 'echo ignored', cases: [], includeAblation: false }), /unsafeCommandAcknowledged/);
+  const tmp = mkdtempSync(path.join(os.tmpdir(), 'vld-routing-env-'));
+  try {
+    const stub = path.join(tmp, 'check-env.mjs');
+    writeFileSync(stub, `if (process.env.OPENAI_API_KEY) process.exit(9); process.stdin.resume(); process.stdin.on('end', () => process.stdout.write('{"selected":[]}'));\n`);
+    const previous = process.env.OPENAI_API_KEY; process.env.OPENAI_API_KEY = ['must', 'not', 'reach', 'cmd', 'driver'].join('-');
+    try {
+      const report = await evaluateRouting({ driver: 'cmd', unsafeCommandAcknowledged: true, cmd: `${JSON.stringify(process.execPath)} ${JSON.stringify(stub)}`, cases: [{ id: 'negative', prompt: 'format a list', expected: [] }], thresholds: { minMicroRecall: 0, minMicroPrecision: 1, maxFalsePositivesPerPractice: 0, maxZeroRecallPractices: 99 }, includeAblation: false });
+      assert.equal(report.ok, true);
+    } finally { if (previous === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = previous; }
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
 });
 
 test('polysemous "token" in LLM token-spend prompts does not falsely activate frontend.design-system-tokens, and domain-scoped visibility routes to security.authz-model', async () => {

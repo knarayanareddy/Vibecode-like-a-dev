@@ -8,6 +8,8 @@ import {
   completeWorkflowStep,
   listWorkflows,
   runWorkflow,
+  runWorkflowStep,
+  WORKFLOW_COMMAND_TIMEOUT_MS,
   validateWorkflow,
   workflowStatus
 } from '../lib/workflows.mjs';
@@ -130,4 +132,21 @@ test('a failing workflow command persists a failure rather than pretending the s
   const failed = runWorkflow({ id: 'release-readiness', projectDir: project, execute: true });
   assert.deepEqual(failed.executed.map((entry) => [entry.id, entry.status]), [['verify-packet', 'failed']]);
   assert.equal(workflowStatus({ id: 'release-readiness', projectDir: project }).steps.find((step) => step.id === 'verify-packet').status, 'failed');
+});
+
+
+test('workflow command timeout records a typed bounded failure receipt', () => {
+  const step = { id: 'hang', type: 'command', run: ['plan'], artifacts: [] };
+  const result = runWorkflowStep(step, { project: process.cwd(), profile: 'profile.json', packet: 'specs', repo: process.cwd() }, {
+    timeoutMs: 25,
+    execFileSyncImpl: (_file, _args, options) => {
+      assert.equal(options.timeout, 25);
+      const error = new Error('timed out'); error.code = 'ETIMEDOUT'; error.signal = 'SIGTERM'; error.killed = true; error.stdout = 'partial output'; error.stderr = 'still running'; throw error;
+    }
+  });
+  assert.equal(WORKFLOW_COMMAND_TIMEOUT_MS, 60_000);
+  assert.equal(result.status, 'failed');
+  assert.deepEqual(result.evidence.failure, { code: 'WORKFLOW_COMMAND_TIMEOUT', timeoutMs: 25 });
+  assert.match(result.evidence.summary, /timed out after 25ms/);
+  assert.match(result.evidence.outputDigest, /^[a-f0-9]{64}$/);
 });

@@ -7,10 +7,11 @@
  *   node scripts/eval-routing.mjs                          # deterministic MCP router (CI default)
  *   node scripts/eval-routing.mjs --driver openai          # live OpenAI-compatible model-in-the-loop
  *   node scripts/eval-routing.mjs --driver anthropic       # live Anthropic model-in-the-loop
- *   node scripts/eval-routing.mjs --driver cmd --cmd "..." # any CLI model reading {prompt,catalog} JSON
+ *   node scripts/eval-routing.mjs --driver cmd --unsafe-command --cmd "..." # explicit arbitrary CLI model execution
  *
  * Options:
  *   --model <id>    model identifier for openai / anthropic drivers
+ *   --unsafe-command required for --driver cmd; command runs as the current user with a scrubbed environment
  *   --out <file>    write full JSON report to disk
  *   --json          print JSON report to stdout
  */
@@ -31,11 +32,13 @@ const model = option('--model', undefined);
 const cmd = option('--cmd', null);
 const outFile = option('--out', null);
 const jsonOut = hasFlag('--json');
+const unsafeCommandAcknowledged = hasFlag('--unsafe-command');
 
 const report = await evaluateRouting({
   driver,
   model,
   cmd,
+  unsafeCommandAcknowledged,
   viaProtocol: driver === 'mcp'
 });
 

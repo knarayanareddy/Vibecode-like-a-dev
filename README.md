@@ -38,7 +38,7 @@ node factory/cli.mjs compile profile.json -o specs
 # brownfield change: a delta spec with a blast radius, a probe and a rollback
 node factory/cli.mjs change specs changes/add-export.json -o changes/add-export
 
-# agent integration: 8 tools over MCP instead of 34 files in context
+# agent integration: 8 tools over MCP instead of loading the full practice library into context
 node factory/cli.mjs mcp
 ```
 
@@ -90,7 +90,7 @@ Three consequences that make this different from a prompt template:
 | An idea and nothing else | `vld init` → `plan` → `compile` | A greenfield packet |
 | A repository (local path or Git URL) and no spec | `vld adopt <repo-or-url> [--name … --idea "…"]` | A profile inferred from code, `docker-compose.yml`, `.env.example`, and SQL/ORM schemas, with evidence per field |
 | An existing packet and a change to make | `vld change <packet> <change.json>` | A delta spec: ADDED / MODIFIED / REMOVED, blast radius, probe, rollback, `spec.after.json` |
-| An agent that needs the library | `vld mcp` | 8 MCP tools so the agent queries selection instead of reading 34 files |
+| An agent that needs the library | `vld mcp` | 8 MCP tools so the agent queries selection instead of reading the full practice library |
 
 ### Optional public web discoverability
 
@@ -157,7 +157,7 @@ Impact is classified (`patch` / `minor` / `major`), and removing a requirement t
 
 Before archive, fill `evidence.md`, register reviewed artifact paths and affected `REQ-` ids in `evidence.json`, then run `vld change verify changes/add-csv-export --project .`. The verifier requires strict, module-locked artifact validation and coverage for every changed requirement. `vld change archive changes/add-csv-export specs` refuses incomplete evidence; once it passes, it folds the delta back into the profile as a `team` overlay, stores a compact evidence-link summary in change history, preserves the `REQ-` id your tests now anchor against, moves the change directory to `changes/archive/`, and recompiles. Running it twice produces the same bytes.
 
-### `vld mcp` — stop pasting 34 files
+### `vld mcp` — stop pasting the whole library
 
 An MCP server over stdio, zero dependencies, 8 tools:
 
@@ -782,24 +782,11 @@ The dependency-free CLI and Node test suite support **Node 22** on Linux, macOS 
 
 ## Roadmap
 
-Shipped in v0.2: `vld adopt`, `vld change` (delta specs), `vld mcp`.
-Shipped in v0.3: progress that survives recompiles, anchor suppression (`@req-ignore`, `anchors.exclude`), stable requirement ids across catalog changes, unmapped-obligation reporting, Go stack support, the always-on `core.domain-invariants` requirement, a self-spec packet guarded in CI, and a ten-idea stress run in `npm run check`.
-Shipped in v0.4: per-product obligations and red-flag/anti-rationalization tables on all 34 practices, EARS-shaped requirement statements enforced by `verify` and `spec-check`, org → domain → team overlays with provenance, `vld change archive`, and `enforcement/gates.mjs` plus config fragments per gate (see [`docs/LANDSCAPE.md`](docs/LANDSCAPE.md) §8).
-Shipped in v0.5: calibrated `search_primitives({ activate: true })` MCP routing + 68-prompt precision/recall & ablation benchmark (`eval-routing.mjs`, 94.3% precision / 100.0% recall in CI, plus live LLM drivers), and the 24-task × 3-arm outcome evaluation harness (`eval-outcome.mjs`, hidden acceptance oracles, review-defect probes, post-merge drift mutations, and live `cmd`/`openai`/`anthropic` agent runners).
-Shipped in v0.6–v0.9: locked capability modules and bundles, agent handoffs, typed delivery workflows, verified Git-store templates, strict artifact evidence gates, and evidence-linked change archives.
-Shipped in v0.10: a packed-install CI journey, reviewable Git-store refresh previews with exact-commit acknowledgement, and bounded `spec-kit` / `kiro` exports from a verified packet.
-Shipped in v0.11: versioned `vld mission init|validate|status`, which freezes a verified packet, Core-policy digest and immutable Git target into complete requirement-linked work packages without starting an agent or changing Git state.
-Shipped in v0.12: `vld workspace create|status|recover|remove`, a manually operated, repository-serialized Git worktree allocator derived only from a current frozen mission. It uses a sibling managed root, atomic recovery-aware locking and exact acknowledged discard; it does not add model/process execution, push, merge or GitHub integration.
-Shipped in v0.13: optional `vld runtime` host state for a frozen mission: versioned JSONL receipts plus an atomically checked snapshot, leases, role/version/idempotency validation, expiry recovery and a bearer-protected loopback API.
-Shipped in v0.14: `vld runtime agent run|status`, with deterministic fake runs and a policy-declared, direct-argv unconfined local-process adapter. The host requires an M2 workspace and M3 lease, never inherits parent credentials, and retains host-owned metadata-only receipts. It deliberately does not claim CWD, `read-only`, network or credential policy flags provide OS confinement, and has no candidate, verification, review, push, merge, PR or GitHub/ACP integration.
-Shipped in v0.15: `vld runtime delivery submit|verify|approve|queue|status`, an exact-SHA local candidate/review foundation. It validates allocated-branch/base ancestry, uses one temporary detached integration worktree and a closed in-process packet check, records digest-bound independent review/queue receipts, and intentionally has no project-command, merge, push, PR, forge or credential capability.
-Shipped in v0.16: `vld studio serve` and the Runtime `/studio` dashboard, plus a VS Code command-entry extension. The static local client displays Runtime packet/mission/lease/receipt state through the existing authenticated loopback API, has a nonce CSP and text-only rendering, and can request only typed Runtime allocation/recovery actions—never Git, an agent, a shell, merge or forge work.
-Shipped in v0.17: `vld catalog trust|add|diff|update|status|copy`, a separately locked Ed25519 threshold-signed catalog of bounded inert content. An explicit local root validates canonical index/package metadata, expiry, compatibility, publisher and every payload digest before cache/lock/copy; Git transport cannot confer trust, and catalog content cannot execute or enable itself.
-Shipped in v0.18: optional stable ACP v1 and GitHub REST adapter packages. ACP has a separately installed SDK boundary and bounded host event normalization; GitHub consumes an immutable candidate/approval/queue plan with caller-supplied in-memory credentials, exact head/base SHA checks and GitHub-enforced merge gates. Neither adds Core credentials, automatic process/network use, push, webhook or autonomous merge authority.
+Released behavior and upgrade notes live in [`CHANGELOG.md`](CHANGELOG.md); this section is intentionally forward-looking.
 
-1. **Published live-agent comparison runs** — use the optional protocol above across Claude Code, Codex and open-weight coding agents, preserving raw JSON logs and configuration notes; do not treat an export as a competing source of requirements.
+1. **Published live-agent comparison runs** — use the optional protocol across Claude Code, Codex and open-weight coding agents, preserving raw JSON logs and configuration notes; do not treat an export as a competing source of requirements.
 2. **`vld change --quick`** — for one-line changes that do not deserve a delta: an explicit, labelled path with no probe, for teams that accept the trade.
-3. **Semantic drift detection** — `eval-outcome.mjs` now measures the gap directly (`0/24` co-mutated semantic weakenings caught by `@req` anchors alone); closing it requires wiring lightweight per-requirement mutation or property checks into `gates.mjs`.
+3. **Semantic drift detection** — ratchet per-requirement independent mutation/property oracles into generated gates. Anchors remain structural evidence, not proof that a code/test pair still means the same thing.
 
 ## Prior art and reading
 

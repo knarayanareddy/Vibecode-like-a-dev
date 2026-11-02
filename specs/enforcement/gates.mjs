@@ -141,18 +141,25 @@ const option = (name, fallback) => {
 
 const STRICT = flag('--strict');
 const JSON_OUT = flag('--json');
+// The evaluator may run spec-check itself inside a read-only Node Permission
+// Model process. In that bounded harness it passes this internal hand-off flag
+// so the gate runner does not need child-process permission merely to repeat it.
+const DRIFT_ALREADY_CHECKED = flag('--drift-already-checked');
 const REPO = path.resolve(option('--repo', process.cwd()));
 
-const IGNORED = new Set(['node_modules', '.git', 'dist', 'build', 'out', 'coverage', 'vendor', '.next', '.nuxt', '.venv', 'venv', '__pycache__', 'target', '.turbo']);
+// Scan all committed product directories. Only Git metadata, dependency trees and
+// language caches are excluded; credentials often hide in generated-looking or
+// uncommon-extension files.
+const IGNORED = new Set(['node_modules', '.git', '.next', '.nuxt', '.venv', 'venv', '__pycache__', '.turbo']);
 // Anchor semantics must match the shipped spec checker and factory verifier.
 // Configuration files may quote @req in fixtures or metadata; they are not source
 // evidence and must not create a stray-anchor failure in only the gate runner.
 const SOURCE = /\.(ts|tsx|js|jsx|mjs|cjs|py|go|rb|java|kt|cs|php|rs|sh|feature|exs)$/;
-const SECRET_SOURCE = /\.(ts|tsx|js|jsx|mjs|cjs|py|go|rb|java|kt|cs|php|rs|dart|ex|exs|swift|sh|yml|yaml|json|toml|tf|env|ini|conf)$/;
 const TEST_PATH = /(^|\/)(tests?|__tests__|spec|e2e)\//i;
 const TEST_NAME = /\.(test|spec)\.[a-z]+$|(^|\/)test_[^/]+\.py$|_test\.(py|go|rb|rs|exs)$|Tests?\.(java|kt|cs|php)$/;
 const ANCHOR_LINE = /@req\s+(REQ-\d{3,})/g;
 const SUPPRESSED = /@req-ignore/i;
+const ASSERTION_SIGNAL = /\b(?:assert[A-Za-z0-9_.]*|expect\s*\(|should\b|require\.[A-Z]\w*|t\.(?:Fatal|Fatalf|Error|Errorf|Fail|FailNow)|pytest\.raises|raises\s*\(|rejects\b|throws\b)\b|!==|===|!=|==|<=|>=/;
 
 function walk(dir, out = []) {
   let entries;
@@ -209,7 +216,10 @@ const matches = (glob) => {
 const pick = (globs) => repoFiles.filter((file) => globs.some((glob) => matches(glob).test(file)));
 const read = (file) => {
   try {
-    return readFileSync(path.join(REPO, file), 'utf8');
+    const bytes = readFileSync(path.join(REPO, file));
+    // Do not treat arbitrary binaries as text, but do inspect every textual
+    // extension/name rather than relying on a narrow source allowlist.
+    return bytes.includes(0) ? '' : bytes.toString('utf8');
   } catch {
     return '';
   }
@@ -317,6 +327,28 @@ function check(rule) {
         ? { status: 'pass', detail: ok.slice(0, 3).join(', ') }
         : { status: 'fail', detail: `${hits.length} file(s) matched, none contained all of ${rule.patterns.length} pattern(s)` };
     }
+    case 'semantic-oracles': {
+      const configs = pick(rule.mutationGlob ?? []);
+      const pythonConfig = pick(rule.pythonGlob ?? []).some((file) => (rule.pythonPatterns ?? []).some((pattern) => new RegExp(pattern, 'i').test(read(file))));
+      if (configs.length === 0 && !pythonConfig) return { status: 'fail', detail: 'no mutation configuration was found beside semantic oracles' };
+      const file = path.join(REPO, rule.config ?? 'semantic-oracles.json');
+      let manifest;
+      try { manifest = JSON.parse(readFileSync(file, 'utf8')); } catch { return { status: 'fail', detail: `missing or invalid ${rule.config ?? 'semantic-oracles.json'}` }; }
+      if (!manifest || manifest.schemaVersion !== 1 || !Array.isArray(manifest.oracles)) return { status: 'fail', detail: `${rule.config ?? 'semantic-oracles.json'} needs schemaVersion 1 and an oracles list` };
+      const expected = (spec?.requirements ?? []).filter((requirement) => requirement.verify === 'automated').map((requirement) => requirement.id);
+      const byId = new Map();
+      for (const oracle of manifest.oracles) if (oracle && typeof oracle.id === 'string' && typeof oracle.test === 'string' && !byId.has(oracle.id)) byId.set(oracle.id, oracle.test);
+      const missing = [];
+      for (const id of expected) {
+        const test = byId.get(id);
+        if (!test || !rule.testGlob.some((glob) => matches(glob).test(test)) || !repoFiles.includes(test)) { missing.push(id); continue; }
+        const source = read(test);
+        if (!new RegExp(`@req\\s+${id}\\b`).test(source) || !ASSERTION_SIGNAL.test(source)) missing.push(id);
+      }
+      return missing.length === 0
+        ? { status: 'pass', detail: `${expected.length} automated requirement(s) have separate semantic-oracle test evidence` }
+        : { status: 'fail', detail: `missing independent semantic oracle evidence for ${missing.slice(0, 5).join(', ')}` };
+    }
     case 'mutation': {
       const configs = pick(rule.glob ?? []);
       if (configs.length > 0) return { status: 'pass', detail: configs.slice(0, 3).join(', ') };
@@ -350,6 +382,7 @@ function check(rule) {
       return { status: 'pass', detail: `${scope.length}/${scope.length} anchored in tests` };
     }
     case 'drift': {
+      if (DRIFT_ALREADY_CHECKED) return { status: 'pass', detail: 'spec-check.mjs already passed in the bounded evaluator' };
       const checker = path.join(PACKET, 'spec-check.mjs');
       if (!existsSync(checker)) return { status: 'fail', detail: 'spec-check.mjs is missing from the packet' };
       if (!existsSync(path.join(PACKET, 'spec.json'))) return { status: 'fail', detail: 'spec.json is missing from the packet' };
@@ -380,9 +413,7 @@ function check(rule) {
     }
     case 'no-secrets': {
       const hits = [];
-      for (const file of relative) {
-        if (!SECRET_SOURCE.test(file) && !/\.env/.test(file)) continue;
-        if (/\.(lock|min|map)$/.test(file)) continue;
+      for (const file of repoFiles) {
         const text = read(file);
         for (const [index, line] of text.split('\n').entries()) {
           const inspected = maskExplicitSecretPlaceholders(line);

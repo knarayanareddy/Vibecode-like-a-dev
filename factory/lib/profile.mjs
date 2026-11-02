@@ -55,6 +55,24 @@ const USER_KEYS = new Set(['scale']);
 const CONSTRAINT_KEYS = new Set(['team', 'weeks', 'stack', 'mustUse']);
 const DISCOVERABILITY_KEYS = new Set(['enabled']);
 
+function plainObject(value) { return Boolean(value) && typeof value === 'object' && !Array.isArray(value); }
+
+/**
+ * Record policy-bearing shape faults before applying defaults. Normalization must
+ * never turn a misspelled scalar/list into an innocent empty value: those fields
+ * determine rigor, generated requirements, and gates.
+ */
+function inputShapeErrors(raw) {
+  if (!plainObject(raw)) return ['profile: must be a JSON object'];
+  const errors = [];
+  if ('traits' in raw && !Array.isArray(raw.traits)) errors.push('traits: must be a list of known trait ids');
+  if ('overlays' in raw && !Array.isArray(raw.overlays)) errors.push('overlays: must be a list of overlay ids');
+  if ('risks' in raw && !plainObject(raw.risks)) errors.push('risks: must be an object of boolean risk flags');
+  if ('users' in raw && !plainObject(raw.users)) errors.push('users: must be an object');
+  if ('constraints' in raw && !plainObject(raw.constraints)) errors.push('constraints: must be an object');
+  return errors;
+}
+
 function unknownKeys(value, allowed, label, errors) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return;
   for (const key of Object.keys(value)) {
@@ -66,6 +84,11 @@ function unknownKeys(value, allowed, label, errors) {
 }
 
 export function normalizeProfile(raw) {
+  const shapeErrors = inputShapeErrors(raw);
+  // Keep a safe object for the remaining defaulting work even for a null/scalar
+  // document. `loadProfile` returns the recorded shape error as a normal input
+  // finding (CLI exit 2) rather than leaking a TypeError from a property read.
+  raw = plainObject(raw) ? raw : {};
   const profile = {
     name: '',
     idea: '',
@@ -78,23 +101,25 @@ export function normalizeProfile(raw) {
     ...raw
   };
 
-  profile.users = { scale: 'small', ...(raw.users || {}) };
+  profile.users = { scale: 'small', ...(plainObject(raw.users) ? raw.users : {}) };
   profile.constraints = {
     team: 1,
     weeks: 4,
     stack: 'undecided',
     mustUse: [],
-    ...(raw.constraints || {})
+    ...(plainObject(raw.constraints) ? raw.constraints : {})
   };
   profile.traits = Array.isArray(raw.traits) ? raw.traits : [];
   profile.overlays = Array.isArray(raw.overlays) ? raw.overlays : [];
-  profile.risks = { ...(raw.risks || {}) };
+  profile.risks = { ...(plainObject(raw.risks) ? raw.risks : {}) };
+  Object.defineProperty(profile, '__inputShapeErrors', { value: shapeErrors, enumerable: false });
 
   return profile;
 }
 
 export function validateProfile(profile) {
-  const errors = [];
+  const errors = [...(Array.isArray(profile?.__inputShapeErrors) ? profile.__inputShapeErrors : [])];
+  if (!plainObject(profile)) return [...errors, 'profile: must be a JSON object'];
 
   // The profile controls rigor, requirements, and gates. Preserve no unknown
   // policy-bearing field as inert data: a typo such as `risk` must fail instead

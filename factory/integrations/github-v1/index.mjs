@@ -117,7 +117,9 @@ function latestChecks(checks, headSha) {
   const byName = new Map();
   for (const check of checks) {
     if (!object(check) || !safeLine(check.name, 120)) continue;
-    if (check.head_sha !== undefined && check.head_sha !== headSha) continue;
+    // A preflight is a fact about one immutable candidate. Missing identity is
+    // not evidence; accepting it could let a check from another commit authorize a merge.
+    if (check.head_sha !== headSha) continue;
     const old = byName.get(check.name);
     if (!old || later(check, old)) byName.set(check.name, check);
   }

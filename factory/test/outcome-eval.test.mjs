@@ -15,7 +15,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { OUTCOME_TASKS, validateOutcomeTasks } from '../evals/tasks/index.mjs';
-import { evaluateWorkspace, materializeWorkspace, runOutcomeHarness, writeModelResponseFiles } from '../lib/outcome-eval.mjs';
+import { evaluateWorkspace, materializeWorkspace, runOutcomeHarness, runWorkspaceLocalChecks, writeModelResponseFiles } from '../lib/outcome-eval.mjs';
 import { buildIndex } from '../lib/indexer.mjs';
 
 // @req REQ-002 — end-to-end multi-arm pipeline and verification loop
@@ -54,13 +54,17 @@ test('outcome task suite has 24 valid tasks across 5 categories and calibrates a
   assert.ok(noSpec.meanContextTokens < generic.meanContextTokens);
   assert.ok(generic.meanContextTokens < vld.meanContextTokens);
 
-  // Structural/anchor drift and gate regressions are caught in vld-packet and missed without it,
-  // while co-mutated semantic weakening (keeping @req comments intact) is caught by neither.
+  // Structural/anchor drift and gate regressions are caught in vld-packet and missed without it.
+  // The independent evaluator-owned semantic oracle/mutation identity detector
+  // catches the controlled co-mutated drift without misreporting local-test coverage.
   assert.equal(noSpec.driftCatchRate, 0);
   assert.equal(generic.driftCatchRate, 0);
   assert.equal(vld.driftByClass.anchorDrop, 1);
   assert.ok(vld.driftByClass.gateRegression > 0.8 && vld.driftByClass.gateRegression < 1, 'tier-0 sketches omit G1-SECRETS by design');
-  assert.equal(vld.driftByClass.semanticWeaken, 0, 'anchor checks alone must not pretend to catch semantic weakening');
+  assert.equal(vld.driftByClass.semanticWeaken, 1, 'the independent semantic detector catches every controlled co-mutated drift');
+  assert.equal(vld.driftByClass.semanticWeakenByLocalChecks, 0, 'keep local structural coverage distinct from evaluator-owned detection');
+  assert.ok(vld.driftByClass.semanticWeakenByFunctionalOracle > 0, 'task functional or defect oracles catch exercised semantic regressions');
+  assert.equal(vld.driftByClass.semanticWeakenByMutationIdentity, 1, 'the identity detector covers every prescribed semantic mutant');
   assert.ok(report.deltas.vsNoSpec.driftCatchRateDelta > 0.5);
   assert.ok(report.deltas.vsGenericSpec.driftCatchRateDelta > 0.5);
 });
@@ -77,7 +81,7 @@ test('workspace checks and hidden oracles are process-isolated, scrub host secre
   const previous = process.env.PARENT_SECRET;
   process.env.PARENT_SECRET = 'parent-secret-must-not-reach-child';
   try {
-    const result = await evaluateWorkspace(task, 'no-spec', root, { runDrift: false });
+    const result = await evaluateWorkspace(task, 'no-spec', root, { runDrift: false, trustedFixture: true });
     assert.equal(result.oraclePass, true, result.oracleError);
     assert.match(result.permissionBoundary, /^(node-read-only|process-only)$/, 'Node 22.0 lacks the Permission Model; newer supported Node releases add the read-only boundary');
     assert.equal(globalThis.__vld_workspace_imported, undefined, 'workspace code did not execute inside the harness process');
@@ -104,6 +108,12 @@ test('the arbitrary command runner requires an explicit unsafe acknowledgement',
 });
 
 test('live cmd agent runner executes inside isolated git workspaces with zero leaked oracle files', async () => {
+  if (!process.allowedNodeEnvironmentFlags?.has('--permission')) {
+    const report = await runOutcomeHarness({ tasks: OUTCOME_TASKS.slice(0, 1), runner: 'cmd', agentCmd: 'must not execute', unsafeCommandAcknowledged: true });
+    assert.equal(report.ok, false);
+    assert.equal(report.findings[0].id, 'workspace-sandbox-unavailable');
+    return;
+  }
   const tmp = mkdtempSync(path.join(os.tmpdir(), 'vld-outcome-cmd-'));
   try {
     const agentScript = path.join(tmp, 'mock-agent.mjs');
@@ -158,4 +168,18 @@ test('live cmd agent runner executes inside isolated git workspaces with zero le
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+
+test('workspace-controlled tests cannot write outside their temporary root', async (t) => {
+  const parent = mkdtempSync(path.join(os.tmpdir(), 'vld-outcome-escape-'));
+  const workspace = path.join(parent, 'workspace'); const sentinel = path.join(parent, 'escaped-by-workspace');
+  t.after(() => rmSync(parent, { recursive: true, force: true }));
+  const task = OUTCOME_TASKS.find((entry) => entry.id === 'gf-06-rate-limiter');
+  materializeWorkspace(task, 'no-spec', workspace, { index: buildIndex() });
+  for (const [rel, content] of Object.entries(task.reference)) writeFileSync(path.join(workspace, rel), content);
+  writeFileSync(path.join(workspace, 'tests', 'hostile.test.mjs'), "import { writeFileSync } from 'node:fs'; import test from 'node:test'; test('hostile write', () => writeFileSync('../escaped-by-workspace', 'owned'));\n");
+  const result = await runWorkspaceLocalChecks(workspace);
+  assert.equal(result.ok, false, 'an escape-write attempt must not be treated as a passing workspace check');
+  assert.equal(existsSync(sentinel), false, 'the read-only child process may not create a sibling host file');
 });

@@ -359,3 +359,13 @@ test('a real stdio session works end to end', async () => {
     child.kill();
   }
 });
+
+test('MCP executes advertised required fields exactly and never responds to an id-less tool notification', () => {
+  const missingTier = handleMessage({ jsonrpc: '2.0', id: 22, method: 'tools/call', params: { name: 'get_gates', arguments: {} } });
+  assert.equal(missingTier.error.code, -32602);
+  const stringTier = handleMessage({ jsonrpc: '2.0', id: 23, method: 'tools/call', params: { name: 'get_gates', arguments: { tier: '0' } } });
+  assert.equal(stringTier.error.code, -32602);
+  const badPrimitive = handleMessage({ jsonrpc: '2.0', id: 24, method: 'tools/call', params: { name: 'get_primitive', arguments: { id: 42 } } });
+  assert.equal(badPrimitive.error.code, -32602);
+  assert.equal(handleMessage({ jsonrpc: '2.0', method: 'tools/call', params: { name: 'get_gates', arguments: { tier: 0 } } }), null);
+});

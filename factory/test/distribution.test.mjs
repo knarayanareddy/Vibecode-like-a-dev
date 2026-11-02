@@ -1,10 +1,12 @@
 /** Package contents are a public documentation and provenance contract. */
 import assert from 'node:assert/strict';
 import { execFileSync, execSync, spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import os from 'node:os';
+import { comparePacketTrees } from '../../scripts/check-packet-sync.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const manifest = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
@@ -50,4 +52,14 @@ test('Git ignores only ephemeral VLD state, not reviewable locks and workflow de
     assert.equal(spawnSync('git', ['check-ignore', '--no-index', '-q', file], { cwd: ROOT }).status, 1, `${file} remains reviewable`);
   }
   assert.match(readFileSync(path.join(ROOT, 'README.md'), 'utf8'), /What to commit from `\.vld\/`/);
+});
+
+
+test('packet synchronization compares nested enforcement assets recursively', (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'vld-packet-sync-test-')); const generated = path.join(root, 'generated'); const committed = path.join(root, 'committed');
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(path.join(generated, 'enforcement'), { recursive: true }); mkdirSync(path.join(committed, 'enforcement'), { recursive: true });
+  writeFileSync(path.join(generated, 'spec.json'), '{}\n'); writeFileSync(path.join(committed, 'spec.json'), '{}\n');
+  writeFileSync(path.join(generated, 'enforcement', 'gates.mjs'), 'generated gate\n'); writeFileSync(path.join(committed, 'enforcement', 'gates.mjs'), 'stale gate\n');
+  assert.deepEqual(comparePacketTrees(generated, committed), ['enforcement/gates.mjs: content differs']);
 });

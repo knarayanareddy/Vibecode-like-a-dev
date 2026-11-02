@@ -51,3 +51,20 @@ test('Runtime client rejects unsafe remote transport and malformed or mismatched
   });
   await assert.rejects(() => mismatched.request('status', {}, { requestId: 'remote-status-0003' }), (error) => error.code === 'INVALID_RUNTIME_RESPONSE');
 });
+
+test('Runtime client enforces its byte ceiling while a chunked body is still streaming', async () => {
+  let cancelled = false;
+  const chunks = [new TextEncoder().encode('{"schemaVersion":1,"requestId":"streaming-0001","ok":true,"result":{"padding":"'), new TextEncoder().encode('x'.repeat(200)), new TextEncoder().encode('"}}')];
+  const client = createRuntimeClient({
+    endpoint: 'https://runtime.example.test/v1/runtime', token: 'example-auth-material', maxResponseBytes: 128,
+    fetchImpl: async () => ({
+      ok: true, status: 200, headers: { get: () => null },
+      body: { getReader: () => ({
+        async read() { return chunks.length ? { done: false, value: chunks.shift() } : { done: true }; },
+        async cancel() { cancelled = true; }, releaseLock() {}
+      }) }
+    })
+  });
+  await assert.rejects(() => client.request('status', {}, { requestId: 'streaming-0001' }), (error) => error.code === 'RUNTIME_RESPONSE_TOO_LARGE');
+  assert.equal(cancelled, true);
+});

@@ -72,10 +72,10 @@ test('Studio browser program renders an authoritative forge plan receipt into DO
   };
   const context = {
     document: { getElementById: (id) => nodes[id], createElement: () => new Node() },
-    fetch: async () => ({ ok: true, json: async () => ({ ok: true, result: status }) }),
+    fetch: async () => ({ ok: true, headers: { get: () => null }, text: async () => JSON.stringify({ ok: true, result: status }) }),
     crypto: { randomUUID: () => 'fixture-request' },
     globalThis: null,
-    Error, JSON, String, Array, Number, Object, Promise, Set, Map
+    Error, JSON, String, Array, Number, Object, Promise, Set, Map, TextEncoder, TextDecoder
   };
   context.globalThis = context;
   vm.runInNewContext(studioDashboardScript(), context);

@@ -229,18 +229,18 @@ function validateManifest(manifest, { root, now }) {
 }
 function loadPackage(rootDir, indexEntry, trust, now) {
   const manifestFile = path.posix.join(indexEntry.path, PACKAGE_FILE); const source = readRegular(rootDir, manifestFile, `catalog package ${indexEntry.name}`);
-  if (digest(source.text) !== indexEntry.manifestDigest) throw extensionError(`catalog package ${indexEntry.name} manifest digest differs from signed index`, 'CATALOG_DIGEST_MISMATCH');
+  if (digest(source.bytes) !== indexEntry.manifestDigest) throw extensionError(`catalog package ${indexEntry.name} manifest digest differs from signed index`, 'CATALOG_DIGEST_MISMATCH');
   let manifest; try { manifest = JSON.parse(source.text); } catch { throw extensionError(`catalog package ${indexEntry.name} manifest is not JSON`, 'INVALID_CATALOG_PACKAGE'); }
   validateManifest(manifest, { root: trust.root, now });
   if (manifest.name !== indexEntry.name || manifest.version !== indexEntry.version) throw extensionError('catalog package identity differs from signed index', 'CATALOG_IDENTITY_MISMATCH');
   const payloads = [];
   for (const payload of manifest.payloads) {
     const item = readRegular(rootDir, path.posix.join(indexEntry.path, payload.path), `catalog payload ${manifest.name}/${payload.id}`);
-    if (item.bytes.length !== payload.bytes || digest(item.bytes.toString('utf8')) !== payload.digest) throw extensionError(`catalog payload ${manifest.name}/${payload.id} digest differs from manifest`, 'CATALOG_DIGEST_MISMATCH');
+    if (item.bytes.length !== payload.bytes || digest(item.bytes) !== payload.digest) throw extensionError(`catalog payload ${manifest.name}/${payload.id} digest differs from manifest`, 'CATALOG_DIGEST_MISMATCH');
     payloadSchema(payload.type, item.text, `catalog payload ${manifest.name}/${payload.id}`);
     payloads.push({ ...payload });
   }
-  return { name: manifest.name, version: manifest.version, path: indexEntry.path, license: manifest.license, publisher: manifest.publisher, manifestDigest: digest(source.text), canonicalDigest: digest(manifest), coreCompatibility: manifest.coreCompatibility, releaseTimestamp: manifest.releaseTimestamp, capabilities: [...manifest.capabilities], ...(manifest.replaces ? { replaces: { ...manifest.replaces } } : {}), payloads };
+  return { name: manifest.name, version: manifest.version, path: indexEntry.path, license: manifest.license, publisher: manifest.publisher, manifestDigest: digest(source.bytes), canonicalDigest: digest(manifest), coreCompatibility: manifest.coreCompatibility, releaseTimestamp: manifest.releaseTimestamp, capabilities: [...manifest.capabilities], ...(manifest.replaces ? { replaces: { ...manifest.replaces } } : {}), payloads };
 }
 function loadIndex(rootDir, trust, now) {
   const source = readRegular(rootDir, INDEX_FILE, 'catalog index'); let index;
@@ -260,7 +260,7 @@ function loadIndex(rootDir, trust, now) {
   if (errors.length) throw extensionError(`catalog index is invalid:\n${errors.map((error) => `- ${error}`).join('\n')}`, 'INVALID_CATALOG_INDEX');
   verifySignatures(index, rootKeys(trust.root, 'index'), trust.root.threshold, 'catalog index');
   const packages = index.packages.map((entry) => loadPackage(rootDir, entry, trust, now)).sort((a, b) => a.name.localeCompare(b.name));
-  return { index, indexDigest: digest(source.text), canonicalDigest: digest(index), packages };
+  return { index, indexDigest: digest(source.bytes), canonicalDigest: digest(index), packages };
 }
 function snapshot(rootDir, id, trust, now) {
   if (!existsSync(rootDir) || lstatSync(rootDir).isSymbolicLink() || !lstatSync(rootDir).isDirectory()) throw extensionError('catalog cache must be a real directory', 'INVALID_CATALOG_CACHE');
@@ -368,7 +368,7 @@ function writeCatalogOutput(project, target, bytes, force) {
 function readVerifiedPayload({ projectDir, catalogId, packageName, payloadId, now }) {
   requireId(catalogId, 'catalog id'); requireId(packageName, 'package name'); requireId(payloadId, 'payload id'); const report = catalogStatus(projectDir, catalogId, { now }); if (!report.ok) throw extensionError(`catalog "${catalogId}" is not verified:\n${[...report.errors, ...(report.catalogs[0]?.drift ?? [])].map((item) => `- ${item}`).join('\n')}`, 'CATALOG_NOT_VERIFIED');
   const catalog = report.catalogs[0]; const packageInfo = catalog.packages.find((item) => item.name === packageName); if (!packageInfo) throw extensionError(`catalog package "${packageName}" is not locked`, 'CATALOG_PACKAGE_NOT_FOUND'); const payload = packageInfo.payloads.find((item) => item.id === payloadId); if (!payload) throw extensionError(`catalog payload "${packageName}/${payloadId}" is not locked`, 'CATALOG_PAYLOAD_NOT_FOUND');
-  const source = readRegular(catalog.directory, path.posix.join(packageInfo.path, payload.path), `catalog payload ${packageName}/${payloadId}`); if (source.bytes.length !== payload.bytes || digest(source.text) !== payload.digest) throw extensionError('catalog payload changed while being read', 'CATALOG_DIGEST_MISMATCH');
+  const source = readRegular(catalog.directory, path.posix.join(packageInfo.path, payload.path), `catalog payload ${packageName}/${payloadId}`); if (source.bytes.length !== payload.bytes || digest(source.bytes) !== payload.digest) throw extensionError('catalog payload changed while being read', 'CATALOG_DIGEST_MISMATCH');
   return { project: report.project, catalog, packageInfo, payload, source };
 }
 export function copyCatalogPayload({ projectDir = '.', catalogId, packageName, payloadId, out, force = false, now } = {}) {

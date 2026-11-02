@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
-import { cpSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
@@ -168,4 +168,55 @@ test('M6 serves a static loopback Studio shell with strict CSP and no Runtime to
   const hostile = await get({ port: address.port, origin: 'https://attacker.invalid' });
   assert.equal(hostile.status, 403);
   assert.match(hostile.body, /RUNTIME_ORIGIN_FORBIDDEN/);
+});
+
+test('Runtime API drains an oversized chunked request and returns the documented JSON 413 envelope', async (t) => {
+  const fixture = runtimeFixture(t);
+  const operatorProof = 'oversize-fixture-token-12345';
+  const { server } = createRuntimeServer({ missionFile: fixture.missionFile, projectDir: fixture.project, identities: { [operatorProof]: { role: 'operator', id: 'local-operator' } } });
+  t.after(() => server.close());
+  const { port } = await listenRuntimeServer(server, { host: '127.0.0.1', port: 0 });
+  const response = await new Promise((resolve, reject) => {
+    const request = http.request({ host: '127.0.0.1', port, method: 'POST', path: '/v1/runtime', headers: { 'content-type': 'application/json', authorization: `Bearer ${operatorProof}` } }, (incoming) => {
+      let raw = ''; incoming.setEncoding('utf8'); incoming.on('data', (part) => { raw += part; }); incoming.on('end', () => resolve({ status: incoming.statusCode, body: JSON.parse(raw) }));
+    });
+    request.on('error', reject);
+    request.write('{"schemaVersion":1,"requestId":"oversize-0001","method":"status","params":{"padding":"');
+    request.write('x'.repeat(70 * 1024));
+    request.end('"}}');
+  });
+  assert.equal(response.status, 413);
+  assert.equal(response.body.ok, false);
+  assert.equal(response.body.error.code, 'RUNTIME_REQUEST_TOO_LARGE');
+});
+
+test('Runtime HTTP conformance covers OPTIONS, missing routes, unsupported methods, recovery, and lease heartbeat', async (t) => {
+  const fixture = runtimeFixture(t); const proof = 'http-paths-fixture-token-12345'; const workerProof = 'http-paths-worker-token-12345';
+  const { server } = createRuntimeServer({ missionFile: fixture.missionFile, projectDir: fixture.project, identities: { [proof]: { role: 'operator', id: 'local-operator' }, [workerProof]: { role: 'implementer', id: 'agent-alpha' } } });
+  t.after(() => server.close()); const { port } = await listenRuntimeServer(server, { host: '127.0.0.1', port: 0 });
+  const raw = (method, pathname, headers = {}, payload = '') => new Promise((resolve, reject) => {
+    const request = http.request({ host: '127.0.0.1', port, method, path: pathname, headers }, (incoming) => { let body = ''; incoming.setEncoding('utf8'); incoming.on('data', (part) => { body += part; }); incoming.on('end', () => resolve({ status: incoming.statusCode, headers: incoming.headers, body: body ? JSON.parse(body) : null })); }); request.on('error', reject); request.end(payload);
+  });
+  const optionsMissing = await raw('OPTIONS', '/v1/runtime'); assert.equal(optionsMissing.status, 403); assert.equal(optionsMissing.body.error.code, 'RUNTIME_ORIGIN_FORBIDDEN');
+  const options = await raw('OPTIONS', '/v1/runtime', { origin: `http://127.0.0.1:${port}` }); assert.equal(options.status, 204); assert.equal(options.headers['access-control-allow-methods'], 'POST');
+  const missing = await raw('GET', '/no-such-route'); assert.equal(missing.status, 404); assert.equal(missing.body.error.code, 'RUNTIME_ROUTE_NOT_FOUND');
+  const unsupported = await raw('PUT', '/v1/runtime'); assert.equal(unsupported.status, 404); assert.equal(unsupported.body.error.code, 'RUNTIME_ROUTE_NOT_FOUND');
+  const call = (requestId, method, params, token = proof) => post({ port, token, body: { schemaVersion: 1, requestId, method, params } });
+  const allocated = await call('paths-allocate-0001', 'allocate', { packageId: 'api-work', assignee: { role: 'implementer', id: 'agent-alpha' }, leaseMs: 10_000 });
+  assert.equal(allocated.status, 200);
+  const heartbeat = await call('paths-heartbeat-0001', 'heartbeat', { packageId: 'api-work', runId: allocated.body.result.allocation.run.id, leaseToken: allocated.body.result.leaseToken, leaseMs: 10_000 }, workerProof);
+  assert.equal(heartbeat.status, 200); assert.equal(heartbeat.body.ok, true);
+  const recovered = await call('paths-recover-0001', 'recover', {}); assert.equal(recovered.status, 200); assert.equal(recovered.body.ok, true);
+});
+
+
+test('Runtime status projects degraded catalog state without exposing its project path', async (t) => {
+  const fixture = runtimeFixture(t); const proof = 'catalog-projection-token-12345';
+  writeFileSync(path.join(fixture.project, '.vld', 'catalog.json'), '{"schemaVersion":1,"catalogs":[]}\n');
+  const { server } = createRuntimeServer({ missionFile: fixture.missionFile, projectDir: fixture.project, identities: { [proof]: { role: 'operator', id: 'local-operator' } } });
+  t.after(() => server.close()); const { port } = await listenRuntimeServer(server, { host: '127.0.0.1', port: 0 });
+  const response = await post({ port, token: proof, body: { schemaVersion: 1, requestId: 'catalog-projection-0001', method: 'status', params: {} } });
+  assert.equal(response.status, 200); const catalog = response.body.result.studio.catalog;
+  assert.equal(catalog.ok, false); assert.ok(Array.isArray(catalog.errors));
+  assert.equal(JSON.stringify(catalog).includes(fixture.project), false);
 });

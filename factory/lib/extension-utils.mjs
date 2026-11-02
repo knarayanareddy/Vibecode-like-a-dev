@@ -31,6 +31,9 @@ export function stableJson(value) {
 }
 
 export function digest(value) {
+  // Catalog metadata promises Git-blob-byte binding. Do not decode a Buffer to
+  // UTF-8 first: distinct invalid byte sequences can decode to the same U+FFFD.
+  if (Buffer.isBuffer(value) || value instanceof Uint8Array) return createHash('sha256').update(value).digest('hex');
   const source = typeof value === 'string' ? value : stableJson(value);
   return createHash('sha256').update(source).digest('hex');
 }

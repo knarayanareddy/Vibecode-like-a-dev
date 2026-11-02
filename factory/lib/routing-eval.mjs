@@ -24,6 +24,8 @@ import { ROOT, buildIndex } from './indexer.mjs';
 import { handleMessage, rankPrimitives } from './mcp.mjs';
 
 export const DEFAULT_CASES_PATH = path.join(ROOT, 'factory', 'evals', 'routing-cases.json');
+const SAFE_EVAL_ENV = ['PATH', 'SystemRoot', 'WINDIR', 'ComSpec', 'PATHEXT', 'TMPDIR', 'TMP', 'TEMP', 'LANG', 'LC_ALL', 'TZ'];
+function scrubbedEvalEnv() { return Object.fromEntries(SAFE_EVAL_ENV.filter((key) => process.env[key] !== undefined).map((key) => [key, process.env[key]])); }
 
 export const DEFAULT_THRESHOLDS = {
   minMicroRecall: 0.7,
@@ -117,7 +119,8 @@ function createMcpSelector(primitives, { viaProtocol = false } = {}) {
   };
 }
 
-function createCmdSelector(command, catalog, validIds) {
+function createCmdSelector(command, catalog, validIds, { unsafeCommandAcknowledged = false } = {}) {
+  if (!unsafeCommandAcknowledged) throw new Error('cmd driver requires explicit unsafeCommandAcknowledged / --unsafe-command; it executes an arbitrary same-user shell command');
   if (!command) throw new Error('cmd driver requires a shell command (--cmd "<command>")');
   return async (prompt) => {
     const input = JSON.stringify({ prompt, catalog, systemPrompt: buildModelRoutingPrompt(prompt, catalog) });
@@ -125,7 +128,8 @@ function createCmdSelector(command, catalog, validIds) {
       input,
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 60_000
+      timeout: 60_000,
+      env: scrubbedEvalEnv()
     });
     return parseModelSelection(stdout, validIds);
   };
@@ -192,6 +196,7 @@ export async function evaluateRouting({
   model = undefined,
   cmd = null,
   viaProtocol = false,
+  unsafeCommandAcknowledged = false,
   includeAblation = driver === 'mcp'
 } = {}) {
   const loaded = cases ? { cases, thresholds: { ...DEFAULT_THRESHOLDS, ...(thresholds ?? {}) } } : loadRoutingSuite();
@@ -201,7 +206,7 @@ export async function evaluateRouting({
 
   let select;
   if (driver === 'mcp') select = createMcpSelector(primitives, { viaProtocol });
-  else if (driver === 'cmd') select = createCmdSelector(cmd, catalog, validIds);
+  else if (driver === 'cmd') select = createCmdSelector(cmd, catalog, validIds, { unsafeCommandAcknowledged });
   else if (driver === 'openai') select = createOpenAiSelector({ model }, catalog, validIds);
   else if (driver === 'anthropic') select = createAnthropicSelector({ model }, catalog, validIds);
   else throw new Error(`unknown routing driver "${driver}" (expected mcp, openai, anthropic, or cmd)`);

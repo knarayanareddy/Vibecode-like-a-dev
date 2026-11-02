@@ -15,7 +15,7 @@ Anything relevant falls into one of six groups. This project only competes in th
 | Family | What it is | Representatives | Overlap with us |
 | --- | --- | --- | --- |
 | **A. Spec frameworks** | Turn intent into specs, plans and tasks for an agent | Spec Kit, Kiro, OpenSpec, BMAD, Spec Kitty, GSD | High on documents, none on rigour |
-| **B. Practice libraries** | Curated engineering knowledge as agent-readable skills | addyosmani/agent-skills, Superpowers, mattpocock/skills, Karpathy skills | **Direct** — our 34 primitives are a smaller version of these |
+| **B. Practice libraries** | Curated engineering knowledge as agent-readable skills | addyosmani/agent-skills, Superpowers, mattpocock/skills, Karpathy skills | **Direct** — our generated practice inventory is a smaller version of these |
 | **C. Enforcement** | Make architectural intent executable | ArchUnit, dependency-cruiser, import-linter, depguard, Nx, CodeQL, Pact, OPA/Conftest | Low today, and it is where our differentiation lives |
 | **D. Generators** | Scaffold a repository from a template | Nx generators, Yeoman, cookiecutter, `create-*` | Low — we emit documents, they emit code |
 | **E. Requirements engineering** | Formalise what a requirement *is* | EARS, ISO/IEC 29148, ISO/IEC 25010, arc42, C4, ADR/MADR | Low-medium — we use the vocabulary, not the standard |
