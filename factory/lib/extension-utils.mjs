@@ -52,7 +52,7 @@ export function writeJsonAtomic(file, value) {
 }
 
 export function ensureProjectDir(projectDir) {
-  const target = path.resolve(projectDir ?? '.');
+  const target = canonicalTemporaryPath(projectDir ?? '.');
   if (!existsSync(target)) {
     const error = new Error(`project directory does not exist: ${target}`);
     error.code = 'PROJECT_NOT_FOUND';
