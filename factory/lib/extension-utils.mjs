@@ -141,6 +141,29 @@ export function ensureSafeManagedDirectory(root, relative, label = 'managed dire
   return target;
 }
 
+/**
+ * Atomically replace a managed regular file without ever following an existing
+ * final symlink. Parents are created/checked one component at a time, and the
+ * temporary sibling is renamed into place only after its complete content exists.
+ */
+export function writeManagedFileAtomic(root, relative, content, { overwrite = true, mode = 0o600, label = 'managed file' } = {}) {
+  const parent = path.dirname(relative);
+  ensureSafeManagedDirectory(root, parent === '.' ? '' : parent, `${label} parent`);
+  const target = safeManagedFile(root, relative, label);
+  if (existsSync(target) && !overwrite) throw extensionError(`${label} already exists`, 'MANAGED_FILE_EXISTS');
+  const temporaryRelative = path.join(parent === '.' ? '' : parent, `.${path.basename(relative)}.${process.pid}.${Date.now()}.tmp`);
+  const temporary = safeManagedFile(root, temporaryRelative, `${label} temporary`);
+  try {
+    writeFileSync(temporary, content, { encoding: 'utf8', flag: 'wx', mode });
+    // `rename` replaces a final link rather than dereferencing it. Parent links
+    // were rejected above; a final replacement is therefore contained in root.
+    renameSync(temporary, target);
+  } finally {
+    rmSync(temporary, { force: true });
+  }
+  return target;
+}
+
 export function vldDir(projectDir) {
   return path.join(ensureProjectDir(projectDir), '.vld');
 }

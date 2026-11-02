@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -52,4 +52,20 @@ test('exports reject malformed packets and preserve unrelated files on explicit 
   exportPacket({ format: 'kiro', packetDir: PACKET, outDir: out, force: true });
   assert.equal(readFileSync(path.join(out, 'keep.txt'), 'utf8'), 'human-owned');
   assert.ok(existsSync(path.join(out, '.kiro', 'steering', 'vld-packet.md')));
+});
+
+test('exports reject a final or intermediate symbolic-link destination', { skip: process.platform === 'win32' }, (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'vld-export-links-'));
+  const outside = mkdtempSync(path.join(os.tmpdir(), 'vld-export-outside-'));
+  t.after(() => { rmSync(root, { recursive: true, force: true }); rmSync(outside, { recursive: true, force: true }); });
+  const linkedRoot = path.join(root, 'linked-root');
+  const finalTarget = path.join(root, 'final-target');
+  // An output-root link must not be accepted merely because stat() sees a directory.
+  symlinkSync(outside, linkedRoot, 'dir');
+  assert.throws(() => exportPacket({ format: 'spec-kit', packetDir: PACKET, outDir: linkedRoot }), /symbolic-link|unsafe/);
+
+  mkdirSync(finalTarget);
+  writeFileSync(path.join(finalTarget, 'vld-export.json'), JSON.stringify({ schemaVersion: 1, generatedBy: 'vibecode-like-a-dev', format: 'spec-kit' }));
+  symlinkSync(outside, path.join(finalTarget, '.specify'), 'dir');
+  assert.throws(() => exportPacket({ format: 'spec-kit', packetDir: PACKET, outDir: finalTarget, force: true }), /symbolic-link|unsafe/);
 });
