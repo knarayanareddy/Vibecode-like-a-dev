@@ -635,14 +635,14 @@ Three honest takeaways from those numbers:
 - **What requires a live agent run:** calibration runs starter/naive/reference fixtures (`100%` reference mergeable across all 3 arms) to verify oracle solvability, defect-probe sensitivity, gate catch rates and context token cost (`+15,088` markdown tokens over `generic-spec`). Measuring live LLM merge-rate lift, defect reduction and API dollar spend requires running a coding agent against the 72 isolated workspaces:
 
 ```bash
-node scripts/eval-outcome.mjs --runner cmd --agent-cmd "claude -p 'Read TASK.md (and specs/AGENTS.md or SPEC.md if present) and complete the task.'" --out /tmp/outcome-claude.json
+node scripts/eval-outcome.mjs --runner cmd --unsafe-command --agent-cmd "claude -p 'Read TASK.md (and specs/AGENTS.md or SPEC.md if present) and complete the task.'" --out /tmp/outcome-claude.json
 node scripts/eval-outcome.mjs --runner openai --model gpt-4o --out /tmp/outcome-gpt4o.json
 node scripts/eval-outcome.mjs --runner anthropic --out /tmp/outcome-sonnet.json
 ```
 
 #### Optional live-run protocol (never normal CI)
 
-Run one provider/model/configuration at a time from the same commit, retain the complete `--out` JSON for each run, and compare its three paired arms—not a live run against calibration fixtures. Start with a bounded pilot such as `--tasks brownfield`, then run all 24 tasks only after setting a spend/time budget. The `cmd` runner executes `--agent-cmd` in each isolated workspace, pipes `TASK.md` to standard input, and sets `VLD_TASK_ID`, `VLD_ARM` and `VLD_TASK_FILE`; it is the right path for a locally authenticated CLI agent. The direct runners require `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` (optional `OPENAI_BASE_URL`, `ANTHROPIC_BASE_URL`, or `EVAL_MODEL`). Export credentials in your own shell or secret manager—never place them in a profile, packet, export, artifact, report committed to Git, or this repository's CI.
+Run one provider/model/configuration at a time from the same commit, retain the complete `--out` JSON for each run, and compare its three paired arms—not a live run against calibration fixtures. Start with a bounded pilot such as `--tasks brownfield`, then run all 24 tasks only after setting a spend/time budget. The `cmd` runner requires `--unsafe-command` because it executes an arbitrary same-user command: it is **not an OS sandbox** and is never part of normal validation or CI. It runs `--agent-cmd` in each disposable workspace, pipes `TASK.md` to standard input, and sets `VLD_TASK_ID`, `VLD_ARM` and `VLD_TASK_FILE`; its child environment is scrubbed of inherited credentials by default. The direct runners require `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` (optional `OPENAI_BASE_URL`, `ANTHROPIC_BASE_URL`, or `EVAL_MODEL`). Export credentials in your own shell or secret manager—never place them in a profile, packet, export, artifact, report committed to Git, or this repository's CI.
 
 Live output is empirical evidence for the exact agent version, command, model and date that produced it; it is not a deterministic release gate. Preserve the raw JSON plus a short human-authored run note naming that configuration and any retries/failures. The generated Spec Kit/Kiro exports are portability aids, not a fourth benchmark arm or competing requirement source.
 

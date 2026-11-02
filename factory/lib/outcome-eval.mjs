@@ -24,10 +24,10 @@
  */
 
 import { execFile, execSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { applyChange, emitChange, planChange } from './change.mjs';
 import { emitPacket } from './emit/index.mjs';
@@ -37,12 +37,84 @@ import { buildPlan } from './planner.mjs';
 import { normalizeProfile } from './profile.mjs';
 
 const REQ_MARKER = `@${'req'}`;
-let importNonce = 0;
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const WORKER_FILE = path.join(HERE, 'outcome-eval-worker.mjs');
+const TASK_FIXTURE_DIR = path.resolve(HERE, '..', 'evals', 'tasks');
+const PERMISSION_MODEL_AVAILABLE = process.allowedNodeEnvironmentFlags?.has('--permission') === true;
+const SAFE_WORKSPACE_ENV = ['PATH', 'SystemRoot', 'WINDIR', 'ComSpec', 'PATHEXT', 'TMPDIR', 'TMP', 'TEMP', 'LANG', 'LC_ALL', 'TZ'];
+
+/**
+ * Workspace code must not inherit the evaluator's API keys, Git credentials or
+ * arbitrary host configuration. Retain only OS execution/locale essentials.
+ */
+function scrubbedWorkspaceEnv(extra = {}) {
+  const env = {};
+  for (const key of SAFE_WORKSPACE_ENV) {
+    if (process.env[key] !== undefined) env[key] = process.env[key];
+  }
+  return { ...env, ...extra };
+}
+
+function safeChildDetail(error) {
+  // Workspace output is untrusted and can contain ambient paths or secrets. The
+  // report needs a diagnosis class, not raw stderr from code we just evaluated.
+  if (error?.killed || error?.signal === 'SIGTERM') return 'workspace evaluator timed out';
+  if (error?.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') return 'workspace evaluator exceeded its output limit';
+  return 'workspace evaluator failed';
+}
+
+function workspacePermissionArgs(workspaceDir, { write = false, includeFixtures = false } = {}) {
+  if (!PERMISSION_MODEL_AVAILABLE) return [];
+  const readable = [path.resolve(workspaceDir)];
+  if (includeFixtures) readable.push(WORKER_FILE, TASK_FIXTURE_DIR);
+  // Node accepts one permission entry per flag. A comma-joined path list is a
+  // single literal pathname on supported Node 22 builds, which would silently
+  // deny the trusted task fixtures.
+  const args = ['--permission', ...readable.map((entry) => `--allow-fs-read=${entry}`)];
+  if (write) args.push(`--allow-fs-write=${path.resolve(workspaceDir)}`);
+  return args;
+}
 
 function writeRel(rootDir, relPath, content) {
   const full = path.join(rootDir, relPath);
   mkdirSync(path.dirname(full), { recursive: true });
   writeFileSync(full, content, 'utf8');
+}
+
+const MODEL_MAX_FILES = 32;
+const MODEL_MAX_FILE_BYTES = 256 * 1024;
+const MODEL_MAX_TOTAL_BYTES = 1024 * 1024;
+const MODEL_EDIT_EXTENSION = /\.(?:mjs|cjs|js|ts|tsx|json|md|yml|yaml|txt|css|html)$/i;
+
+export function writeModelResponseFiles(workspaceDir, files) {
+  if (!files || typeof files !== 'object' || Array.isArray(files)) throw new Error('model response files must be an object');
+  const entries = Object.entries(files);
+  if (entries.length > MODEL_MAX_FILES) throw new Error(`model response exceeds ${MODEL_MAX_FILES} files`);
+  const root = path.resolve(workspaceDir);
+  let total = 0;
+  for (const [relPath, content] of entries) {
+    if (typeof relPath !== 'string' || !relPath || relPath.length > 240 || /[\0\r\n]/.test(relPath) || !MODEL_EDIT_EXTENSION.test(relPath)) {
+      throw new Error('model response contains an invalid output path');
+    }
+    const candidate = path.resolve(root, relPath);
+    const relative = path.relative(root, candidate);
+    if (!relative || relative.startsWith(`..${path.sep}`) || relative === '..' || path.isAbsolute(relative) || relative.split(path.sep).includes('.git') || relative.split(path.sep).includes('node_modules')) {
+      throw new Error('model response output escapes the workspace');
+    }
+    if (typeof content !== 'string') throw new Error('model response file content must be a string');
+    const bytes = Buffer.byteLength(content, 'utf8');
+    if (bytes > MODEL_MAX_FILE_BYTES) throw new Error('model response file exceeds the per-file limit');
+    total += bytes;
+    if (total > MODEL_MAX_TOTAL_BYTES) throw new Error('model response exceeds the total output limit');
+
+    let cursor = root;
+    for (const part of relative.split(path.sep).slice(0, -1)) {
+      cursor = path.join(cursor, part);
+      if (!existsSync(cursor)) break;
+      if (lstatSync(cursor).isSymbolicLink()) throw new Error('model response traverses a symbolic link');
+    }
+  }
+  for (const [relPath, content] of entries) writeRel(root, relPath, content);
 }
 
 function walkFiles(dir, prefix = '') {
@@ -297,14 +369,22 @@ const execFileAsync = promisify(execFile);
 
 async function runNodeScript(cwd, args) {
   try {
-    const { stdout } = await execFileAsync(process.execPath, args, { cwd, encoding: 'utf8', timeout: 15_000 });
+    const { stdout } = await execFileAsync(process.execPath, args, {
+      cwd,
+      encoding: 'utf8',
+      timeout: 15_000,
+      maxBuffer: 256 * 1024,
+      // These are disposable workspaces, but a check still has no reason to see
+      // credentials or configuration inherited by the evaluator process.
+      env: scrubbedWorkspaceEnv()
+    });
     return { ok: true, code: 0, stdout };
   } catch (error) {
     return {
       ok: false,
       code: error.code ?? 1,
-      stdout: String(error.stdout ?? ''),
-      stderr: String(error.stderr ?? '')
+      stdout: String(error.stdout ?? '').slice(0, 16_384),
+      stderr: String(error.stderr ?? '').slice(0, 16_384)
     };
   }
 }
@@ -346,11 +426,39 @@ export async function runWorkspaceLocalChecks(workspaceDir) {
   return { ok: true, syntaxOk: true, smokeOk: true, failedStep: null, detail: 'all local checks green' };
 }
 
-async function importWorkspaceModule(workspaceDir) {
-  importNonce += 1;
-  const entry = path.join(workspaceDir, 'src', 'index.mjs');
-  if (!existsSync(entry)) throw new Error('missing src/index.mjs');
-  return import(`${pathToFileURL(entry).href}?v=${process.pid}-${importNonce}`);
+async function runIsolatedWorkspaceOracle(task, workspaceDir) {
+  const args = [
+    ...workspacePermissionArgs(workspaceDir, { includeFixtures: true }),
+    WORKER_FILE,
+    task.id,
+    path.resolve(workspaceDir)
+  ];
+  try {
+    const { stdout } = await execFileAsync(process.execPath, args, {
+      cwd: workspaceDir,
+      encoding: 'utf8',
+      timeout: 15_000,
+      maxBuffer: 64 * 1024,
+      env: scrubbedWorkspaceEnv()
+    });
+    const result = JSON.parse(stdout.trim());
+    if (!result || typeof result !== 'object' || typeof result.oraclePass !== 'boolean' || !Array.isArray(result.triggeredDefects)) {
+      throw new Error('malformed worker result');
+    }
+    return {
+      oraclePass: result.oraclePass,
+      oracleError: typeof result.oracleError === 'string' ? result.oracleError.slice(0, 240) : null,
+      triggeredDefects: result.triggeredDefects.filter((id) => typeof id === 'string'),
+      permissionBoundary: PERMISSION_MODEL_AVAILABLE ? 'node-read-only' : 'process-only'
+    };
+  } catch (error) {
+    return {
+      oraclePass: false,
+      oracleError: safeChildDetail(error),
+      triggeredDefects: task.defectProbes.map((probe) => probe.id),
+      permissionBoundary: PERMISSION_MODEL_AVAILABLE ? 'node-read-only' : 'process-only'
+    };
+  }
 }
 
 export async function evaluateWorkspace(task, arm, workspaceDir, { runDrift = true } = {}) {
@@ -359,32 +467,18 @@ export async function evaluateWorkspace(task, arm, workspaceDir, { runDrift = tr
 
   let oraclePass = false;
   let oracleError = null;
-  const triggeredDefects = [];
+  let triggeredDefects = [];
+  let permissionBoundary = PERMISSION_MODEL_AVAILABLE ? 'node-read-only' : 'process-only';
 
   if (syntaxOk) {
-    try {
-      const mod = await importWorkspaceModule(workspaceDir);
-      try {
-        await task.oracle(mod, workspaceDir);
-        oraclePass = true;
-      } catch (err) {
-        oracleError = err.message;
-      }
-
-      for (const probe of task.defectProbes) {
-        try {
-          await probe.check(mod, workspaceDir);
-        } catch {
-          triggeredDefects.push(probe.id);
-        }
-      }
-    } catch (err) {
-      oracleError = err.message;
-      for (const probe of task.defectProbes) triggeredDefects.push(probe.id);
-    }
+    const isolated = await runIsolatedWorkspaceOracle(task, workspaceDir);
+    oraclePass = isolated.oraclePass;
+    oracleError = isolated.oracleError;
+    triggeredDefects = isolated.triggeredDefects;
+    permissionBoundary = isolated.permissionBoundary;
   } else {
     oracleError = 'syntax check failed';
-    for (const probe of task.defectProbes) triggeredDefects.push(probe.id);
+    triggeredDefects = task.defectProbes.map((probe) => probe.id);
   }
 
   let drift = null;
@@ -404,6 +498,7 @@ export async function evaluateWorkspace(task, arm, workspaceDir, { runDrift = tr
     smokeOk,
     oraclePass,
     oracleError,
+    permissionBoundary,
     localChecksPass: localChecks.ok,
     localFailedStep: localChecks.failedStep,
     mergeable,
@@ -460,22 +555,29 @@ export async function runPostMergeDriftProbes(task, workspaceDir) {
 function initGitRepo(workspaceDir) {
   execSync('git init -q && git config user.email "eval@local" && git config user.name "eval" && git add -A && git commit -qm "starter"', {
     cwd: workspaceDir,
-    stdio: 'pipe'
+    stdio: 'pipe',
+    env: scrubbedWorkspaceEnv()
   });
 }
 
-async function runExternalAgent(runner, workspaceDir, task, arm, { agentCmd, model } = {}) {
+async function runExternalAgent(runner, workspaceDir, task, arm, { agentCmd, model, unsafeCommandAcknowledged = false } = {}) {
   initGitRepo(workspaceDir);
   const started = Date.now();
 
   if (runner === 'cmd') {
+    if (!unsafeCommandAcknowledged) {
+      throw new Error('the cmd runner is disabled until unsafeCommandAcknowledged is true; it runs an arbitrary same-user command and is not an OS sandbox');
+    }
     if (!agentCmd) throw new Error('--runner cmd requires --agent-cmd "<command>"');
     const promptText = readFileSync(path.join(workspaceDir, 'TASK.md'), 'utf8');
     const stdout = execSync(agentCmd, {
       cwd: workspaceDir,
       input: promptText,
       encoding: 'utf8',
-      env: { ...process.env, VLD_TASK_ID: task.id, VLD_ARM: arm, VLD_TASK_FILE: 'TASK.md' },
+      // Even the explicitly unsafe runner does not receive inherited API keys or
+      // host configuration by default. It remains unsafe because an arbitrary
+      // same-user command can still read/write what that OS account permits.
+      env: scrubbedWorkspaceEnv({ VLD_TASK_ID: task.id, VLD_ARM: arm, VLD_TASK_FILE: 'TASK.md' }),
       stdio: ['pipe', 'pipe', 'pipe'],
       timeout: 300_000
     });
@@ -551,10 +653,7 @@ async function runExternalAgent(runner, workspaceDir, task, arm, { agentCmd, mod
   const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(rawJson);
   const clean = fenced ? fenced[1].trim() : rawJson.trim();
   const parsed = JSON.parse(clean.slice(clean.indexOf('{'), clean.lastIndexOf('}') + 1));
-  for (const [relPath, content] of Object.entries(parsed.files ?? {})) {
-    if (relPath.includes('..') || path.isAbsolute(relPath)) continue;
-    writeRel(workspaceDir, relPath, String(content));
-  }
+  writeModelResponseFiles(workspaceDir, parsed.files ?? {});
 
   return { wallClockMs: Date.now() - started, agentTokens, costUsd: null };
 }
@@ -608,8 +707,17 @@ export async function runOutcomeHarness({
   runner = 'calibration',
   agentCmd = null,
   model = undefined,
-  concurrency = 6
+  concurrency = 6,
+  unsafeCommandAcknowledged = false
 } = {}) {
+  if (runner === 'cmd' && !unsafeCommandAcknowledged) {
+    return {
+      ok: false,
+      runner,
+      liveAgent: true,
+      findings: [{ id: 'unsafe-command-acknowledgment-required', detail: 'The cmd runner executes an arbitrary same-user command. Pass the explicit unsafe-command acknowledgment; it is not used by ordinary validation or CI.' }]
+    };
+  }
   const schemaErrors = validateOutcomeTasks(tasks);
   if (schemaErrors.length > 0) {
     return { ok: false, runner, liveAgent: runner !== 'calibration', findings: schemaErrors.map((detail) => ({ id: 'invalid-task', detail })) };
@@ -695,7 +803,7 @@ export async function runOutcomeHarness({
           for (const arm of arms) {
             const workDir = path.join(rootTmp, `${task.id}-${arm}-live`);
             const meta = materializeWorkspace(task, arm, workDir, { index });
-            const telemetry = await runExternalAgent(runner, workDir, task, arm, { agentCmd, model });
+            const telemetry = await runExternalAgent(runner, workDir, task, arm, { agentCmd, model, unsafeCommandAcknowledged });
             const scored = await evaluateWorkspace(task, arm, workDir, { runDrift: true });
             armRecords[arm].push({
               ...scored,

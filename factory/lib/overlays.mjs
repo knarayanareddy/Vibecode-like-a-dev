@@ -154,7 +154,15 @@ export function resolveOverlays(profile, { profileDir = ROOT, index = null } = {
       errors.push(...problems.map((problem) => `${id}: ${problem}`));
       continue;
     }
-    loaded.push({ overlay, source: path.relative(ROOT, source).split(path.sep).join('/'), absSource: source });
+    // A local overlay travels with the profile, so record its profile-relative
+    // identity rather than an absolute/workspace-relative path. This keeps packet
+    // provenance stable when a profile is compiled in a transaction staging area.
+    const localRoot = path.resolve(profileDir, 'overlays');
+    const sourcePath = path.resolve(source);
+    const sourceLabel = sourcePath.startsWith(`${localRoot}${path.sep}`)
+      ? path.relative(path.resolve(profileDir), sourcePath).split(path.sep).join('/')
+      : path.relative(ROOT, sourcePath).split(path.sep).join('/');
+    loaded.push({ overlay, source: sourceLabel, absSource: source });
   }
 
   // `extends` is a promise that the layer above is built on the one below, so the
@@ -192,38 +200,72 @@ export function resolveOverlays(profile, { profileDir = ROOT, index = null } = {
  * changed and removed. The base catalog is never mutated.
  */
 export function applyOverlays(catalog, overlays = []) {
-  let requirements = catalog.requirements.map((requirement) => ({ ...requirement, origin: 'catalog' }));
+  let requirements = catalog.requirements.map((requirement) => ({ ...requirement, origin: 'catalog', overlaid: [] }));
   const provenance = [];
+  const provenanceById = new Map();
+
+  const record = (overlay, source) => {
+    const entry = {
+      id: overlay.id,
+      layer: overlay.layer,
+      title: overlay.title,
+      source,
+      why: overlay.why,
+      adds: { requirements: [], gates: (overlay.addGates ?? []).map((gate) => gate.id), practices: overlay.addPrimitives ?? [] },
+      modifies: [],
+      removes: []
+    };
+    provenance.push(entry);
+    provenanceById.set(overlay.id, entry);
+    return entry;
+  };
+
+  // A later removal or replacement makes an earlier add/modify no longer part of
+  // the final catalog. Do not leave provenance saying a removed requirement is
+  // still supplied by a layer: the packet must describe the resulting stack, not
+  // every transient intermediate state.
+  const forgetEffectiveContribution = (requirement) => {
+    for (const id of requirement.overlaid ?? []) {
+      const entry = provenanceById.get(id);
+      if (!entry) continue;
+      entry.adds.requirements = entry.adds.requirements.filter((key) => key !== requirement.key);
+      entry.modifies = entry.modifies.filter((key) => key !== requirement.key);
+    }
+  };
 
   for (const { overlay, source } of overlays) {
-    const added = [];
-    const modified = [];
-    const removed = [];
+    const layer = record(overlay, source);
 
     for (const entry of overlay.modify ?? []) {
       const target = requirements.find((requirement) => requirement.key === entry.key);
+      // `checkOverlayTargets` validates this before planning. Retaining the guard
+      // keeps direct callers fail-closed rather than turning a typo into a no-op.
       if (!target) continue;
       if (entry.statement) target.statement = entry.statement;
       if (entry.failurePath) target.failurePath = entry.failurePath;
       if (entry.title) target.title = entry.title;
-      if ((entry.addAcceptance ?? []).length > 0) {
-        target.acceptance = [...(target.acceptance ?? []), ...entry.addAcceptance];
-      }
+      if ((entry.addAcceptance ?? []).length > 0) target.acceptance = [...(target.acceptance ?? []), ...entry.addAcceptance];
       target.origin = target.origin === 'catalog' ? `overlay:${overlay.id}` : `${target.origin}+${overlay.id}`;
       target.overlaid = [...new Set([...(target.overlaid ?? []), overlay.id])];
-      modified.push(entry.key);
+      layer.modifies.push(entry.key);
     }
 
     for (const entry of overlay.remove ?? []) {
-      const before = requirements.length;
-      requirements = requirements.filter((requirement) => requirement.key !== entry.key);
-      if (requirements.length < before) removed.push(entry.key);
+      const target = requirements.find((requirement) => requirement.key === entry.key);
+      if (!target) continue;
+      forgetEffectiveContribution(target);
+      requirements = requirements.filter((requirement) => requirement !== target);
+      layer.removes.push(entry.key);
     }
 
     for (const entry of overlay.addRequirements ?? []) {
       // A later layer may redefine a requirement an earlier one added; the last
       // layer wins, which is what "team overrides domain" has to mean.
-      requirements = requirements.filter((requirement) => requirement.key !== entry.key);
+      const replaced = requirements.find((requirement) => requirement.key === entry.key);
+      if (replaced) {
+        forgetEffectiveContribution(replaced);
+        requirements = requirements.filter((requirement) => requirement !== replaced);
+      }
       requirements.push({
         ...entry,
         // An overlay is already a decision, so its requirements apply unless the
@@ -234,19 +276,8 @@ export function applyOverlays(catalog, overlays = []) {
         origin: `overlay:${overlay.id}`,
         overlaid: [overlay.id]
       });
-      added.push(entry.key);
+      layer.adds.requirements.push(entry.key);
     }
-
-    provenance.push({
-      id: overlay.id,
-      layer: overlay.layer,
-      title: overlay.title,
-      source,
-      why: overlay.why,
-      adds: { requirements: added, gates: (overlay.addGates ?? []).map((gate) => gate.id), practices: overlay.addPrimitives ?? [] },
-      modifies: modified,
-      removes: removed
-    });
   }
 
   return { catalog: { ...catalog, requirements }, provenance };
@@ -265,15 +296,22 @@ export function overlayGates(overlays = []) {
  * mistake that would otherwise be a silent no-op.
  */
 export function checkOverlayTargets(catalog, overlays = []) {
+  // Validate against the state left by *preceding* layers, not only against the
+  // base catalog. A team overlay legitimately tightens an org/domain requirement
+  // that the earlier layer introduced. The operation order mirrors applyOverlays:
+  // modify/remove address the prior state, then additions become available to the
+  // next layer.
   const keys = new Set(catalog.requirements.map((requirement) => requirement.key));
   const errors = [];
   for (const { overlay } of overlays) {
     for (const entry of overlay.modify ?? []) {
-      if (!keys.has(entry.key)) errors.push(`${overlay.id}: modify "${entry.key}" is not a catalog requirement`);
+      if (!keys.has(entry.key)) errors.push(`${overlay.id}: modify "${entry.key}" is not a catalog requirement or an addition from a preceding overlay`);
     }
     for (const entry of overlay.remove ?? []) {
-      if (!keys.has(entry.key)) errors.push(`${overlay.id}: remove "${entry.key}" is not a catalog requirement`);
+      if (!keys.has(entry.key)) errors.push(`${overlay.id}: remove "${entry.key}" is not a catalog requirement or an addition from a preceding overlay`);
+      else keys.delete(entry.key);
     }
+    for (const entry of overlay.addRequirements ?? []) keys.add(entry.key);
   }
   return errors;
 }

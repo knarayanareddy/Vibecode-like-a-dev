@@ -411,6 +411,8 @@ test('archiving folds the delta into the profile, the history and the packet', a
   assert.equal(history.entries[0].id, 'add-export');
   assert.deepEqual(history.entries[0].added, ['feature.export']);
   assert.deepEqual(history.entries[0].modified, ['api.error-envelope']);
+  assert.deepEqual(history.entries[0].retired.map((entry) => entry.id), [p.delta.removed[0].target.id]);
+  assert.deepEqual(history.retiredRequirementIds.map((entry) => entry.id), [p.delta.removed[0].target.id], 'retired IDs survive outside the active manifest');
   assert.equal(history.entries[0].evidence.artifacts[0].kind, 'review-brief');
   assert.deepEqual(history.entries[0].compile.dropped, ['ui.design-tokens'], 'the removal is recorded as a drop, next to the change that caused it');
   assert.equal(spec.history, undefined, 'the manifest stays a pure function of its inputs');
@@ -429,6 +431,68 @@ test('archiving refuses a change whose reviewed evidence was withdrawn or altere
     /change evidence is not ready to archive[\s\S]*status must be Approved/
   );
   assert.equal(existsSync(path.join(p.root, 'overlays', 'change-add-export.json')), false, 'a failed evidence check writes no profile overlay');
+});
+
+test('retired history IDs are reserved when a later overlay introduces a new requirement', (t) => {
+  const p = packetWithProfile();
+  t.after(p.cleanup);
+  const original = JSON.parse(readFileSync(path.join(p.outDir, 'spec.json'), 'utf8'));
+  const retiredId = original.requirements.find((requirement) => requirement.key === 'core.domain-invariants').id;
+
+  // Model the durable archive history after a previous change removed the highest
+  // active requirement. The next recompile must reserve that retired number.
+  const profile = JSON.parse(readFileSync(p.profileFile, 'utf8'));
+  profile.overlays = ['retire-max-id'];
+  writeFileSync(p.profileFile, `${JSON.stringify(profile, null, 2)}\n`);
+  mkdirSync(path.join(p.root, 'overlays'), { recursive: true });
+  writeFileSync(path.join(p.root, 'overlays', 'retire-max-id.json'), `${JSON.stringify({
+    id: 'retire-max-id', layer: 'team', title: 'Retire max id',
+    why: 'The fixture models a reviewed archival removal of the highest active requirement identity.',
+    remove: [{ key: 'core.domain-invariants', why: 'The archived fixture deliberately retires this identifier before a later addition.' }]
+  }, null, 2)}\n`);
+  recompilePacket(p.profileFile, p.outDir);
+  mkdirSync(path.join(p.outDir, 'changes'), { recursive: true });
+  writeFileSync(path.join(p.outDir, 'changes', 'history.json'), `${JSON.stringify({
+    schemaVersion: 1, packet: 'spec', entries: [], retiredRequirementIds: [{ id: retiredId, key: 'core.domain-invariants', change: 'retire-max-id' }]
+  }, null, 2)}\n`);
+
+  profile.overlays.push('later-new-rule');
+  writeFileSync(p.profileFile, `${JSON.stringify(profile, null, 2)}\n`);
+  writeFileSync(path.join(p.root, 'overlays', 'later-new-rule.json'), `${JSON.stringify({
+    id: 'later-new-rule', layer: 'team', title: 'Later rule',
+    why: 'The fixture adds a new requirement after an earlier maximum identifier was retired.',
+    addRequirements: [{
+      key: 'ops.later-new-rule', title: 'Later requirement', area: 'core',
+      statement: 'When the fixture recompiles after a retirement, the application shall assign a fresh requirement identifier.',
+      failurePath: 'A stale anchor is rebound to a newly added requirement.', acceptance: ['A fresh identifier is visible.'], verify: 'manual'
+    }]
+  }, null, 2)}\n`);
+
+  recompilePacket(p.profileFile, p.outDir);
+  const after = JSON.parse(readFileSync(path.join(p.outDir, 'spec.json'), 'utf8'));
+  const added = after.requirements.find((requirement) => requirement.key === 'ops.later-new-rule');
+  assert.ok(added);
+  assert.notEqual(added.id, retiredId, 'a historical retired identifier must not be recycled');
+});
+
+test('a staging recompile failure leaves profile, packet, overlay, archive and history byte-for-byte unchanged', async (t) => {
+  const p = packetWithProfile();
+  t.after(p.cleanup);
+  const before = snapshot(p.root);
+
+  await assert.rejects(
+    () => archiveChange({
+      packetDir: p.outDir,
+      changeDir: p.changeDir,
+      profilePath: p.profileFile,
+      recompileFn: () => { throw new Error('simulated staged compiler failure'); }
+    }),
+    /simulated staged compiler failure/
+  );
+
+  const after = snapshot(p.root);
+  assert.deepEqual([...after.keys()].sort(), [...before.keys()].sort());
+  for (const [file, content] of before) assert.equal(after.get(file), content, `${file} changed after a failed archive`);
 });
 
 test('apply -> archive -> recompile is idempotent', async (t) => {
