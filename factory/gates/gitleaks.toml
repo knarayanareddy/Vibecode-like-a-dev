@@ -20,9 +20,7 @@ keywords = ["key", "secret", "token", "password"]
 [allowlist]
 description = "Fixtures, examples and environment references"
 paths = [
-  '''(.*)?\.env\.example''',
-  '''docs/.*\.md''',
-  '''enforcement/.*'''
+  '''(.*)?\.env\.example'''
 ]
 # Exact inert fixtures used by deterministic transport tests. Do not add broad
 # names such as "token" here: a real credential-shaped value must still fail.
