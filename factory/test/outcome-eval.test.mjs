@@ -10,12 +10,13 @@
  */
 
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { OUTCOME_TASKS, validateOutcomeTasks } from '../evals/tasks/index.mjs';
-import { runOutcomeHarness } from '../lib/outcome-eval.mjs';
+import { evaluateWorkspace, materializeWorkspace, runOutcomeHarness, writeModelResponseFiles } from '../lib/outcome-eval.mjs';
+import { buildIndex } from '../lib/indexer.mjs';
 
 // @req REQ-002 — end-to-end multi-arm pipeline and verification loop
 test('outcome task suite has 24 valid tasks across 5 categories and calibrates across tiers 0-3', async () => {
@@ -64,6 +65,44 @@ test('outcome task suite has 24 valid tasks across 5 categories and calibrates a
   assert.ok(report.deltas.vsGenericSpec.driftCatchRateDelta > 0.5);
 });
 
+test('workspace checks and hidden oracles are process-isolated, scrub host secrets, and model edits stay bounded', async (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'vld-outcome-isolation-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const task = OUTCOME_TASKS.find((entry) => entry.id === 'gf-06-rate-limiter');
+  materializeWorkspace(task, 'no-spec', root, { index: buildIndex() });
+  for (const [rel, content] of Object.entries(task.reference)) writeFileSync(path.join(root, rel), content);
+  const entry = path.join(root, 'src', 'index.mjs');
+  writeFileSync(entry, `${readFileSync(entry, 'utf8')}\nif (process.env.PARENT_SECRET) throw new Error('host secret leaked');\nglobalThis.__vld_workspace_imported = true;\n`);
+
+  const previous = process.env.PARENT_SECRET;
+  process.env.PARENT_SECRET = 'parent-secret-must-not-reach-child';
+  try {
+    const result = await evaluateWorkspace(task, 'no-spec', root, { runDrift: false });
+    assert.equal(result.oraclePass, true, result.oracleError);
+    assert.match(result.permissionBoundary, /^(node-read-only|process-only)$/, 'Node 22.0 lacks the Permission Model; newer supported Node releases add the read-only boundary');
+    assert.equal(globalThis.__vld_workspace_imported, undefined, 'workspace code did not execute inside the harness process');
+  } finally {
+    if (previous === undefined) delete process.env.PARENT_SECRET;
+    else process.env.PARENT_SECRET = previous;
+  }
+
+  writeModelResponseFiles(root, { 'src/safe-model-edit.mjs': 'export const safe = true;\n' });
+  assert.equal(existsSync(path.join(root, 'src', 'safe-model-edit.mjs')), true);
+  assert.throws(() => writeModelResponseFiles(root, { '../escaped.mjs': 'nope' }), /invalid output path|escapes/);
+  assert.equal(existsSync(path.join(path.dirname(root), 'escaped.mjs')), false);
+  assert.throws(() => writeModelResponseFiles(root, { 'src/too-large.mjs': 'x'.repeat(256 * 1024 + 1) }), /per-file limit/);
+});
+
+test('the arbitrary command runner requires an explicit unsafe acknowledgement', async () => {
+  const report = await runOutcomeHarness({
+    tasks: OUTCOME_TASKS.filter((task) => task.id === 'gf-06-rate-limiter'),
+    runner: 'cmd',
+    agentCmd: 'this command must never run without acknowledgement'
+  });
+  assert.equal(report.ok, false);
+  assert.match(report.findings[0].detail, /same-user command/);
+});
+
 test('live cmd agent runner executes inside isolated git workspaces with zero leaked oracle files', async () => {
   const tmp = mkdtempSync(path.join(os.tmpdir(), 'vld-outcome-cmd-'));
   try {
@@ -106,7 +145,8 @@ test('live cmd agent runner executes inside isolated git workspaces with zero le
     const report = await runOutcomeHarness({
       tasks: singleTask,
       runner: 'cmd',
-      agentCmd: `${JSON.stringify(process.execPath)} ${JSON.stringify(agentScript)}`
+      agentCmd: `${JSON.stringify(process.execPath)} ${JSON.stringify(agentScript)}`,
+      unsafeCommandAcknowledged: true
     });
 
     assert.equal(report.ok, true);

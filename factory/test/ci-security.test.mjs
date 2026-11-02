@@ -40,6 +40,10 @@ test('CI pins every third-party action, has read-only permissions and keeps one 
   mustMatch(live, /^permissions:\n  contents: read$/m);
   mustMatch(ci, /^  check:\n    name: check\n    if: \$\{\{ always\(\) \}\}\n    needs: \[core, node-22-minimum, integration, packed-distribution, acp-v1-bridge, evaluations, stress, portable-smoke\]/m);
   assert.match(read('.github', 'dependabot.yml'), /package-ecosystem: github-actions/);
+  for (const job of ['core', 'node-22-minimum', 'integration', 'packed-distribution', 'acp-v1-bridge', 'evaluations', 'stress', 'portable-smoke', 'check']) {
+    mustMatch(ci, new RegExp(`^  ${job}:\\n[\\s\\S]*?^    timeout-minutes: \\d+$`, 'm'), `${job} needs an explicit job timeout`);
+  }
+  mustMatch(read('CONTRIBUTING.md'), /Workflow jobs have explicit time limits[\s\S]*pinned to full commit SHAs/);
 });
 
 test('CI separates deterministic evaluations/stress work and validates the portable Node suite', () => {
@@ -57,6 +61,7 @@ test('CI separates deterministic evaluations/stress work and validates the porta
   mustMatch(ci, /name: Full portable test suite[\s\S]*?shell: bash[\s\S]*?NODE_OPTIONS=--test-reporter=dot npm test/);
   mustNotMatch(ci, /portable-test\.log|Portable npm test failure/);
   mustMatch(ci, /deterministic outcome calibration/);
+  mustNotMatch(ci, /--runner cmd|--unsafe-command/);
   mustNotMatch(ci, /actions\/[\w-]+@v\d/);
 });
 

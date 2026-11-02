@@ -286,6 +286,19 @@ test('scanning ignores node_modules and build output', (t) => {
   assert.equal(report.profile.kind, 'web-app');
 });
 
+test('schema signal names are tested rather than treating every sampled file as schema evidence', (t) => {
+  const repo = fixture({
+    'package.json': { name: 'plain-notes' },
+    'src/tenant-note.mjs': 'export const note = "tenant_id is mentioned in prose, not a persisted schema";\n'
+  });
+  t.after(repo.cleanup);
+
+  const report = adoptRepo(repo.root);
+  assert.equal(report.profile.risks.multiTenant, false);
+  assert.equal(report.profile.risks.pii, false);
+  assert.equal(report.profile.risks.destructiveWrites, false);
+});
+
 test('compound tenant scoping column names like tenant_sponsor_id infer risks.multiTenant', (t) => {
   const repo = fixture({
     'backend/pyproject.toml': '[project]\nname = "trialbridge"\ndependencies = ["fastapi>=0.111.0", "sqlalchemy>=2.0.0"]\n',

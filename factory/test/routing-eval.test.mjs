@@ -17,7 +17,7 @@ import { buildModelRoutingPrompt, evaluateRouting, loadRoutingSuite, metadataCat
 const index = buildIndex();
 
 // @req REQ-005 — routing invariants and CI metadata regressions are pinned by automated tests
-test('labelled routing benchmark covers all 34 practices and clears CI precision/recall gates', async () => {
+test('labelled routing benchmark covers every practice and clears CI precision/recall gates', async () => {
   const suite = loadRoutingSuite();
   assert.ok(suite.cases.length >= 60, 'routing suite should have at least 60 labelled prompts');
 

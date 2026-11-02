@@ -2,7 +2,7 @@
   "meta": {
     "purpose": "Machine-readable catalog for agent traversal. Read this before opening any SKILL.md.",
     "generatedFrom": "primitives/**/SKILL.md",
-    "count": 34,
+    "count": 35,
     "note": "Do not edit by hand. Run `vld index` after changing a primitive."
   },
   "primitives": [
@@ -773,6 +773,48 @@
       ],
       "path": "primitives/product/product-brief/SKILL.md",
       "dir": "product/product-brief"
+    },
+    {
+      "id": "product.public-web-discoverability",
+      "module": "product",
+      "title": "Public web discoverability",
+      "summary": "Declare which public routes may be discovered and make canonical URLs, metadata and structured data testable product contracts.",
+      "tier_min": 0,
+      "cost": "low",
+      "priority": 2,
+      "enforces": [
+        "web.discoverability"
+      ],
+      "gates": [],
+      "advisory": false,
+      "advisory_reason": "",
+      "obligation": "In {project}, the public routes that explain {aPrimary} have an explicit, testable contract for indexability, canonical URLs, metadata and truthful structured data.",
+      "artifacts": [
+        "01-product-brief.md",
+        "04-contracts.md",
+        "05-verification.md"
+      ],
+      "tags": [
+        "public-web",
+        "discoverability",
+        "indexability",
+        "canonical",
+        "metadata",
+        "structured-data"
+      ],
+      "triggers": [
+        "seo",
+        "discoverability",
+        "indexability",
+        "canonical url",
+        "sitemap",
+        "robots",
+        "metadata",
+        "structured data",
+        "llms.txt"
+      ],
+      "path": "primitives/product/public-web-discoverability/SKILL.md",
+      "dir": "product/public-web-discoverability"
     },
     {
       "id": "product.user-journeys",

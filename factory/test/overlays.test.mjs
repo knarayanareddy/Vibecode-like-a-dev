@@ -130,6 +130,34 @@ test('modify and remove are recorded, and the last layer wins', () => {
   assert.deepEqual(removal.provenance[0].removes, ['ui.design-tokens']);
 });
 
+test('later overlays can target an earlier addition and final provenance excludes retired effects', () => {
+  const base = { requirements: [] };
+  const org = {
+    overlay: {
+      id: 'org-adds-obligation', layer: 'org', title: 'Org', why: 'The organisation requires an explicit shared operational rule.',
+      addRequirements: [{
+        key: 'ops.retired-later', title: 'Operational rule', area: 'core',
+        statement: 'When an operator reviews the service, the application shall expose the current operational state.',
+        failurePath: 'The operational state is missing when a reviewer needs it.', acceptance: ['The state is visible.'], verify: 'manual'
+      }]
+    }, source: 'org.json'
+  };
+  const team = {
+    overlay: {
+      id: 'team-removes-obligation', layer: 'team', title: 'Team', why: 'The team replaces the temporary rule before the packet is released.',
+      modify: [{ key: 'ops.retired-later', statement: 'When an operator reviews the service, the application shall expose a reviewed operational state.' }],
+      remove: [{ key: 'ops.retired-later', why: 'The temporary rule is replaced by the team runbook before release.' }]
+    }, source: 'team.json'
+  };
+
+  assert.deepEqual(checkOverlayTargets(base, [org, team]), [], 'a later layer can modify an earlier layer addition');
+  const merged = applyOverlays(base, [org, team]);
+  assert.equal(merged.catalog.requirements.length, 0);
+  assert.deepEqual(merged.provenance[0].adds.requirements, [], 'an add removed by a later layer is not presented as final catalog provenance');
+  assert.deepEqual(merged.provenance[0].modifies, []);
+  assert.deepEqual(merged.provenance[1].removes, ['ops.retired-later']);
+});
+
 test('a compiled packet records the stack in spec.json and shows it in the constitution', (t) => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'vld-overlay-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));

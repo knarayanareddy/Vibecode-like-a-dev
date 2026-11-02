@@ -10,6 +10,10 @@ Thanks for improving VLD. Changes should preserve the boundary between reviewed 
 4. Do not hand-edit generated packet output; change the profile, policy, routing, template, or approved change source instead.
 5. Keep dependencies out unless an ADR explains the durable trade-off. The core CLI deliberately has no runtime dependencies.
 
+## CI maintenance
+
+Workflow jobs have explicit time limits so a stalled tool cannot consume an unbounded runner. Keep third-party GitHub Actions pinned to full commit SHAs; Dependabot may propose an update, but a maintainer must review the action release notes, provenance, permissions, and the pinned replacement SHA before merging. Do not add live-provider or arbitrary-command evaluation to pull-request workflows: those paths require an explicit human-approved environment.
+
 ## Reviews and security
 
 Keep changes small and explain policy or authority-boundary changes in the PR. Do not include credentials, private keys, runtime tokens, or local `.vld/runtime/` state. See [SECURITY.md](SECURITY.md) for vulnerability reporting.

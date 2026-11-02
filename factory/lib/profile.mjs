@@ -50,9 +50,10 @@ export const RISK_FLAGS = [
 ];
 
 const ID_PATTERN = /^[a-z0-9][a-z0-9-]{1,60}$/;
-const PROFILE_KEYS = new Set(['name', 'idea', 'kind', 'stage', 'users', 'traits', 'risks', 'constraints', 'overlays', '$comment', '$adopted']);
+const PROFILE_KEYS = new Set(['name', 'idea', 'kind', 'stage', 'users', 'traits', 'risks', 'constraints', 'overlays', 'discoverability', '$comment', '$adopted']);
 const USER_KEYS = new Set(['scale']);
 const CONSTRAINT_KEYS = new Set(['team', 'weeks', 'stack', 'mustUse']);
+const DISCOVERABILITY_KEYS = new Set(['enabled']);
 
 function unknownKeys(value, allowed, label, errors) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return;
@@ -101,6 +102,14 @@ export function validateProfile(profile) {
   unknownKeys(profile, PROFILE_KEYS, 'profile', errors);
   unknownKeys(profile.users, USER_KEYS, 'users', errors);
   unknownKeys(profile.constraints, CONSTRAINT_KEYS, 'constraints', errors);
+  if ('discoverability' in profile) {
+    if (!profile.discoverability || typeof profile.discoverability !== 'object' || Array.isArray(profile.discoverability)) {
+      errors.push('discoverability: must be an object with enabled: true or false');
+    } else {
+      unknownKeys(profile.discoverability, DISCOVERABILITY_KEYS, 'discoverability', errors);
+      if (typeof profile.discoverability.enabled !== 'boolean') errors.push('discoverability.enabled: must be true or false; required when discoverability is set');
+    }
+  }
 
   // Adoption records inference provenance under these namespaced metadata fields.
   // They are deliberately not router inputs, but must retain basic safe shapes.

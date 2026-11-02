@@ -335,6 +335,17 @@ test('anchor scanning skips symlinked sources and directory loops', (t) => {
   assert.equal(scan.scanned, 0, 'the directory loop is not traversed');
 });
 
+test('anchor scanning retains every same-line marker and supports requirement IDs beyond three digits', (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'vld-anchor-multiple-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(path.join(root, 'tests'), { recursive: true });
+  const marker = ['@', 'req'].join('');
+  writeFileSync(path.join(root, 'tests', 'multiple.test.ts'), `// ${marker} REQ-001 ${marker} REQ-1000\ntest("anchors", () => {});\n`);
+  const scan = scanAnchors(root);
+  assert.deepEqual([...scan.anchors.keys()].sort(), ['REQ-001', 'REQ-1000']);
+  assert.equal(scan.anchors.get('REQ-1000')[0].isTest, true);
+});
+
 test('an anchor outside a test file does not count as proof', (t) => {
   const project = compileTemp(makeProject('non-test-anchor'));
   t.after(project.cleanup);

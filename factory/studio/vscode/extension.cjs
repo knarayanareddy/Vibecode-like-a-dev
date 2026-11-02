@@ -45,7 +45,9 @@ function safeRuntimeValue(value, depth = 0) {
   return String(value).slice(0, 4_000);
 }
 
-function runtimeStatus(endpoint, token) {
+const MAX_RUNTIME_RESPONSE_BYTES = 1_000_000;
+
+function runtimeStatus(endpoint, token, { maxBytes = MAX_RUNTIME_RESPONSE_BYTES } = {}) {
   const payload = JSON.stringify({ schemaVersion: 1, requestId: `vscode-${crypto.randomUUID()}`, method: 'status', params: {} });
   return new Promise((resolve, reject) => {
     const request = http.request(endpoint, {
@@ -53,9 +55,21 @@ function runtimeStatus(endpoint, token) {
       headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload), authorization: `Bearer ${token}` }
     }, (response) => {
       let body = '';
+      let bytes = 0;
+      let rejected = false;
       response.setEncoding('utf8');
-      response.on('data', (part) => { body += part; });
+      response.on('data', (part) => {
+        bytes += Buffer.byteLength(part, 'utf8');
+        if (bytes > maxBytes) {
+          rejected = true;
+          response.destroy();
+          reject(new Error(`Runtime response exceeds ${maxBytes} bytes`));
+          return;
+        }
+        body += part;
+      });
       response.on('end', () => {
+        if (rejected) return;
         try {
           const parsed = JSON.parse(body);
           if (response.statusCode !== 200 || !parsed.ok) reject(new Error(parsed.error && parsed.error.message || 'Runtime rejected the request'));
@@ -103,4 +117,4 @@ function activate(context) {
 
 function deactivate() {}
 
-module.exports = { activate, deactivate, loopbackStudioUrl, runtimeEndpoint, validWebviewMessage, panelHtml, safeError, safeRuntimeValue };
+module.exports = { activate, deactivate, loopbackStudioUrl, runtimeEndpoint, validWebviewMessage, panelHtml, safeError, safeRuntimeValue, runtimeStatus, MAX_RUNTIME_RESPONSE_BYTES };

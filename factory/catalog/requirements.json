@@ -452,6 +452,36 @@
       "verify": "automated"
     },
     {
+      "key": "web.discoverability",
+      "when": {
+        "all": [
+          {
+            "field": "kind",
+            "eq": "web-app"
+          },
+          {
+            "field": "risks.publicFacing",
+            "eq": true
+          },
+          {
+            "field": "discoverability.enabled",
+            "eq": true
+          }
+        ]
+      },
+      "render": "frontend",
+      "title": "Public routes have a truthful discoverability contract",
+      "statement": "When a route is declared public and indexable, the web application shall serve one canonical URL and reviewed robots, sitemap, metadata and structured-data behavior that matches the rendered page.",
+      "definition": "The public routes that explain {aPrimary} declare one canonical identity and only publish machine-readable claims that the rendered page or maintained source of truth can support.",
+      "failurePath": "A duplicate or private route enters a public discovery artifact, or a canonical/metadata/structured-data claim disagrees with the rendered page, causing a misleading or unsafe public contract.",
+      "acceptance": [
+        "Given each declared indexable route class, when a representative route is rendered in the verification environment, then its canonical URL, title, description and social metadata match the approved route policy.",
+        "Given an account, administration, preview, user-specific search or error route declared excluded, when discovery artifacts are generated, then the route is absent or marked according to the approved exclusion policy.",
+        "Given structured data is emitted for a public route, when its properties are compared with rendered content and maintained source data, then every asserted fact is present and attributable."
+      ],
+      "verify": "automated"
+    },
+    {
       "key": "ops.rate-limits",
       "when": {
         "all": [

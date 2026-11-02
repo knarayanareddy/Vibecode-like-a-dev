@@ -89,7 +89,21 @@ const collisions = [...byTrigger.entries()]
 const profileFiles = [
   ...readdirSync(path.join(ROOT, 'examples', 'ideas')).filter((file) => file.endsWith('.json')).map((file) => path.join(ROOT, 'examples', 'ideas', file)),
   path.join(ROOT, 'examples', 'retro-board', 'profile.json'),
-  path.join(ROOT, 'profile.json')
+  path.join(ROOT, 'profile.json'),
+  // An explicit opt-in must be represented in the library corpus: it proves this
+  // narrow practice is selected, while every ordinary public app remains opted out.
+  {
+    inline: {
+      name: 'public-web-discoverability',
+      kind: 'web-app',
+      stage: 'production',
+      idea: 'Public documentation and product pages with deliberate discovery boundaries.',
+      users: { scale: 'small' },
+      traits: [],
+      risks: { publicFacing: true },
+      discoverability: { enabled: true }
+    }
+  }
 ];
 const adversarial = path.join(ROOT, 'examples', 'ideas', 'adversarial', 'cases.json');
 if (readdirSync(path.join(ROOT, 'examples', 'ideas', 'adversarial')).includes('cases.json')) {

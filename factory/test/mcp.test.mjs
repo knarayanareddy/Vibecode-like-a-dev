@@ -71,6 +71,24 @@ test('select_primitives returns reasons and records what was skipped', () => {
   assert.ok(result.skipped.length > 0, 'a tier-3 api still skips frontend practices');
 });
 
+test('MCP preserves the explicit public-web discoverability decision used by CLI planning', () => {
+  const profile = {
+    name: 'discoverable-docs',
+    idea: 'A public documentation website that explains how engineering teams safely adopt a developer product.',
+    kind: 'web-app',
+    stage: 'mvp',
+    risks: { publicFacing: true },
+    discoverability: { enabled: true }
+  };
+  const selected = payload(call('select_primitives', profile));
+  assert.ok(selected.selected.some((primitive) => primitive.id === 'product.public-web-discoverability'));
+  const requirements = payload(call('get_requirements', profile));
+  assert.ok(requirements.requirements.some((requirement) => requirement.key === 'web.discoverability'));
+
+  const disabled = payload(call('select_primitives', { ...profile, discoverability: { enabled: false } }));
+  assert.ok(!disabled.selected.some((primitive) => primitive.id === 'product.public-web-discoverability'));
+});
+
 test('a prototype selection stays small', () => {
   const result = payload(
     call('select_primitives', {
@@ -184,6 +202,16 @@ test('protocol errors follow JSON-RPC', () => {
 
   assert.equal(handleMessage({ jsonrpc: '2.0', method: 'notifications/initialized' }), null);
   assert.equal(handleMessage({ jsonrpc: '2.0', method: 'some/notification' }), null);
+});
+
+test('MCP rejects malformed envelopes and numeric coercion instead of silently changing requests', () => {
+  for (const invalid of [null, [], 1, {}, { jsonrpc: '2.0', id: {}, method: 'ping' }, { jsonrpc: '2.0', id: 1, method: 'ping', params: [] }]) {
+    assert.equal(handleMessage(invalid).error.code, -32600, JSON.stringify(invalid));
+  }
+  const badLimit = handleMessage({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'search_primitives', arguments: { query: 'testing', limit: '50' } } });
+  assert.equal(badLimit.error.code, -32602);
+  const badTier = handleMessage({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'get_gates', arguments: { tier: 4 } } });
+  assert.equal(badTier.error.code, -32602);
 });
 
 function runMcpUntilEof(source) {

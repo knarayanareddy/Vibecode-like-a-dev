@@ -25,7 +25,7 @@ const IGNORED_DIRS = new Set([
 const SOURCE_FILE = /\.(ts|tsx|js|jsx|mjs|cjs|py|go|rb|java|kt|cs|php|rs|sh|feature|exs)$/;
 const TEST_FILE = /(^|\/)(tests?|__tests__|specs?)\//;
 const TEST_NAME = /\.(test|spec)\.[a-z]+$|(^|\/)test_[^/]+\.py$|_test\.(py|go|rb|rs|exs)$|Tests?\.(java|kt|cs|php)$/;
-const ANCHOR_LINE = /@req\s+(REQ-\d{3})/;
+const ANCHOR_LINE = /@req\s+(REQ-\d{3,})/g;
 const SUPPRESSED = /@req-ignore/i;
 const CLARIFY_MARKER = /\[(?:CLARIFY|NEEDS CLARIFICATION)(?::[^\]]*)?\]/i;
 
@@ -83,17 +83,19 @@ export function scanAnchors(repoDir, { exclude = [] } = {}) {
 
     const isTest = TEST_FILE.test(relative) || TEST_NAME.test(relative);
     for (const line of source.split('\n')) {
-      const match = line.match(ANCHOR_LINE);
-      if (!match) continue;
+      const matches = [...line.matchAll(ANCHOR_LINE)];
+      if (matches.length === 0) continue;
       // A line that suppresses the marker is not an anchor: fixtures and examples
       // quote @req deliberately, and pretending otherwise creates false failures.
       if (SUPPRESSED.test(line)) {
-        suppressed += 1;
+        suppressed += matches.length;
         continue;
       }
-      const id = match[1];
-      if (!anchors.has(id)) anchors.set(id, []);
-      anchors.get(id).push({ id, file: relative, isTest });
+      for (const match of matches) {
+        const id = match[1];
+        if (!anchors.has(id)) anchors.set(id, []);
+        anchors.get(id).push({ id, file: relative, isTest });
+      }
     }
   }
 

@@ -41,10 +41,10 @@ test('M8 GitHub adapter reads fixture checks/reviews and requests merge only aft
   const reviewed = plan(); const calls = []; const client = fixtureClient([
     response(pull()),
     response({ check_runs: [{ name: 'check', status: 'completed', conclusion: 'success' } ] }),
-    response([{ state: 'APPROVED', user: { login: 'independent-reviewer' } }]),
+    response([{ id: 1, submitted_at: '2026-11-02T00:00:00Z', commit_id: SHA, state: 'APPROVED', user: { login: 'independent-reviewer' } }]),
     response(pull()),
     response({ check_runs: [{ name: 'check', status: 'completed', conclusion: 'success' } ] }),
-    response([{ state: 'APPROVED', user: { login: 'independent-reviewer' } }]),
+    response([{ id: 1, submitted_at: '2026-11-02T00:00:00Z', commit_id: SHA, state: 'APPROVED', user: { login: 'independent-reviewer' } }]),
     response({ merged: true, sha: 'e'.repeat(40), message: 'Pull Request successfully merged' })
   ], calls);
   const facts = await inspectGitHubPullRequest({ client, plan: reviewed, pullNumber: 42 });
@@ -69,7 +69,45 @@ test('M8 GitHub adapter normalizes credential, rate-limit and malformed-response
   const timeout = createGitHubV1Client({ token: 'example-auth-material', timeoutMs: 100, fetchImpl: (_url, request) => new Promise((_, reject) => request.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true })) });
   await assert.rejects(() => publishGitHubPullRequest({ client: timeout, plan: plan() }), (error) => error.code === 'GITHUB_NETWORK_FAILED');
   const ambiguous = fixtureClient([
-    response(pull()), response({ check_runs: [{ name: 'check', status: 'completed', conclusion: 'success' }] }), response([{ state: 'APPROVED', user: { login: 'independent-reviewer' } }]), response({ merged: false, sha: SHA })
+    response(pull()), response({ check_runs: [{ name: 'check', status: 'completed', conclusion: 'success' }] }), response([{ id: 1, submitted_at: '2026-11-02T00:00:00Z', commit_id: SHA, state: 'APPROVED', user: { login: 'independent-reviewer' } }]), response({ merged: false, sha: SHA })
   ], []);
   await assert.rejects(() => requestGitHubMerge({ client: ambiguous, plan: plan(), pullNumber: 42 }), (error) => error.code === 'GITHUB_MERGE_AMBIGUOUS');
+});
+
+test('M8 GitHub preflight exhausts pages and fails closed on newer pending/failure or stale reviews', async () => {
+  const reviewed = plan();
+  const client = {
+    request: async (_method, pathname) => {
+      assert.match(pathname, /\/pulls\/42$/);
+      return pull();
+    },
+    requestPage: async (_method, pathname) => {
+      if (pathname.includes('check-runs?')) {
+        return {
+          result: { check_runs: [{ id: 1, name: 'check', head_sha: SHA, status: 'completed', conclusion: 'success', completed_at: '2026-11-01T00:00:00Z' }] },
+          next: '/checks-page-2'
+        };
+      }
+      if (pathname === '/checks-page-2') {
+        return { result: { check_runs: [{ id: 2, name: 'check', head_sha: SHA, status: 'in_progress', conclusion: null, started_at: '2026-11-02T00:00:00Z' }] }, next: null };
+      }
+      if (pathname.includes('/reviews?')) {
+        return {
+          result: [
+            { id: 10, submitted_at: '2026-11-01T00:00:00Z', commit_id: SHA, state: 'APPROVED', user: { login: 'reviewer' } },
+            { id: 11, submitted_at: '2026-11-02T00:00:00Z', commit_id: 'd'.repeat(40), state: 'APPROVED', user: { login: 'stale-reviewer' } }
+          ],
+          next: '/reviews-page-2'
+        };
+      }
+      if (pathname === '/reviews-page-2') {
+        return { result: [{ id: 12, submitted_at: '2026-11-02T01:00:00Z', commit_id: SHA, state: 'DISMISSED', user: { login: 'reviewer' } }], next: null };
+      }
+      throw new Error(`unexpected page ${pathname}`);
+    }
+  };
+  const facts = await inspectGitHubPullRequest({ client, plan: reviewed, pullNumber: 42 });
+  assert.equal(facts.requiredChecksPassed, false, 'a newer pending rerun defeats an older success');
+  assert.equal(facts.githubApproval, false, 'only the latest review on the exact planned SHA can approve');
+  assert.deepEqual(facts.checks, [{ name: 'check', status: 'in_progress', conclusion: null, id: 2 }]);
 });

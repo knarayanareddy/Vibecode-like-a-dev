@@ -19,9 +19,7 @@ tags: [mutation-testing, assertions]  # for search
 triggers: [mutation testing, stryker] # phrases a user or agent would say
 enforces: [spec.drift-guard]          # requirement keys from the catalog this practice supports
 artifacts: [05-verification.md]       # packet documents this practice feeds
-gates:                                # optional: extra gates this practice contributes
-  - id: G-FIT-DOMAIN-PURE
-    statement: Domain modules contain no framework or vendor imports, checked in CI.
+gates: [G1-SECRETS]                  # optional: existing policy gate IDs this practice makes real
 ---
 
 # Mutation testing
@@ -62,7 +60,7 @@ Rules:
 
 Predicates available: `all`, `any`, `not`, `always`, and `field` with `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `in`, `includes`, `exists`, `truthy`.
 
-Every rule needs a `why` of at least twenty characters, because the packet prints it and a reviewer will read it. Unknown operators throw rather than defaulting to false — a router that silently ignores a decision is worse than one that refuses.
+Every rule needs a `why` of at least twenty characters, because the packet prints it and a reviewer will read it. Unknown operators throw rather than defaulting to false — a router that silently ignores a decision is worse than one that refuses. `gates` in primitive front matter is an **inline list of existing policy gate IDs**; nested YAML is intentionally unsupported and rejected.
 
 ## 3. Optional: contribute requirement templates
 
@@ -105,7 +103,7 @@ If a payload changes, tell the reader what changed rather than quietly regenerat
 
 ## 6. If you change the guard or the emit path
 
-The drift guard exists twice on purpose — `factory/lib/verify.mjs` for `vld verify` and `factory/templates/spec-check.mjs` for the copy shipped inside a packet, which may not import anything from this repository. Any change to anchor scanning, suppression or the exit-code contract must land in both, with a test that would fail if they diverge.
+The drift guard exists twice on purpose — `factory/lib/verify.mjs` for `vld verify` and `factory/templates/spec-check.mjs` for the copy shipped inside a packet, which may not import anything from this repository. Use a same-line `@req REQ-<three-or-more digits>` marker in a test; repeat the marker for each additional requirement ID. `@req-ignore` suppresses every marker on that line. Any change to anchor scanning, suppression or the exit-code contract must land in both, with a test that would fail if they diverge.
 
 Two invariants hold the packet together, and both have tests:
 

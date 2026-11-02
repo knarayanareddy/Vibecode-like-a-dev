@@ -244,6 +244,11 @@ test('the secret scan finds a committed key and tolerates a placeholder', () => 
     write(repo, 'src/config.ts', 'export const apiKey = process.env.API_KEY ?? "changeme-placeholder";\n');
     const good = JSON.parse(run(p.outDir, ['--repo', repo, '--json']).stdout);
     assert.equal(good.results.find((entry) => entry.id === 'G1-SECRETS').status, 'pass');
+
+    // An unrelated explanatory word no longer excuses a realistic token on the same line.
+    write(repo, 'src/config.ts', `// example configuration\nexport const apiKey = "${fakeKey}";\n`);
+    const stillBad = JSON.parse(run(p.outDir, ['--repo', repo, '--json']).stdout);
+    assert.equal(stillBad.results.find((entry) => entry.id === 'G1-SECRETS').status, 'fail');
   } finally {
     p.cleanup();
   }

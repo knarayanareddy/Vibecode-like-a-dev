@@ -135,6 +135,12 @@
       "expected": ["product.product-brief"]
     },
     {
+      "id": "rt-22-public-web-discoverability",
+      "kind": "single",
+      "prompt": "Our public documentation and pricing pages need one canonical URL, rendered titles and descriptions, and truthful JSON-LD, while account, admin, preview and user-search pages must stay out of discovery. Add route-level regression checks instead of chasing an SEO score.",
+      "expected": ["product.public-web-discoverability"]
+    },
+    {
       "id": "rt-22-thin-vertical-journey",
       "kind": "single",
       "prompt": "Instead of building every database table first, map the primary user journey walkthrough and ship one testable end-to-end vertical slice.",

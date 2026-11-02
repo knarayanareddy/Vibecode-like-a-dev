@@ -9,12 +9,14 @@
  *
  * Modes:
  *   node scripts/eval-outcome.mjs                                           # CI calibration (no model calls)
- *   node scripts/eval-outcome.mjs --runner cmd --agent-cmd "claude -p ..."  # live CLI agent (Claude Code, Codex, Aider)
+ *   node scripts/eval-outcome.mjs --runner cmd --unsafe-command --agent-cmd "claude -p ..."
+ *     # live CLI agent: explicitly unsafe, same-user execution and not an OS sandbox
  *   node scripts/eval-outcome.mjs --runner openai --model gpt-4o            # live OpenAI-compatible model
  *   node scripts/eval-outcome.mjs --runner anthropic                        # live Anthropic model
  *
  * Options:
  *   --tasks <substr>   filter task IDs or categories (e.g. --tasks brownfield)
+ *   --unsafe-command   required only for --runner cmd; arbitrary same-user command execution
  *   --out <file>       save full JSON report
  *   --json             print JSON report to stdout
  */
@@ -37,6 +39,7 @@ const model = option('--model', undefined);
 const filter = option('--tasks', null);
 const outFile = option('--out', null);
 const jsonOut = hasFlag('--json');
+const unsafeCommandAcknowledged = hasFlag('--unsafe-command');
 
 const selectedTasks = filter
   ? OUTCOME_TASKS.filter((task) => task.id.includes(filter) || task.category.includes(filter))
@@ -51,7 +54,8 @@ const report = await runOutcomeHarness({
   tasks: selectedTasks,
   runner,
   agentCmd,
-  model
+  model,
+  unsafeCommandAcknowledged
 });
 
 if (outFile) {

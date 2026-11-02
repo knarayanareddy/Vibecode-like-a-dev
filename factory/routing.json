@@ -333,6 +333,30 @@
       "why": "The ability to undo is worth more than the ability to predict."
     },
     {
+      "primitive": "product.public-web-discoverability",
+      "when": {
+        "all": [
+          {
+            "field": "kind",
+            "eq": "web-app"
+          },
+          {
+            "field": "risks.publicFacing",
+            "eq": true
+          },
+          {
+            "field": "discoverability.enabled",
+            "eq": true
+          }
+        ]
+      },
+      "why": "A public web surface needs an explicit route and metadata contract; discovery must be chosen rather than inferred from reachability.",
+      "reportSkippedWhen": {
+        "field": "discoverability",
+        "exists": true
+      }
+    },
+    {
       "primitive": "frontend.design-system-tokens",
       "when": {
         "field": "kind",

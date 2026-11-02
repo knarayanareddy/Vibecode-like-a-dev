@@ -5,9 +5,9 @@
  * packet. They are generated views, not inputs: profile, overlays, packet and
  * change manifests remain the only requirement/compiler authorities.
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { digest, extensionError, stableJson } from './extension-utils.mjs';
+import { digest, ensureSafeManagedDirectory, extensionError, stableJson, writeManagedFileAtomic } from './extension-utils.mjs';
 import { verifyPacket } from './verify.mjs';
 
 const FORMATS = new Set(['spec-kit', 'kiro']);
@@ -129,6 +129,8 @@ export function exportPacket({ format, packetDir, outDir, force = false }) {
   if (out === source.packet || out.startsWith(`${source.packet}${path.sep}`)) {
     throw extensionError('export output must be outside the authoritative packet directory', 'EXPORT_OUTPUT_INSIDE_PACKET');
   }
+  const parsedOutput = path.parse(out);
+  ensureSafeManagedDirectory(parsedOutput.root, out.slice(parsedOutput.root.length), 'export output directory');
   if (existsSync(out) && !statSync(out).isDirectory()) throw extensionError(`export output is not a directory: ${out}`, 'EXPORT_OUTPUT_NOT_DIRECTORY');
   if (!outputIsEmpty(out) && !force) throw extensionError(`${out} is not empty; choose an empty directory or pass --force to replace generated files`, 'EXPORT_OUTPUT_NOT_EMPTY');
   if (!outputIsEmpty(out) && force && !canReplacePriorExport(out, format)) {
@@ -154,11 +156,8 @@ export function exportPacket({ format, packetDir, outDir, force = false }) {
   };
   files[MANIFEST] = `${stableJson(manifest)}\n`;
 
-  mkdirSync(out, { recursive: true });
   for (const [relative, content] of Object.entries(files)) {
-    const target = path.join(out, relative);
-    mkdirSync(path.dirname(target), { recursive: true });
-    writeFileSync(target, content, 'utf8');
+    writeManagedFileAtomic(out, relative, content, { label: 'export output file' });
   }
   return { format, packet: source.packet, out, manifest: path.join(out, MANIFEST), files: Object.keys(files).sort(), source: manifest.source };
 }

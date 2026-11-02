@@ -15,7 +15,7 @@
  * over a backup.
  */
 
-import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { ARTIFACTS, validateArtifact } from './artifacts.mjs';
 import { earsError } from './ears.mjs';
@@ -571,8 +571,69 @@ export function applyChange(plan, { force = false } = {}) {
  * history entry is keyed by change id, and the recompile is a pure function of the
  * profile — so archiving twice produces byte-identical files.
  */
-export async function archiveChange({ packetDir, changeDir, profilePath = null, force = false, recompile = true }) {
-  const specPath = path.join(packetDir, 'spec.json');
+function archiveHistoryEntry({ delta, overlayId, addRequirements, modify, remove, evidence }) {
+  return {
+    id: delta.id,
+    title: delta.title,
+    risk: delta.risk,
+    impact: delta.impact,
+    why: delta.why,
+    overlay: overlayId,
+    added: addRequirements.map((requirement) => requirement.key),
+    modified: modify.map((item) => item.key),
+    removed: remove.map((item) => item.key),
+    // Keep the retired identifiers, not just keys, in durable history. The active
+    // manifest deliberately omits removed requirements, so it cannot by itself
+    // reserve the identifier against a future catalog/profile change.
+    retired: (delta.removed ?? []).map(({ target = {}, definition = {} }) => ({
+      id: target.id ?? null,
+      key: target.key ?? definition.key,
+      why: definition.why ?? null,
+      replaceWith: definition.replaceWith ?? null
+    })).filter((entry) => entry.id && entry.key),
+    requirementsAfter: Number.isInteger(delta.requirementsAfter) ? delta.requirementsAfter : null,
+    evidence: {
+      file: 'evidence.md',
+      artifacts: evidence.artifacts.map((artifact) => ({ kind: artifact.kind, file: artifact.file, requirements: artifact.requirements }))
+    }
+  };
+}
+
+function canonicalJson(value) {
+  return `${JSON.stringify(value, null, 2)}\n`;
+}
+
+function writeAtomic(file, content) {
+  const parent = path.dirname(file);
+  mkdirSync(parent, { recursive: true });
+  const temporary = path.join(parent, `.${path.basename(file)}.${process.pid}.${Date.now()}.tmp`);
+  try {
+    writeFileSync(temporary, content, 'utf8');
+    renameSync(temporary, file);
+  } finally {
+    rmSync(temporary, { force: true });
+  }
+}
+
+function restoreFile(file, previous) {
+  if (previous === null) {
+    rmSync(file, { force: true });
+    return;
+  }
+  writeAtomic(file, previous);
+}
+
+/**
+ * Fold an applied change back into the packet's source of truth.
+ *
+ * The entire archive is assembled and recompiled under a temporary sibling before
+ * touching the profile, overlays or packet. The final packet directory is promoted
+ * by rename, and profile/overlay file replacements use sibling renames. If staging
+ * fails (including a planner/emitter failure), callers observe the original bytes.
+ */
+export async function archiveChange({ packetDir, changeDir, profilePath = null, force = false, recompile = true, recompileFn = recompilePacket }) {
+  const resolvedPacket = path.resolve(packetDir);
+  const specPath = path.join(resolvedPacket, 'spec.json');
   if (!existsSync(specPath)) throw new Error(`no spec.json in ${packetDir}`);
   const spec = readJson(specPath);
   const deltaPath = path.join(changeDir, 'delta.json');
@@ -583,7 +644,7 @@ export async function archiveChange({ packetDir, changeDir, profilePath = null, 
   }
   const delta = readJson(deltaPath);
 
-  const profileFile = resolveProfileFile({ profilePath, spec, packetDir });
+  const profileFile = resolveProfileFile({ profilePath, spec, packetDir: resolvedPacket });
   const evidenceCheck = verifyChange(changeDir, { projectDir: path.dirname(profileFile) });
   if (!evidenceCheck.ok) {
     const error = new Error(`change evidence is not ready to archive:\n${evidenceCheck.errors.map((issue) => `- ${issue}`).join('\n')}`);
@@ -591,13 +652,11 @@ export async function archiveChange({ packetDir, changeDir, profilePath = null, 
     throw error;
   }
   const evidence = readJson(path.join(changeDir, 'evidence.json'));
-
   const profile = readJson(profileFile);
   const overlayId = `change-${delta.id}`;
   const overlayDir = path.join(path.dirname(profileFile), 'overlays');
   const overlayPath = path.join(overlayDir, `${overlayId}.json`);
 
-  // --- the delta, restated as an overlay a later compile can re-apply
   const addRequirements = (delta.added ?? []).map((requirement) => ({
     key: requirement.key,
     title: requirement.title,
@@ -608,7 +667,6 @@ export async function archiveChange({ packetDir, changeDir, profilePath = null, 
     verify: requirement.verify ?? 'automated',
     why: requirement.why ?? ''
   }));
-
   const modify = (delta.modified ?? [])
     .map(({ definition = {}, target = {} }) => {
       const entry = { key: target.key ?? definition.key };
@@ -619,94 +677,119 @@ export async function archiveChange({ packetDir, changeDir, profilePath = null, 
       return Object.keys(entry).length > 1 ? entry : null;
     })
     .filter(Boolean);
-
   const remove = (delta.removed ?? [])
     .map(({ definition = {}, target = {} }) => ({ key: target.key ?? definition.key, why: definition.why }))
     .filter((entry) => entry.key);
-
   const overlay = {
     id: overlayId,
     layer: 'team',
     title: `Change: ${delta.title}`,
     why: delta.why,
-    provenance: {
-      from: 'vld change',
-      change: delta.id,
-      risk: delta.risk,
-      impact: delta.impact,
-      base: delta.base ?? null
-    },
+    provenance: { from: 'vld change', change: delta.id, risk: delta.risk, impact: delta.impact, base: delta.base ?? null },
     addRequirements,
     addGates: [],
     modify,
     remove
   };
 
-  mkdirSync(overlayDir, { recursive: true });
-  const overlayText = `${JSON.stringify(overlay, null, 2)}\n`;
-  const overlayChanged = !existsSync(overlayPath) || readFileSync(overlayPath, 'utf8') !== overlayText;
-  writeFileSync(overlayPath, overlayText, 'utf8');
-
-  // --- the profile lists the overlay, once
+  const nextProfile = { ...profile };
   const overlays = Array.isArray(profile.overlays) ? profile.overlays : [];
-  const profileChanged = !overlays.includes(overlayId);
-  if (profileChanged) {
-    profile.overlays = [...overlays, overlayId];
-    writeFileSync(profileFile, `${JSON.stringify(profile, null, 2)}\n`, 'utf8');
-  }
+  if (!overlays.includes(overlayId)) nextProfile.overlays = [...overlays, overlayId];
+  const overlayText = canonicalJson(overlay);
+  const profileText = canonicalJson(nextProfile);
+  const previousOverlay = existsSync(overlayPath) ? readFileSync(overlayPath, 'utf8') : null;
+  const previousProfile = readFileSync(profileFile, 'utf8');
+  const overlayChanged = previousOverlay !== overlayText;
+  const profileChanged = previousProfile !== profileText;
 
-  // --- the change directory is kept with the packet that absorbed it
-  const archiveRoot = path.join(packetDir, 'changes', 'archive');
-  const archiveDir = path.join(archiveRoot, delta.id);
-  mkdirSync(archiveRoot, { recursive: true });
-  if (path.resolve(changeDir) !== path.resolve(archiveDir)) {
-    cpSync(changeDir, archiveDir, { recursive: true, force: true });
-  }
+  // Staging lives beside the final packet, so directory rename promotion is atomic
+  // on the same filesystem. It contains independent copies of the profile state and
+  // packet; no failed compile can mutate the real archive/history/profile.
+  const stageRoot = mkdtempSync(path.join(path.dirname(resolvedPacket), '.vld-archive-stage-'));
+  const stagedPacket = path.join(stageRoot, 'packet');
+  const stagedProfile = path.join(stageRoot, path.basename(profileFile));
+  const stagedOverlayDir = path.join(stageRoot, 'overlays');
+  const archiveDir = path.join(resolvedPacket, 'changes', 'archive', delta.id);
+  const stagedArchiveDir = path.join(stagedPacket, 'changes', 'archive', delta.id);
+  const historyPath = path.join(resolvedPacket, 'changes', 'history.json');
+  let compiled = null;
 
-  // --- history: one entry per change, in merge order, rewritten in place
-  const historyPath = path.join(packetDir, 'changes', 'history.json');
-  const history = existsSync(historyPath)
-    ? readJson(historyPath)
-    : { schemaVersion: 1, packet: path.basename(path.resolve(packetDir)), entries: [] };
-  const entry = {
-    id: delta.id,
-    title: delta.title,
-    risk: delta.risk,
-    impact: delta.impact,
-    why: delta.why,
-    overlay: overlayId,
-    added: addRequirements.map((requirement) => requirement.key),
-    modified: modify.map((item) => item.key),
-    removed: remove.map((item) => item.key),
-    requirementsAfter: Number.isInteger(delta.requirementsAfter) ? delta.requirementsAfter : null,
-    evidence: {
-      file: 'evidence.md',
-      artifacts: evidence.artifacts.map((artifact) => ({ kind: artifact.kind, file: artifact.file, requirements: artifact.requirements }))
+  try {
+    cpSync(resolvedPacket, stagedPacket, { recursive: true, force: true });
+    writeFileSync(stagedProfile, profileText, 'utf8');
+    if (existsSync(overlayDir)) cpSync(overlayDir, stagedOverlayDir, { recursive: true, force: true });
+    mkdirSync(stagedOverlayDir, { recursive: true });
+    writeFileSync(path.join(stagedOverlayDir, `${overlayId}.json`), overlayText, 'utf8');
+    mkdirSync(path.dirname(stagedArchiveDir), { recursive: true });
+    if (path.resolve(changeDir) !== path.resolve(archiveDir)) cpSync(changeDir, stagedArchiveDir, { recursive: true, force: true });
+
+    const stagedHistoryPath = path.join(stagedPacket, 'changes', 'history.json');
+    const history = existsSync(stagedHistoryPath)
+      ? readJson(stagedHistoryPath)
+      : { schemaVersion: 1, packet: path.basename(resolvedPacket), entries: [], retiredRequirementIds: [] };
+    if (!Array.isArray(history.entries)) throw new Error('changes/history.json has no entries array');
+    if (!Array.isArray(history.retiredRequirementIds)) history.retiredRequirementIds = [];
+
+    compiled = recompile ? await recompileFn(stagedProfile, stagedPacket, { force: true }) : null;
+    const stagedSpecPath = path.join(stagedPacket, 'spec.json');
+    const stagedSpec = readJson(stagedSpecPath);
+    const entry = archiveHistoryEntry({ delta, overlayId, addRequirements, modify, remove, evidence });
+    if (compiled && stagedSpec.history) {
+      entry.compile = stagedSpec.history;
+      delete stagedSpec.history;
+      writeFileSync(stagedSpecPath, canonicalJson(stagedSpec), 'utf8');
     }
-  };
-  // A recompile reports what it carried forward and what it dropped in the manifest.
-  // That is a record of one transition, not a property of the packet, so it belongs
-  // next to the change that caused it — and leaving it in spec.json would make an
-  // archived packet differ from a freshly compiled one for the same inputs.
-  const compiled = recompile ? await recompilePacket(profileFile, packetDir, { force: true }) : null;
-  if (compiled) {
-    const after = readJson(specPath);
-    if (after.history) {
-      entry.compile = after.history;
-      delete after.history;
-      writeFileSync(specPath, `${JSON.stringify(after, null, 2)}\n`, 'utf8');
+    const activeKeys = new Set((stagedSpec.requirements ?? []).map((requirement) => requirement.key));
+    const invalidAdded = entry.added.find((key) => !activeKeys.has(key));
+    const invalidRemoved = entry.removed.find((key) => activeKeys.has(key));
+    if (!stagedSpec.overlays?.some((item) => item.id === overlayId) || invalidAdded || invalidRemoved) {
+      throw new Error(`staged archive did not produce the expected overlay state${invalidAdded ? ` (missing ${invalidAdded})` : invalidRemoved ? ` (retained ${invalidRemoved})` : ''}`);
     }
-  }
 
-  const existing = history.entries.findIndex((item) => item.id === delta.id);
-  if (existing === -1) history.entries.push(entry);
-  else {
-    // Re-archiving keeps the first record of what the compile did: it is history,
-    // and rewriting it to "nothing to report" would erase the drop it documents.
-    history.entries[existing] = { ...entry, compile: history.entries[existing].compile ?? entry.compile };
+    const existing = history.entries.findIndex((item) => item.id === delta.id);
+    if (existing === -1) history.entries.push(entry);
+    else history.entries[existing] = { ...entry, compile: history.entries[existing].compile ?? entry.compile };
+    const retiredById = new Map(history.retiredRequirementIds.map((item) => [item.id, item]));
+    for (const retired of entry.retired) retiredById.set(retired.id, { ...retired, change: delta.id });
+    history.retiredRequirementIds = [...retiredById.values()].sort((a, b) => a.id.localeCompare(b.id));
+    history.entries = history.entries.map((item, index) => ({ ...item, n: index + 1 }));
+    writeFileSync(stagedHistoryPath, canonicalJson(history), 'utf8');
+
+    // Promote profile inputs first, with original bytes retained for rollback; the
+    // final packet swap is a same-filesystem directory rename. No fallible work is
+    // left after that swap other than deleting private staging/backup directories.
+    const hadOverlayDir = existsSync(overlayDir);
+    const packetBackup = path.join(path.dirname(resolvedPacket), `.${path.basename(resolvedPacket)}.vld-archive-backup-${process.pid}-${Date.now()}`);
+    let profilePromoted = false;
+    let overlayPromoted = false;
+    let packetBackedUp = false;
+    try {
+      if (overlayChanged) {
+        mkdirSync(overlayDir, { recursive: true });
+        writeAtomic(overlayPath, overlayText);
+        overlayPromoted = true;
+      }
+      if (profileChanged) {
+        writeAtomic(profileFile, profileText);
+        profilePromoted = true;
+      }
+      renameSync(resolvedPacket, packetBackup);
+      packetBackedUp = true;
+      renameSync(stagedPacket, resolvedPacket);
+      packetBackedUp = false;
+      rmSync(packetBackup, { recursive: true, force: true });
+    } catch (error) {
+      if (packetBackedUp) {
+        try { renameSync(packetBackup, resolvedPacket); } catch {}
+      }
+      try { if (profilePromoted) restoreFile(profileFile, previousProfile); } catch {}
+      try { if (overlayPromoted) restoreFile(overlayPath, previousOverlay); } catch {}
+      try { if (!hadOverlayDir && existsSync(overlayDir)) rmSync(overlayDir, { recursive: true, force: true }); } catch {}
+      throw error;
+    }
+  } finally {
+    rmSync(stageRoot, { recursive: true, force: true });
   }
-  history.entries = history.entries.map((item, index) => ({ ...item, n: index + 1 }));
-  writeFileSync(historyPath, `${JSON.stringify(history, null, 2)}\n`, 'utf8');
 
   return {
     overlayId,
@@ -719,7 +802,6 @@ export async function archiveChange({ packetDir, changeDir, profilePath = null, 
     compiled
   };
 }
-
 /**
  * Recompile an existing packet in place. Kept here rather than in the CLI so the
  * archive path and the `vld compile` path cannot drift: same planner, same emitter,
@@ -732,6 +814,16 @@ export function recompilePacket(profileFile, packetDir, { force = true } = {}) {
         (readJson(path.join(packetDir, 'spec.json')).requirements ?? []).map((requirement) => [requirement.key, requirement.id])
       )
     : {};
+  // Retired IDs have no active key in spec.json, but they remain unavailable. Use
+  // synthetic keys so the planner's existing `used` set reserves them without ever
+  // binding a newly reintroduced requirement to an obsolete anchor identity.
+  const historyPath = path.join(packetDir, 'changes', 'history.json');
+  if (existsSync(historyPath)) {
+    const retired = readJson(historyPath).retiredRequirementIds ?? [];
+    for (const entry of retired) {
+      if (typeof entry?.id === 'string') previousIds[`__retired__${entry.id}`] = entry.id;
+    }
+  }
   const plan = buildPlan(profile, {
     index: buildIndex(),
     previousIds,
