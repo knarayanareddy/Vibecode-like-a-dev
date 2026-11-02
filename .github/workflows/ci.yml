@@ -352,8 +352,17 @@ jobs:
       # each supported runner shell. Linux retains the shell-heavy pack journey.
       - name: Full portable test suite
         # Run the same Node suite under Bash on each supported portable runner.
+        # Preserve TAP on failure and surface the failing test in an annotation:
+        # hosted log blobs are not always retained/available to reviewers.
         shell: bash
-        run: NODE_OPTIONS=--test-reporter=dot npm test
+        run: |
+          npm test 2>&1 | tee portable-test.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            failure=$(grep -m1 -A 14 '^not ok' portable-test.log | tr '\n' ' ' || true)
+            echo "::error title=Portable Node test failure::${failure:-npm test failed without a TAP failure record}"
+            exit "$status"
+          fi
 
   # Keep this ID stable for branch protection. It only succeeds once every
   # complete-coverage job above has completed successfully.
