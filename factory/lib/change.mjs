@@ -15,9 +15,8 @@
  * over a backup.
  */
 
-import { cpSync, existsSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import os from 'node:os';
 import path from 'node:path';
 import { ARTIFACTS, validateArtifact } from './artifacts.mjs';
 import { earsError } from './ears.mjs';
@@ -25,7 +24,7 @@ import { emitPacket } from './emit/index.mjs';
 import { buildIndex, loadIndex } from './indexer.mjs';
 import { buildPlan } from './planner.mjs';
 import { normalizeProfile } from './profile.mjs';
-import { ensureSafeManagedDirectory, safeManagedDirectory, safeManagedFile, writeManagedFileAtomic } from './extension-utils.mjs';
+import { canonicalTemporaryPath, ensureSafeManagedDirectory, safeManagedDirectory, safeManagedFile, writeManagedFileAtomic } from './extension-utils.mjs';
 
 const ID_PATTERN = /^[a-z0-9][a-z0-9-]{1,60}$/;
 // Keys are namespaced like the catalog: "feature.export", not "feature-export".
@@ -563,20 +562,6 @@ export function applyChange(plan, { force = false } = {}) {
   return { specPath, backupPath };
 }
 
-function canonicalTemporaryPath(directory) {
-  let resolved = path.resolve(directory);
-  // macOS presents its OS-owned temporary hierarchy through a `/var` alias.
-  // Canonicalize that trusted anchor before walking descendants so a system alias
-  // does not look like a caller-controlled parent link. Links below it remain
-  // forbidden by ensureSafeManagedDirectory.
-  const temporary = path.resolve(os.tmpdir());
-  const temporaryRelative = path.relative(temporary, resolved);
-  if (temporaryRelative === '' || (!temporaryRelative.startsWith(`..${path.sep}`) && temporaryRelative !== '..' && !path.isAbsolute(temporaryRelative))) {
-    try { resolved = path.resolve(realpathSync(temporary), temporaryRelative); } catch {}
-  }
-  return resolved;
-}
-
 function ensureRealDirectory(directory, label) {
   const resolved = canonicalTemporaryPath(directory);
   const parsed = path.parse(resolved);
@@ -1007,7 +992,7 @@ export function verifyChange(changeDir, { projectDir = '.' } = {}) {
   const errors = [];
   const warnings = [];
   const passes = [];
-  const project = path.resolve(projectDir);
+  const project = canonicalTemporaryPath(projectDir);
 
   const deltaPath = path.join(changeDir, 'delta.json');
   if (!existsSync(deltaPath)) return { ok: false, errors: ['no delta.json in this change directory'], warnings, passes };
