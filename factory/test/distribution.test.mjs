@@ -8,9 +8,11 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const manifest = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+// Node's execFile does not invoke Windows .cmd shims through a shell.
+const NPM = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
 function packedFiles() {
-  const result = execFileSync('npm', ['pack', '--json', '--dry-run'], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  const result = execFileSync(NPM, ['pack', '--json', '--dry-run'], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   return new Set(JSON.parse(result)[0].files.map((entry) => entry.path));
 }
 
