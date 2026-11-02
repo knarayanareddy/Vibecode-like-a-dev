@@ -36,7 +36,14 @@ const ASSERTION_SIGNAL = /\b(?:assert[A-Za-z0-9_.]*|expect\s*\(|should\b|require
 
 function globToRegExp(glob) {
   const escaped = glob.replace(/[.+^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`^${escaped.replace(/\*\*/g, '\u0000').replace(/\*/g, '[^/]*').replace(/\u0000/g, '.*')}$`);
+  // `**/` means zero or more path components, while a remaining `**` may span
+  // nested descendants (including the trailing `/**` form).
+  return new RegExp(`^${escaped
+    .replace(/\*\*\//g, '\u0000')
+    .replace(/\*\*/g, '\u0001')
+    .replace(/\*/g, '[^/]*')
+    .replace(/\u0000/g, '(?:.*/)?')
+    .replace(/\u0001/g, '.*')}$`);
 }
 
 const rel = (root, file) => path.relative(root, file).split(path.sep).join('/');

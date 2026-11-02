@@ -227,12 +227,24 @@
     },
     "G3-MUTATION": {
       "check": {
-        "kind": "exists",
+        "kind": "mutation",
         "glob": [
           "enforcement/mutation.config.json",
+          "mutation.config.*",
+          "**/mutation.config.*",
+          "stryker.config.*",
+          "**/stryker.config.*",
           "stryker.conf.*",
           "**/stryker.conf.*",
-          "pyproject.toml"
+          ".mutmut*",
+          "**/.mutmut*"
+        ],
+        "pythonGlob": [
+          "pyproject.toml",
+          "**/pyproject.toml"
+        ],
+        "pythonPatterns": [
+          "\\[tool\\.(mutmut|cosmic-ray)\\]"
         ]
       },
       "files": [

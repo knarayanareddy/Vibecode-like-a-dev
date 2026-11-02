@@ -17,6 +17,7 @@ import { validateModule } from './modules.mjs';
 import { validateWorkflow } from './workflows.mjs';
 import { digest, ensureProjectDir, ensureSafeManagedDirectory, extensionError, externalOperationError, ID_PATTERN, readJson, safeManagedDirectory, safeManagedFile, SEMVER_PATTERN, stableJson, vldDir, writeManagedFileAtomic, writeManagedJsonAtomic } from './extension-utils.mjs';
 import { validateRepository } from './stores.mjs';
+import { PACKAGE_VERSION } from './version.mjs';
 
 const CATALOG_VERSION = 1;
 const STATE_VERSION = 1;
@@ -40,7 +41,7 @@ const PAYLOAD_TYPES = new Map([
 ]);
 const MAX_PAYLOAD_BYTES = 256 * 1024;
 const MAX_SIGNATURES = 16;
-const VERSION = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
+const VERSION = PACKAGE_VERSION;
 
 function object(value) { return Boolean(value) && typeof value === 'object' && !Array.isArray(value); }
 function catalogDir(project) { return path.join(vldDir(project), 'catalogs'); }

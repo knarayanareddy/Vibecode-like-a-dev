@@ -96,6 +96,49 @@ test('a change is validated: empty, unknown references and thin rationale all fa
   assert.match(validateChange(badKey).join('\n'), /namespaced kebab-case/);
 });
 
+test('a title-only requirement change is valid, changes the manifest, and is visible without inventing test work', (t) => {
+  const p = packet();
+  t.after(p.cleanup);
+  const target = p.spec.requirements[0];
+  const titleOnly = change({
+    id: 'clarify-title',
+    title: 'Clarify a requirement title',
+    risk: 'low',
+    add: [],
+    remove: [],
+    modify: [{ key: target.key, title: `${target.title} clearly` }],
+    probe: [],
+    rollback: ''
+  });
+  assert.deepEqual(validateChange(titleOnly), []);
+  const plan = planChange({ packetDir: p.outDir, change: titleOnly });
+  assert.deepEqual(plan.errors, []);
+  assert.equal(plan.afterSpec.requirements.find((entry) => entry.id === target.id).title, `${target.title} clearly`);
+  const rendered = renderChange(plan);
+  assert.match(rendered.get('proposal.md'), /\| title \|/);
+  assert.match(rendered.get('tasks.md'), /title-only clarification; no behaviour or anchor changes are implied/);
+});
+
+test('change-added anchors follow the packet stack and verification mode', (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'vld-change-go-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const profile = normalizeProfile({
+    name: 'go-change', idea: 'A Go service records durable approval decisions for a release queue.', kind: 'api', stage: 'mvp',
+    constraints: { stack: 'Go 1.23' }, traits: ['persistence']
+  });
+  const { outDir } = emitPacket(buildPlan(profile, { index }), path.join(root, 'spec'));
+  const delta = change({
+    id: 'go-anchor', title: 'Add Go-verified export', risk: 'low', modify: [], remove: [], probe: [], rollback: '',
+    add: [{ ...change().add[0], key: 'feature.go-export', title: 'An export has a Go test', verify: 'automated' }]
+  });
+  const plan = planChange({ packetDir: outDir, change: delta });
+  assert.deepEqual(plan.errors, []);
+  assert.equal(plan.added[0].anchor, 'tests/api/feature-go-export.test.go');
+
+  const manual = planChange({ packetDir: outDir, change: { ...delta, id: 'manual-anchor', add: [{ ...delta.add[0], verify: 'manual' }] } });
+  assert.equal(manual.added[0].anchor, null);
+});
+
 test('a high-risk change without a probe or rollback is rejected', () => {
   const errors = validateChange(change({ probe: [], rollback: '' }));
   assert.match(errors.join('\n'), /probe: a high-risk change needs/);
@@ -511,6 +554,21 @@ test('retired history IDs are reserved when a later overlay introduces a new req
   const added = after.requirements.find((requirement) => requirement.key === 'ops.later-new-rule');
   assert.ok(added);
   assert.notEqual(added.id, retiredId, 'a historical retired identifier must not be recycled');
+});
+
+test('change planning reserves historical identifiers that are no longer active', (t) => {
+  const p = packet();
+  t.after(p.cleanup);
+  mkdirSync(path.join(p.outDir, 'changes'), { recursive: true });
+  writeFileSync(path.join(p.outDir, 'changes', 'history.json'), `${JSON.stringify({
+    schemaVersion: 1,
+    packet: 'spec',
+    entries: [],
+    retiredRequirementIds: [{ id: 'REQ-999', key: 'historical.retired-rule', change: 'retire-max-id' }]
+  }, null, 2)}\n`);
+  const planned = planChange({ packetDir: p.outDir, change: change() });
+  assert.equal(planned.errors.length, 0, planned.errors.join('\n'));
+  assert.equal(planned.added[0].id, 'REQ-1000', 'the next change id follows the highest retired identity');
 });
 
 test('a staging recompile failure leaves profile, packet, overlay, archive and history byte-for-byte unchanged', async (t) => {

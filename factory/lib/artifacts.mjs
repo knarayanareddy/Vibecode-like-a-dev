@@ -50,7 +50,7 @@ function headingBody(content, heading) {
   const end = lines.findIndex((line, index) => index > start && /^##\s+/.test(line));
   return lines.slice(start + 1, end === -1 ? undefined : end).join('\n').trim();
 }
-function links(content) { return [...new Set(content.match(/REQ-\d{3}/g) ?? [])]; }
+function links(content) { return [...new Set(content.match(/\bREQ-\d{3,}\b/g) ?? [])]; }
 function storeReference(value) {
   const [storeId, assetId, ...extra] = String(value ?? '').split('/');
   if (!storeId || !assetId || extra.length) throw extensionError('store template must be written as <store-id>/<asset-id>', 'INVALID_STORE_TEMPLATE');

@@ -406,6 +406,16 @@ function runShippedChecker(packetDir, repo, { strict = false, requireAssertions 
   }
 }
 
+function runGeneratedGates(packetDir, repo) {
+  const args = [path.join(packetDir, 'enforcement', 'gates.mjs'), '--repo', repo, '--strict', '--json'];
+  try {
+    const stdout = execFileSync(process.execPath, args, { encoding: 'utf8' });
+    return { code: 0, report: JSON.parse(stdout) };
+  } catch (error) {
+    return { code: error.status ?? 1, report: JSON.parse(String(error.stdout ?? '{}')) };
+  }
+}
+
 /** Anchor every automated requirement in a test file, the way an honest repo would. */
 function anchorEverything(packetDir, repo) {
   const spec = JSON.parse(readFileSync(path.join(packetDir, 'spec.json'), 'utf8'));
@@ -463,6 +473,30 @@ test('the shipped checker and the factory verifier reach the same verdict', (t) 
   writeFileSync(path.join(repo, 'tests', 'stray.test.ts'), `// ${strayMarker}REQ-999\ntest('stray', () => {});\n`);
   assert.equal(verifyPacket(project.outDir, { repo, strict: true }).ok, false);
   assert.equal(runShippedChecker(project.outDir, repo, { strict: true }).code, 1);
+});
+
+test('factory verifier, shipped spec-checker, and generated drift gate agree on anchor fixtures', (t) => {
+  const project = compileTemp(makeProject('three-runner-parity', { stage: 'production', risks: { pii: true, publicFacing: true, regulated: true } }));
+  t.after(project.cleanup);
+  assert.ok(project.plan.gates.some((gate) => gate.id === 'G2-DRIFT'), 'fixture needs the generated drift gate');
+  const repo = path.join(project.root, 'repo');
+  mkdirSync(repo, { recursive: true });
+  const automated = anchorEverything(project.outDir, repo);
+
+  assert.equal(verifyPacket(project.outDir, { repo, strict: true }).ok, true);
+  assert.equal(runShippedChecker(project.outDir, repo, { strict: true }).code, 0);
+  let gates = runGeneratedGates(project.outDir, repo);
+  assert.equal(gates.report.results.find((entry) => entry.id === 'G2-DRIFT')?.status, 'pass', JSON.stringify(gates.report));
+
+  const strayMarker = ['@', 'req '].join('');
+  writeFileSync(path.join(repo, 'tests', 'unknown.test.ts'), `// ${strayMarker}REQ-1000\ntest('unknown', () => { expect(true).toBe(true); });\n`);
+  assert.equal(verifyPacket(project.outDir, { repo, strict: true }).ok, false);
+  assert.equal(runShippedChecker(project.outDir, repo, { strict: true }).code, 1);
+  gates = runGeneratedGates(project.outDir, repo);
+  const drift = gates.report.results.find((entry) => entry.id === 'G2-DRIFT');
+  assert.equal(drift?.status, 'fail', JSON.stringify(drift));
+  assert.match(drift.detail, /spec-check\.mjs failed/);
+  assert.ok(automated.length > 0);
 });
 
 test('factory verify and the shipped guard agree on hollow assertions and EARS failures', (t) => {
@@ -551,6 +585,29 @@ test('a single-file packet never points at documents it does not ship', (t) => {
   const referenced = [...text.matchAll(/\b(0[0-7]-[a-z-]+\.md)\b/g)].map((match) => match[1]);
   const missing = [...new Set(referenced)].filter((file) => !shipped.includes(file));
   assert.deepEqual(missing, [], `packet references documents it does not ship: ${missing.join(', ')}`);
+});
+
+test('verification anchor examples use valid Python and Go syntax for their declared stacks', (t) => {
+  for (const [stack, expected] of [['Python 3.12', /def test_.*\(\):/], ['Go 1.23', /func Test.*\(t \*testing\.T\)/]]) {
+    const project = compileTemp(makeProject(`example-${stack.slice(0, 2).toLowerCase()}`, { constraints: { stack } }));
+    t.after(project.cleanup);
+    const verification = readFileSync(path.join(project.outDir, '05-verification.md'), 'utf8');
+    assert.match(verification, expected, stack);
+    assert.equal(verification.includes("test('") && stack.startsWith('Go'), false, 'Go example must not be JavaScript syntax');
+  }
+});
+
+test('an unsupported stack does not invent TypeScript commands or test syntax and labels anchor placeholders', (t) => {
+  const project = compileTemp(makeProject('unsupported-stack', { constraints: { stack: 'Rust 1.82' } }));
+  t.after(project.cleanup);
+  const manifest = JSON.parse(readFileSync(path.join(project.outDir, 'spec.json'), 'utf8'));
+  for (const requirement of manifest.requirements.filter((entry) => entry.verify === 'automated')) assert.match(requirement.anchor, /^tests\/choose-runner\/.*\.test$/);
+  const verification = readFileSync(path.join(project.outDir, '05-verification.md'), 'utf8');
+  assert.match(verification, /No test syntax is suggested/);
+  assert.match(verification, /tests\/choose-runner\//);
+  assert.equal(verification.includes('.test.ts'), false);
+  const architecture = readFileSync(path.join(project.outDir, '03-architecture.md'), 'utf8');
+  assert.match(architecture, /No substitute language, command, or test runner is assumed/);
 });
 
 test('a single-file packet states the stack it is asking for', (t) => {

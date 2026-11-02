@@ -9,7 +9,7 @@
 
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -84,6 +84,25 @@ test('primary journey: plan, compile, verify, then the shipped drift guard agree
   );
 });
 
+test('adopted TODO ideas are prominent in advisory mode and refused in strict plan and compile', async (t) => {
+  const workspace = mkdtempSync(path.join(os.tmpdir(), 'vld-adopted-todo-'));
+  t.after(() => rmSync(workspace, { recursive: true, force: true }));
+  const profile = path.join(workspace, 'profile.json');
+  writeFileSync(profile, JSON.stringify({ ...PROFILE, idea: 'TODO replace with one paragraph. Adopted draft: web application.' }, null, 2));
+
+  const advisory = await cli(['plan', profile]);
+  assert.equal(advisory.code, 0, advisory.stderr);
+  assert.match(advisory.stderr, /TODO draft/);
+
+  const strictPlan = await cli(['plan', profile, '--strict']);
+  assert.equal(strictPlan.code, 2);
+  assert.match(strictPlan.stderr, /Remove TODO from profile\.idea/);
+
+  const strictCompile = await cli(['compile', profile, '-o', path.join(workspace, 'spec'), '--strict']);
+  assert.equal(strictCompile.code, 2);
+  assert.equal(existsSync(path.join(workspace, 'spec')), false, 'strict refusal must not emit a packet');
+});
+
 // @req REQ-004
 test('cli contract: data on stdout, diagnostics on stderr, non-zero exit on misuse', async () => {
   const declared = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
@@ -101,6 +120,22 @@ test('cli contract: data on stdout, diagnostics on stderr, non-zero exit on misu
 
   const missingProfile = await cli(['plan', '/nonexistent/profile.json']);
   assert.equal(missingProfile.code, 2);
+
+  const unknownFlag = await cli(['plan', '/nonexistent/profile.json', '--strcit']);
+  assert.equal(unknownFlag.code, 2);
+  assert.match(unknownFlag.stderr, /unknown option: --strcit/);
+
+  const extraPositional = await cli(['init', 'one', 'two']);
+  assert.equal(extraPositional.code, 2);
+  assert.match(extraPositional.stderr, /Usage: vld init <dir>/);
+
+  const equalsOption = await cli(['compile', '/missing.json', '--out=spec']);
+  assert.equal(equalsOption.code, 2);
+  assert.match(equalsOption.stderr, /unknown option: --out=spec/);
+
+  const collision = await cli(['compile', '/missing.json', '-o', 'one', '--out', 'two']);
+  assert.equal(collision.code, 2);
+  assert.match(collision.stderr, /option supplied more than once: --out/);
 
   const misspelledRisk = path.join(os.tmpdir(), `vld-misspelled-risk-${process.pid}.json`);
   writeFileSync(misspelledRisk, JSON.stringify({ ...PROFILE, risk: { payments: true } }));

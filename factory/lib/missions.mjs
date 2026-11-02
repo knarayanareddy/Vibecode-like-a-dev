@@ -23,7 +23,7 @@ import { verifyPacket } from './verify.mjs';
 
 export const MISSION_SCHEMA_VERSION = 1;
 const COMMIT = /^[a-f0-9]{40}$/;
-const REQUIREMENT = /^REQ-\d{3}$/;
+const REQUIREMENT = /^REQ-\d{3,}$/;
 const SAFE_GIT_REF = /^(?:HEAD|[A-Za-z0-9][A-Za-z0-9._/-]{0,200})$/;
 const SAFE_PATH_PATTERN = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9][A-Za-z0-9._/*?{}-]{0,240}$/;
 const MISSION_FIELDS = new Set(['schemaVersion', 'id', 'title', 'packet', 'target', 'corePolicyDigest', 'workPackages']);

@@ -19,6 +19,7 @@
  * have this tool installed.
  */
 
+import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, lstatSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -39,8 +40,15 @@ const JSON_OUT = flag('--json');
 const REPO = path.resolve(option('--repo', process.cwd()));
 
 const IGNORED = new Set(['node_modules', '.git', 'dist', 'build', 'out', 'coverage', 'vendor', '.next', '.nuxt', '.venv', 'venv', '__pycache__', 'target', '.turbo']);
-const SOURCE = /\.(ts|tsx|js|jsx|mjs|cjs|py|go|rb|java|kt|cs|php|rs|dart|ex|exs|swift|sh|yml|yaml|json|toml|tf|env|ini|conf)$/;
+// Anchor semantics must match the shipped spec checker and factory verifier.
+// Configuration files may quote @req in fixtures or metadata; they are not source
+// evidence and must not create a stray-anchor failure in only the gate runner.
+const SOURCE = /\.(ts|tsx|js|jsx|mjs|cjs|py|go|rb|java|kt|cs|php|rs|sh|feature|exs)$/;
+const SECRET_SOURCE = /\.(ts|tsx|js|jsx|mjs|cjs|py|go|rb|java|kt|cs|php|rs|dart|ex|exs|swift|sh|yml|yaml|json|toml|tf|env|ini|conf)$/;
 const TEST_PATH = /(^|\/)(tests?|__tests__|spec|e2e)\//i;
+const TEST_NAME = /\.(test|spec)\.[a-z]+$|(^|\/)test_[^/]+\.py$|_test\.(py|go|rb|rs|exs)$|Tests?\.(java|kt|cs|php)$/;
+const ANCHOR_LINE = /@req\s+(REQ-\d{3,})/g;
+const SUPPRESSED = /@req-ignore/i;
 
 function walk(dir, out = []) {
   let entries;
@@ -84,8 +92,10 @@ const globToRegExp = (glob) =>
     `^${glob
       .replace(/[.+^${}()|[\]\\]/g, '\\$&')
       .replace(/\*\*\//g, '\u0000')
+      .replace(/\*\*/g, '\u0001')
       .replace(/\*/g, '[^/]*')
-      .replace(/\u0000/g, '(?:.*/)?')}$`
+      .replace(/\u0000/g, '(?:.*/)?')
+      .replace(/\u0001/g, '.*')}$`
   );
 const matchers = new Map();
 const matches = (glob) => {
@@ -112,28 +122,32 @@ try {
   spec = null;
 }
 
-/** Requirement ids proven by a test file carrying an @req anchor. */
+/** Requirement ids proven by source/test markers, matching the shipped drift guard. */
 function anchored() {
   const found = new Map();
+  const stray = [];
+  const known = new Set((spec?.requirements ?? []).map((requirement) => requirement.id));
+  const exclusions = Array.isArray(spec?.anchors?.exclude) ? spec.anchors.exclude : [];
+  const exclusionPatterns = exclusions.map(globToRegExp);
   for (const file of repoFiles) {
-    if (!SOURCE.test(file)) continue;
+    if (!SOURCE.test(file) || exclusionPatterns.some((pattern) => pattern.test(file))) continue;
     const text = read(file);
     if (!text.includes('@req')) continue;
-    const isTest =
-      TEST_PATH.test(file) ||
-      /\.(test|spec)\.[a-z]+$/i.test(file) ||
-      /(^|\/)test_[^/]+\.py$/i.test(file) ||
-      /_test\.(py|go|rb|rs|exs)$/i.test(file) ||
-      /Tests?\.(java|kt|cs|php)$/.test(file);
+    const isTest = TEST_PATH.test(file) || TEST_NAME.test(file);
     for (const line of text.split('\n')) {
-      if (!line.includes('@req') || /@req-ignore/i.test(line)) continue;
-      const match = line.match(/@req\s+(REQ-\d{3})/);
-      if (!match) continue;
-      if (!found.has(match[1])) found.set(match[1], []);
-      found.get(match[1]).push({ file, isTest });
+      if (!line.includes('@req') || SUPPRESSED.test(line)) continue;
+      for (const match of line.matchAll(ANCHOR_LINE)) {
+        const id = match[1];
+        if (!known.has(id)) {
+          stray.push(`${file} cites unknown requirement ${id}`);
+          continue;
+        }
+        if (!found.has(id)) found.set(id, []);
+        found.get(id).push({ file, isTest });
+      }
     }
   }
-  return found;
+  return { found, stray };
 }
 
 /**
@@ -174,9 +188,13 @@ const SECRET_PLACEHOLDER_VALUES = new Set([
   'example-auth-material',
   'parent-secret-must-not-reach-child'
 ]);
-function isExplicitSecretPlaceholder(line) {
-  const value = /(?:password|secret|token|api[_-]?key)\s*[:=]\s*['"]([^'"\s]+)['"]/i.exec(line)?.[1];
-  return value !== undefined && SECRET_PLACEHOLDER_VALUES.has(value);
+function maskExplicitSecretPlaceholders(line) {
+  // Mask only the exact inert assignment value. Never exempt the whole source
+  // line: minified/object-literal code can contain a real credential beside a
+  // fixture placeholder.
+  return line.replace(/((?:password|secret|token|api[_-]?key)\s*[:=]\s*['"])([^'"\s]+)(['"])/gi, (match, prefix, value, suffix) =>
+    SECRET_PLACEHOLDER_VALUES.has(value) ? `${prefix}[placeholder]${suffix}` : match
+  );
 }
 
 function check(rule) {
@@ -195,6 +213,15 @@ function check(rule) {
         ? { status: 'pass', detail: ok.slice(0, 3).join(', ') }
         : { status: 'fail', detail: `${hits.length} file(s) matched, none contained all of ${rule.patterns.length} pattern(s)` };
     }
+    case 'mutation': {
+      const configs = pick(rule.glob ?? []);
+      if (configs.length > 0) return { status: 'pass', detail: configs.slice(0, 3).join(', ') };
+      const pyproject = pick(rule.pythonGlob ?? []);
+      const configuredPython = pyproject.filter((file) => matchesAll(read(file), rule.pythonPatterns ?? []));
+      return configuredPython.length > 0
+        ? { status: 'pass', detail: configuredPython.slice(0, 3).join(', ') }
+        : { status: 'fail', detail: 'no mutation configuration (Stryker, mutmut, Cosmic Ray, or packet config) was found' };
+    }
     case 'ci': {
       const workflows = relative.filter((file) => /^\.github\/workflows\/.*\.ya?ml$/.test(file) || /^(\.gitlab-ci\.yml|\.circleci\/config\.yml|azure-pipelines\.yml|Jenkinsfile)$/.test(file));
       if (workflows.length === 0) return { status: 'fail', detail: 'no CI configuration in the repository' };
@@ -203,7 +230,8 @@ function check(rule) {
     }
     case 'anchors': {
       if (!spec) return { status: 'fail', detail: 'spec.json is not readable from the enforcement directory' };
-      const map = anchored();
+      const { found: map, stray } = anchored();
+      if (stray.length > 0) return { status: 'fail', detail: stray.slice(0, 3).join(' | ') };
       // Only automated requirements can carry a test anchor. A requirement verified by
       // a gate (`verify: "gate"`) or by a person (`verify: "manual"`) would otherwise
       // sit in this list forever, which trains everyone to ignore a permanent amber.
@@ -224,13 +252,15 @@ function check(rule) {
       const docs = spec?.docs ?? [];
       const missingDocs = docs.filter((doc) => !existsSync(path.join(PACKET, doc)));
       if (missingDocs.length > 0) return { status: 'fail', detail: `missing documents: ${missingDocs.join(', ')}` };
-      const map = anchored();
-      const pending = (spec?.requirements ?? []).filter(
-        (requirement) => requirement.verify === 'automated' && !(map.get(requirement.id) ?? []).some((hit) => hit.isTest)
-      );
-      return pending.length > 0
-        ? { status: 'pending', detail: `${pending.length} requirement(s) still unanchored; run node spec-check.mjs --repo .` }
-        : { status: 'pass', detail: 'anchors resolve and every document is present' };
+      // Delegate final drift authority to the copied checker. It owns EARS,
+      // unknown/source-only anchors, suppression, exclusions, and assertion
+      // behavior; duplicating a subset here has repeatedly caused false greens.
+      try {
+        execFileSync(process.execPath, [checker, '--repo', REPO, '--strict'], { stdio: ['ignore', 'pipe', 'pipe'], timeout: 30_000 });
+      } catch {
+        return { status: 'fail', detail: 'spec-check.mjs failed; run node spec-check.mjs --repo . for findings' };
+      }
+      return { status: 'pass', detail: 'spec-check.mjs validates anchors and every document is present' };
     }
     case 'attest': {
       const file = path.join(REPO, rule.file);
@@ -247,11 +277,12 @@ function check(rule) {
     case 'no-secrets': {
       const hits = [];
       for (const file of relative) {
-        if (!SOURCE.test(file) && !/\.env/.test(file)) continue;
+        if (!SECRET_SOURCE.test(file) && !/\.env/.test(file)) continue;
         if (/\.(lock|min|map)$/.test(file)) continue;
         const text = read(file);
-        for (const line of text.split('\n')) {
-          if (SECRET.some((pattern) => pattern.test(line)) && !isExplicitSecretPlaceholder(line)) hits.push(`${file}: ${line.trim().slice(0, 60)}`);
+        for (const [index, line] of text.split('\n').entries()) {
+          const inspected = maskExplicitSecretPlaceholders(line);
+          if (SECRET.some((pattern) => pattern.test(inspected))) hits.push(`${file}:${index + 1} (credential-shaped value redacted)`);
         }
       }
       return hits.length === 0

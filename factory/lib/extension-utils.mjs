@@ -237,6 +237,17 @@ export function writeManagedJsonAtomic(root, relative, value, options = {}) {
   return writeManagedFileAtomic(root, relative, `${JSON.stringify(value, null, 2)}\n`, options);
 }
 
+/**
+ * Safely write an explicitly requested absolute/relative output path. The
+ * filesystem root is the containment anchor so every existing component is
+ * inspected and any missing parent is created without traversing a link.
+ */
+export function writeAbsoluteManagedFileAtomic(file, content, options = {}) {
+  const target = path.resolve(file);
+  const root = path.parse(target).root;
+  return writeManagedFileAtomic(root, path.relative(root, target), content, options);
+}
+
 export function vldDir(projectDir) {
   return path.join(ensureProjectDir(projectDir), '.vld');
 }

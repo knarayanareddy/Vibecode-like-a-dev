@@ -7,7 +7,7 @@
 
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -211,6 +211,11 @@ test('writing the profile refuses to clobber and rejects an invalid one', (t) =>
   assert.ok(existsSync(nested));
   assert.doesNotThrow(() => writeAdoptedProfile(report, out, { force: true }));
 
+  const dangling = path.join(repo.root, 'dangling-profile.json');
+  symlinkSync(path.join(repo.root, 'outside-profile.json'), dangling, 'file');
+  assert.throws(() => writeAdoptedProfile(report, dangling, { force: true }), /symbolic link/);
+  assert.equal(existsSync(path.join(repo.root, 'outside-profile.json')), false, 'a dangling output link is never followed');
+
   const broken = { ...report, profile: { ...report.profile, kind: 'spaceship' } };
   assert.throws(() => writeAdoptedProfile(broken, path.join(repo.root, 'broken.json'), { force: true }), /invalid profile/);
 });
@@ -398,6 +403,15 @@ test('remote Git repository URLs parse safely, reject flag injection, redact cre
   assert.equal(parsed.displayUrl, 'https://github.com/acme/widget');
   assert.equal(parsed.branch, 'feat/coldchain');
   assert.equal(parsed.name, 'widget');
+  assert.throws(() => parseRemoteRepo('file:///tmp/..'), { code: 'INVALID_REMOTE_URL' });
+  assert.throws(() => parseRemoteRepo('https://github.com/acme/..'), { code: 'INVALID_REMOTE_URL' });
+  const ssh = parseRemoteRepo('ssh://user:supersecret@example.invalid/acme/widget.git');
+  assert.equal(ssh.displayUrl, 'ssh://example.invalid/acme/widget.git');
+  assert.doesNotMatch(ssh.displayUrl, /supersecret/);
+  assert.throws(
+    () => adoptRepo('file:///tmp/vld-adopt-secret-path/missing.git'),
+    (error) => error.code === 'REMOTE_CLONE_FAILED' && !/vld-adopt-secret-path|file:\/\//.test(error.message) && !/vld-adopt-secret-path|file:\/\//.test(error.debug ?? '')
+  );
 
   const sourceRepo = fixture({
     'go.mod': 'module github.com/acme/coldchain-api\n\ngo 1.23\n\nrequire github.com/gin-gonic/gin v1.10.0\n',

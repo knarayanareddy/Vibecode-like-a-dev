@@ -89,6 +89,25 @@ test('Runtime initializes a snapshot plus ledger and never allocates a worktree 
   assert.equal(same.changed, false, 'matching initialization is idempotent');
 });
 
+test('Runtime status uses its supplied clock once for deterministic lease warnings', (t) => {
+  const value = fixture(t);
+  initializeRuntime({ missionFile: value.missionFile, projectDir: value.project, now: FUTURE });
+  allocateRuntimePackage({
+    missionFile: value.missionFile,
+    projectDir: value.project,
+    packageId: 'export-api',
+    actor: operator,
+    assignee: implementer,
+    leaseMs: 1_000,
+    leaseToken: IDEMPOTENT_LEASE,
+    now: FUTURE
+  });
+  const beforeExpiry = runtimeStatus({ missionFile: value.missionFile, projectDir: value.project, now: '2035-01-01T00:00:00.500Z' });
+  assert.equal(beforeExpiry.warnings.filter((warning) => /lease\(s\) are expired/.test(warning)).length, 0);
+  const afterExpiry = runtimeStatus({ missionFile: value.missionFile, projectDir: value.project, now: '2035-01-01T00:00:01.001Z' });
+  assert.equal(afterExpiry.warnings.filter((warning) => /lease\(s\) are expired/.test(warning)).length, 1, 'status emits one expiry warning, not a wall-clock duplicate');
+});
+
 test('Runtime host enforces leases, expected versions, and receipt-only delivery progression', (t) => {
   const value = fixture(t);
   initializeRuntime({ missionFile: value.missionFile, projectDir: value.project, now: FUTURE });

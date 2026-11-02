@@ -6,6 +6,7 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import vm from 'node:vm';
 import { studioContentSecurityPolicy, studioDashboardScript, studioHtml } from '../lib/studio.mjs';
 
 const require = createRequire(import.meta.url);
@@ -36,6 +37,58 @@ test('M6 dashboard uses a nonce CSP, never interpolates Runtime fields as HTML, 
   assert.match(studioDashboardScript(), /textContent/);
   assert.match(studioDashboardScript(), /codePointAt/);
   assert.match(page, /type="password"/);
+});
+
+test('Studio renders forge receipts as a disabled-merge provider plan, not as a generic delivery outcome', () => {
+  const script = studioDashboardScript();
+  assert.match(script, /item\.forge/);
+  assert.match(script, /Forge plan/);
+  assert.match(script, /Repository/);
+  assert.match(script, /Head ref/);
+  assert.match(script, /Base ref/);
+  assert.match(script, /Required checks/);
+  assert.match(script, /Merge request/);
+  assert.match(script, /plan\.allowMergeRequest \? 'allowed' : 'disabled'/);
+});
+
+test('Studio browser program renders an authoritative forge plan receipt into DOM fields', async () => {
+  class Node {
+    constructor() { this.children = []; this.listeners = new Map(); this.textContent = ''; this.value = ''; this.disabled = false; this.className = ''; }
+    get firstChild() { return this.children[0] ?? null; }
+    append(...nodes) { this.children.push(...nodes); }
+    removeChild(node) { this.children.splice(this.children.indexOf(node), 1); }
+    addEventListener(type, listener) { this.listeners.set(type, listener); }
+  }
+  const ids = ['token', 'connect', 'refresh', 'connection', 'mission', 'packages', 'runs', 'evidence', 'package-id', 'assignee', 'lease-ms', 'allocate', 'recover'];
+  const nodes = Object.fromEntries(ids.map((id) => [id, new Node()]));
+  const status = {
+    ok: true,
+    runtime: { missionId: 'mission-fixture', packetDigest: 'packet', corePolicyDigest: 'policy', sequence: 42 }, mission: { current: true }, packages: [], agentRuns: [], warnings: [],
+    studio: { actions: { allocate: false, recover: false }, actor: { role: 'reviewer', id: 'fixture' } },
+    delivery: [{ packageId: 'delivery-work', forge: {
+      id: 'forge-fixture', candidateSha: 'a'.repeat(40), targetSha: 'b'.repeat(40), policyDigest: 'c'.repeat(64), exportedAt: '2026-11-02T00:00:00.000Z',
+      plan: { provider: 'github-v1', repository: 'owner/repository', headRef: 'review/fixture', baseRef: 'main', title: 'Review fixture', requiredChecks: ['npm run check'], allowMergeRequest: false }
+    } }]
+  };
+  const context = {
+    document: { getElementById: (id) => nodes[id], createElement: () => new Node() },
+    fetch: async () => ({ ok: true, json: async () => ({ ok: true, result: status }) }),
+    crypto: { randomUUID: () => 'fixture-request' },
+    globalThis: null,
+    Error, JSON, String, Array, Number, Object, Promise, Set, Map
+  };
+  context.globalThis = context;
+  vm.runInNewContext(studioDashboardScript(), context);
+  nodes.token.value = 'ephemeral-token';
+  await nodes.connect.listeners.get('click')();
+  const flatten = (node) => [node.textContent, ...node.children.flatMap(flatten)].filter(Boolean).join(' ');
+  const rendered = flatten(nodes.runs);
+  assert.match(rendered, /Forge plan/);
+  assert.match(rendered, /owner\/repository/);
+  assert.match(rendered, /review\/fixture/);
+  assert.match(rendered, /npm run check/);
+  assert.match(rendered, /disabled/);
+  assert.equal(rendered.includes('Outcome'), false, 'forge receipts are plans, not generic outcomes');
 });
 
 test('M6 VS Code bridge accepts only exact loopback Studio URLs and its WebView message schema is closed', () => {

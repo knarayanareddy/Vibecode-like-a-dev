@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { createMission } from '../lib/missions.mjs';
 import { defaultDeliveryPolicy, validateDeliveryPolicy } from '../lib/delivery-policy.mjs';
 import { approveRuntimeDeliveryCandidate, queueRuntimeDeliveryCandidate, runtimeDeliveryStatus, submitRuntimeDeliveryCandidate, verifyRuntimeDeliveryCandidate } from '../lib/runtime-delivery.mjs';
-import { allocateRuntimePackage, initializeRuntime, recordRuntimeForgePlan, runtimeDebugPaths, runtimeStatus } from '../lib/runtime.mjs';
+import { allocateRuntimePackage, heartbeatRuntimeLease, initializeRuntime, recordRuntimeForgePlan, runtimeDebugPaths, runtimeStatus } from '../lib/runtime.mjs';
 import { exportRuntimeForgePlan, prepareRuntimeForgePlan, writeRuntimeForgePlan } from '../lib/runtime-forge.mjs';
 import { digest } from '../lib/extension-utils.mjs';
 import { requestGitHubMerge } from '../integrations/github-v1/index.mjs';
@@ -204,6 +204,76 @@ test('M5 delivery foundation and M8.1 forge export bind only a verified approved
     async () => runtimeStatus({ missionFile: value.missionFile, projectDir: value.project }),
     (error) => error.code === 'INVALID_RUNTIME_LEDGER'
   );
+});
+
+test('M5 delivery authority survives status-window rollover for adapter runs, candidates, and forge plans', async (t) => {
+  const value = fixture(t);
+  const { agent, workspace } = await changesReady(value);
+  const candidateSha = git(workspace, ['rev-parse', 'HEAD']);
+  const heartbeat = () => heartbeatRuntimeLease({
+    missionFile: value.missionFile,
+    projectDir: value.project,
+    packageId: 'delivery-work',
+    runId: value.allocated.allocation.run.id,
+    leaseToken: value.allocated.leaseToken,
+    actor: { role: 'implementer', id: 'agent-alpha' },
+    leaseMs: 600_000
+  });
+
+  // The completed adapter receipt is no longer visible in the bounded recent
+  // window. Submission must still be able to bind it as candidate authority.
+  for (let index = 0; index < 201; index += 1) heartbeat();
+  assert.equal(runtimeStatus({ missionFile: value.missionFile, projectDir: value.project }).recentEvents.length, 200);
+  const submitted = submitRuntimeDeliveryCandidate({
+    missionFile: value.missionFile,
+    packageId: 'delivery-work',
+    policyFile: 'delivery-policy.json',
+    leaseToken: value.allocated.leaseToken,
+    candidateSha,
+    adapterRunId: agent.agentRun.id,
+    projectDir: value.project
+  });
+
+  // Roll the candidate itself out of the transport view before host verification.
+  for (let index = 0; index < 201; index += 1) heartbeat();
+  const rolled = runtimeStatus({ missionFile: value.missionFile, projectDir: value.project });
+  assert.equal(rolled.recentEvents.some((event) => event.candidate?.id === submitted.candidate.id), false);
+  assert.equal(rolled.delivery.some((event) => event.candidate?.id === submitted.candidate.id), true, 'durable delivery projection retains the candidate');
+  assert.equal(rolled.agentRuns.some((entry) => entry.id === agent.agentRun.id), true, 'durable agent projection retains the completed adapter run');
+
+  const verified = verifyRuntimeDeliveryCandidate({ missionFile: value.missionFile, packageId: 'delivery-work', policyFile: 'delivery-policy.json', projectDir: value.project });
+  assert.equal(verified.verification.outcome, 'passed');
+  const approved = approveRuntimeDeliveryCandidate({
+    missionFile: value.missionFile,
+    packageId: 'delivery-work',
+    policyFile: 'delivery-policy.json',
+    candidateId: submitted.candidate.id,
+    actor: { role: 'reviewer', id: 'reviewer-beta' },
+    reason: 'durable receipt regression review passed',
+    projectDir: value.project
+  });
+  assert.equal(approved.package.state, 'approved');
+  const queued = queueRuntimeDeliveryCandidate({
+    missionFile: value.missionFile,
+    packageId: 'delivery-work',
+    policyFile: 'delivery-policy.json',
+    candidateId: submitted.candidate.id,
+    actor: { role: 'release-approver', id: 'release-gamma' },
+    projectDir: value.project
+  });
+  assert.equal(queued.package.state, 'queued');
+  const exported = exportRuntimeForgePlan({
+    missionFile: value.missionFile,
+    packageId: 'delivery-work',
+    candidateId: submitted.candidate.id,
+    repository: 'example/vld-runtime',
+    headRef: 'vld/delivery-work',
+    requiredChecks: ['packet-check'],
+    actor: { role: 'release-approver', id: 'release-gamma' },
+    projectDir: value.project
+  });
+  assert.equal(exported.changed, true);
+  assert.equal(runtimeDeliveryStatus({ missionFile: value.missionFile, projectDir: value.project }).delivery.at(-1).forge.id, exported.forge.id);
 });
 
 test('M5 blocks a candidate when its integrated packet digest differs and retains only a bounded check receipt', async (t) => {

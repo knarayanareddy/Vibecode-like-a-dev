@@ -5,15 +5,13 @@
  * formatted" can be reviewed independently.
  */
 
-import { readFileSync } from 'node:fs';
 import { aggregatesFor, contextsFor, termsFor } from '../domain-hints.mjs';
+import { PACKAGE_VERSION } from '../version.mjs';
 import { articleFor, ideaNouns, pluralOf, singularOf, vocabularyFor } from './vocabulary.mjs';
 
-// The package manifest is the release authority; generated provenance must never
-// carry a hand-maintained second version. Read it explicitly rather than through
-// a JSON module so all supported Node 22 releases keep ordinary CLI stderr clean.
-const packageMetadata = JSON.parse(readFileSync(new URL('../../../package.json', import.meta.url), 'utf8'));
-export const FACTORY_VERSION = packageMetadata.version;
+// Generated provenance shares the same package-metadata authority as the CLI
+// and MCP server, preventing independently maintained version literals.
+export const FACTORY_VERSION = PACKAGE_VERSION;
 
 // ---------- text helpers ----------
 
@@ -76,6 +74,20 @@ const PY_STACK = {
   ci: 'GitHub Actions'
 };
 
+const UNKNOWN_STACK = {
+  language: 'Unrecognised stack (decision required)',
+  runtime: 'record the supported runtime',
+  ui: 'record the UI/runtime boundary if one exists',
+  http: 'record the HTTP or transport boundary',
+  db: 'record the persistence choice or none',
+  validation: 'record boundary validation',
+  unitRunner: 'record the test runner',
+  tests: 'record unit, integration, and journey test tools',
+  lint: 'record static checks that block CI',
+  logs: 'record structured logging and correlation fields',
+  ci: 'record the CI provider and commands'
+};
+
 const GO_STACK = {
   language: 'Go 1.23',
   runtime: 'the Go toolchain, shipped as a single static binary',
@@ -136,7 +148,7 @@ export function stackFor(profile) {
   const pythonish = PYTHONISH.test(declared);
   const goish = !pythonish && GOISH.test(declared);
   const recognised = declared === 'undecided' || pythonish || goish || /typescript|node|react|vite|javascript/.test(declared);
-  const base = pythonish ? PY_STACK : goish ? GO_STACK : TS_STACK;
+  const base = pythonish ? PY_STACK : goish ? GO_STACK : recognised ? TS_STACK : UNKNOWN_STACK;
   const mustUse = profile.constraints.mustUse ?? [];
 
   // unitRunner is an implementation detail of the `tests` row, not a layer.
@@ -158,7 +170,7 @@ export function stackFor(profile) {
     mustUse,
     recognised,
     note: !recognised
-      ? `The declared stack (${declared}) is not one this packet has a built-in profile for, so the table above is a TypeScript default and must be replaced. Record an ADR that names the real language, test runner and migration tool before implementation starts; the requirements and gates are language-neutral and do not change.`
+      ? `The declared stack (${declared}) is not one this packet knows. No substitute language, command, or test runner is assumed: record an ADR that names the real language, test runner and migration tool before implementation starts; the requirements and gates are language-neutral and do not change.`
       : mustUse.length > 0
         ? `Declared constraints: ${mustUse.join(', ')}. Keep them; record an ADR explaining how they fit, and do not add a second framework that duplicates their job.`
         : 'This is the default. Override it only through an ADR that names the trade-off; the tests and gates do not depend on any specific framework.'
@@ -198,13 +210,13 @@ export function groupRequirements(requirements) {
  */
 export function stackContract(profile) {
   const stack = stackFor(profile);
-  const kind = isPythonStack(profile) ? 'python' : isGoStack(profile) ? 'go' : 'typescript';
+  const kind = !stack.recognised ? 'unsupported' : isPythonStack(profile) ? 'python' : isGoStack(profile) ? 'go' : 'typescript';
   return {
     kind,
     language: stack.stack.language,
-    fenceLanguage: kind === 'python' ? 'python' : kind === 'go' ? 'go' : 'ts',
-    testExtension: kind === 'python' ? 'py' : kind === 'go' ? 'go' : 'ts',
-    anchorComment: kind === 'python' ? '#' : '//',
+    fenceLanguage: kind === 'python' ? 'python' : kind === 'go' ? 'go' : kind === 'typescript' ? 'ts' : 'text',
+    testExtension: kind === 'python' ? 'py' : kind === 'go' ? 'go' : kind === 'typescript' ? 'ts' : null,
+    anchorComment: kind === 'python' ? '#' : kind === 'unsupported' ? null : '//',
     recognised: stack.recognised,
     commands: commandsFor(profile)
   };
@@ -225,8 +237,12 @@ export function planContract(plan) {
 }
 
 export function anchorPath(profile, requirement) {
+  const contract = stackContract(profile);
   const name = slugOf(requirement.key);
-  return `tests/${requirement.render}/${name}.test.${stackContract(profile).testExtension}`;
+  // This is a deliberately visible placeholder path, not a TypeScript fallback.
+  // The author must replace it after choosing a runner in the required ADR.
+  if (!contract.testExtension) return `tests/choose-runner/${name}.test`;
+  return `tests/${requirement.render}/${name}.test.${contract.testExtension}`;
 }
 
 // ---------- non-goals and questions ----------

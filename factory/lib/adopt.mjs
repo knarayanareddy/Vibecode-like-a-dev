@@ -15,10 +15,11 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readJsonFile, scanRepo } from './scan.mjs';
+import { extensionError, safeExternalDiagnostic, writeAbsoluteManagedFileAtomic } from './extension-utils.mjs';
 import { normalizeProfile, validateProfile } from './profile.mjs';
 
 const WEB_DEPS = ['next', 'react', 'vue', 'svelte', '@sveltejs/kit', 'nuxt', '@remix-run/react', 'astro', 'solid-js', '@angular/core', 'gatsby', 'qwik', '@builder.io/qwik'];
@@ -416,7 +417,29 @@ function detectSchemaSignals(scan) {
 }
 
 function redactRemoteUrl(raw) {
-  return String(raw).replace(/^(https?:\/\/)([^/@\s]+@)/i, '$1');
+  // Diagnostics may prefix a URL with Git prose, so credential stripping cannot
+  // be anchored at the beginning of the complete message. Cover HTTPS and SSH
+  // userinfo without attempting to preserve a password-shaped value.
+  return String(raw)
+    .replace(/([a-z][a-z0-9+.-]*:\/\/)[^/\s@]+@/gi, '$1')
+    .replace(/[\r\n\0]+/g, ' ');
+}
+
+function remoteInputError(message) {
+  const error = extensionError(message, 'INVALID_REMOTE_URL');
+  return error;
+}
+
+function assertSafeRemoteText(raw) {
+  if (!raw || /[\r\n\0]/.test(raw)) throw remoteInputError('Invalid repository reference');
+}
+
+function checkoutLeaf(value) {
+  const leaf = String(value ?? '').replace(/\.git$/i, '');
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,100}$/.test(leaf) || leaf === '.' || leaf === '..') {
+    throw remoteInputError('Invalid repository checkout name');
+  }
+  return leaf;
 }
 
 /**
@@ -424,7 +447,7 @@ function redactRemoteUrl(raw) {
  */
 export function isRemoteRepo(target) {
   const value = String(target ?? '').trim();
-  if (!value || value.startsWith('-')) return false;
+  if (!value || value.startsWith('-') || /[\r\n\0]/.test(value)) return false;
   return /^(?:https?:\/\/|git@|ssh:\/\/|file:\/\/|github:[a-z0-9_.-]+\/[a-z0-9_.-]+)/i.test(value);
 }
 
@@ -435,51 +458,50 @@ export function isRemoteRepo(target) {
  */
 export function parseRemoteRepo(target) {
   const raw = String(target ?? '').trim();
-  if (!raw || raw.startsWith('-')) {
-    const error = new Error(`Invalid repository reference: ${raw || '(empty)'}`);
-    error.code = 'INVALID_REMOTE_URL';
-    throw error;
-  }
+  if (!raw || raw.startsWith('-')) throw remoteInputError('Invalid repository reference');
+  assertSafeRemoteText(raw);
 
   const ghShort = raw.match(/^github:([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?(?:#([A-Za-z0-9_./-]+))?$/i);
   if (ghShort) {
     const [, owner, repo, branch] = ghShort;
-    if (branch?.startsWith('-')) {
-      const error = new Error(`Invalid branch name in repository reference: ${branch}`);
-      error.code = 'INVALID_REMOTE_URL';
-      throw error;
-    }
-    const cleanUrl = `https://github.com/${owner}/${repo}`;
-    return { cloneUrl: `${cleanUrl}.git`, displayUrl: cleanUrl, name: repo, branch: branch ?? null };
+    checkoutLeaf(owner);
+    const name = checkoutLeaf(repo);
+    if (branch?.startsWith('-')) throw remoteInputError('Invalid branch name in repository reference');
+    const cleanUrl = `https://github.com/${owner}/${name}`;
+    return { cloneUrl: `${cleanUrl}.git`, displayUrl: cleanUrl, name, branch: branch ?? null };
   }
 
   const ghTree = raw.match(/^(https?:\/\/(?:[^/@\s]+@)?github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?))(?:\.git)?(?:\/tree\/([A-Za-z0-9_./-]+))?\/?$/i);
   if (ghTree) {
-    const [, baseUrl, , repo, branch] = ghTree;
-    if (branch?.startsWith('-')) {
-      const error = new Error(`Invalid branch name in repository URL: ${branch}`);
-      error.code = 'INVALID_REMOTE_URL';
-      throw error;
-    }
+    const [, baseUrl, owner, repo, branch] = ghTree;
+    checkoutLeaf(owner);
+    const name = checkoutLeaf(repo);
+    if (branch?.startsWith('-')) throw remoteInputError('Invalid branch name in repository URL');
     const displayUrl = redactRemoteUrl(baseUrl);
-    return { cloneUrl: `${baseUrl}.git`, displayUrl, name: repo, branch: branch ?? null };
+    return { cloneUrl: `${baseUrl}.git`, displayUrl, name, branch: branch ?? null };
   }
 
   if (/^(?:https?:\/\/|ssh:\/\/|file:\/\/|git@)/i.test(raw)) {
     const displayUrl = redactRemoteUrl(raw).replace(/\/+$/, '');
-    const tail = displayUrl.split(/[/:]/).filter(Boolean).pop()?.replace(/\.git$/i, '') ?? 'adopted-project';
-    return { cloneUrl: raw, displayUrl, name: tail, branch: null };
+    const tail = displayUrl.split(/[\\/:]/).filter(Boolean).pop() ?? 'adopted-project';
+    return { cloneUrl: raw, displayUrl, name: checkoutLeaf(tail), branch: null };
   }
 
-  const error = new Error(`Unsupported repository URL: ${raw}`);
-  error.code = 'INVALID_REMOTE_URL';
-  throw error;
+  throw remoteInputError(`Unsupported repository URL: ${redactRemoteUrl(raw)}`);
 }
 
 function cloneRemoteRepo(remote) {
   const tempRoot = mkdtempSync(path.join(os.tmpdir(), 'vld-remote-'));
-  const checkoutDir = path.join(tempRoot, remote.name || 'repo');
-  const args = ['clone', '--depth', '1', '--single-branch'];
+  const leaf = checkoutLeaf(remote.name || 'repo');
+  const checkoutDir = path.join(tempRoot, leaf);
+  const relative = path.relative(tempRoot, checkoutDir);
+  if (!relative || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    rmSync(tempRoot, { recursive: true, force: true });
+    throw remoteInputError('Repository checkout escapes its temporary root');
+  }
+  // Disable checkout link materialization for untrusted repositories. Repository
+  // inspection is content-only and must never turn a cloned link into a host path.
+  const args = ['-c', 'core.symlinks=false', 'clone', '--depth', '1', '--single-branch'];
   if (remote.branch) args.push('--branch', remote.branch);
   args.push('--', remote.cloneUrl, checkoutDir);
 
@@ -495,9 +517,8 @@ function cloneRemoteRepo(remote) {
     };
   } catch (cause) {
     rmSync(tempRoot, { recursive: true, force: true });
-    const stderr = String(cause?.stderr ?? cause?.message ?? '').trim();
-    const error = new Error(`Failed to clone ${remote.displayUrl}${stderr ? `: ${redactRemoteUrl(stderr.split('\n')[0])}` : ''}`);
-    error.code = 'REMOTE_CLONE_FAILED';
+    const error = extensionError('Git clone failed; re-run with --debug for bounded redacted detail', 'REMOTE_CLONE_FAILED');
+    error.debug = safeExternalDiagnostic(cause);
     throw error;
   }
 }
@@ -773,12 +794,6 @@ function adoptLocalRepo(repoRoot, options = {}) {
 /** Write the profile, refusing to clobber an existing file without force. */
 export function writeAdoptedProfile(report, outPath, { force = false } = {}) {
   const target = path.resolve(outPath);
-  if (existsSync(target) && !force) {
-    const error = new Error(`${target} already exists. Pass --force to overwrite, or choose another path.`);
-    error.code = 'OUTPUT_EXISTS';
-    throw error;
-  }
-
   const errors = validateProfile(normalizeProfile(report.profile));
   if (errors.length > 0) {
     const error = new Error(`adoption produced an invalid profile:\n  - ${errors.join('\n  - ')}`);
@@ -786,7 +801,15 @@ export function writeAdoptedProfile(report, outPath, { force = false } = {}) {
     throw error;
   }
 
-  mkdirSync(path.dirname(target), { recursive: true });
-  writeFileSync(target, `${JSON.stringify(report.profile, null, 2)}\n`, 'utf8');
+  try {
+    writeAbsoluteManagedFileAtomic(target, `${JSON.stringify(report.profile, null, 2)}\n`, { overwrite: force, label: 'adopted profile' });
+  } catch (cause) {
+    if (cause.code === 'MANAGED_FILE_EXISTS') {
+      const error = new Error(`${target} already exists. Pass --force to overwrite, or choose another path.`);
+      error.code = 'OUTPUT_EXISTS';
+      throw error;
+    }
+    throw cause;
+  }
   return target;
 }

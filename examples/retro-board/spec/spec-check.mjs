@@ -177,7 +177,7 @@ const strayAnchors = [];
 let scanned = 0;
 let suppressed = 0;
 const exclusions = Array.isArray(spec.anchors?.exclude) ? spec.anchors.exclude : [];
-const globToRegExp = (glob) => new RegExp(`^${glob.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*\*/g, '\u0000').replace(/\*/g, '[^/]*').replace(/\u0000/g, '.*')}$`);
+const globToRegExp = (glob) => new RegExp(`^${glob.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*\*\//g, '\u0000').replace(/\*\*/g, '\u0001').replace(/\*/g, '[^/]*').replace(/\u0000/g, '(?:.*/)?').replace(/\u0001/g, '.*')}$`);
 const exclusionPatterns = exclusions.map(globToRegExp);
 const isExcluded = (file) => exclusionPatterns.some((pattern) => pattern.test(file));
 

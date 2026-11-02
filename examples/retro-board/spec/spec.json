@@ -60,7 +60,7 @@
   },
   "anchorConvention": {
     "marker": "@req",
-    "syntax": "// @req REQ-xxx   (or \"# @req REQ-xxx\" in Python)",
+    "syntax": "// @req REQ-xxx",
     "countedIn": [
       "tests/**"
     ],

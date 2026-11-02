@@ -17,11 +17,11 @@ import { ROOT, buildIndex, loadIndex } from './indexer.mjs';
 import { buildPlan, loadCatalog, loadPolicy, loadRouting } from './planner.mjs';
 import { normalizeProfile, validateProfile } from './profile.mjs';
 import { anchorPath, planContract } from './emit/derive.mjs';
+import { PACKAGE_VERSION } from './version.mjs';
 
 const PROTOCOL_VERSION = '2024-11-05';
-// MCP clients display this in their server list, so it must be the package version
-// rather than a second literal that can silently drift from `vld --version`.
-const PACKAGE_VERSION = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
+// MCP clients display this in their server list, so it shares the release
+// authority used by `vld --version` and emitted provenance.
 const SERVER_INFO = { name: 'vibecode-like-a-dev', version: PACKAGE_VERSION };
 
 const PRIMITIVE_ROOT = path.join(ROOT, 'primitives');

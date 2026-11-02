@@ -40,6 +40,19 @@ not as an aspiration. "Coverage answers X; it does not answer Y" beats
 | `## Anti-patterns` | The specific wrong versions, each with why it fails. |
 | `## Why it works` | The mechanism. One paragraph. |
 | `## Cost and when to skip` | Honest cost, and the tier below which to skip. |
+| `## In this product` | Bind the practice to this repository’s product shape; this is checked by the library evaluator. |
+| `## Red flags` | At least three concrete bullet warnings; do not hide them in prose. |
+| `## Anti-rationalization` | A Markdown table with at least three concrete excuse/countermeasure data rows. |
+
+### Enforced primitive contracts
+
+These are CI contracts, not editorial preferences. `validatePrimitives`, `factory/test/primitives.test.mjs`, and `npm run eval` reject a primitive when it violates them:
+
+- Front matter has a unique `<module>.<name>` ID whose module matches its directory; required `summary`, `tier_min`, `cost`, `priority`, and product-slot `obligation` are present and valid. `gates`, when supplied, is an inline list of non-empty IDs (nested YAML is rejected).
+- Every `enforces` key exists; every `gates` item is a policy gate. A primitive must have a consequence (`enforces` or `gates`) or be explicitly `advisory: true` with an `advisory_reason` of at least 30 characters.
+- Exactly one routing rule names the primitive, has a supported predicate and a `why` longer than 20 characters. No primitive may be unreachable or routed twice.
+- The body has non-empty **In this product**, enough `## Red flags` bullets, and enough **Anti-rationalization** table rows to meet the evaluator thresholds. Keep these headings exact: the evaluator is intentionally mechanical.
+- The generated `primitives/index.json` must be fresh (`node factory/cli.mjs index --check`).
 
 Rules:
 
@@ -80,6 +93,10 @@ If the practice implies behaviour a project must have, add a requirement to `fac
 ```
 
 Requirements need: a statement two independent implementers would implement the same way, at least one acceptance criterion, and a failure path. The test suite rejects vacuous ones (`you should`, `best practice`) and requirements with no criteria.
+
+### Enforced requirement-definition contracts
+
+Every catalog requirement must also have a `definition` template. It is the product-specific rendering sentence, not an optional summary. `npm run eval` rejects a missing template and rejects a generic template that lacks at least one of these slots: `{primary}`, `{aPrimary}`, `{primaryPlural}`, `{secondary}`, `{aSecondary}`, `{secondaryPlural}`, `{project}`, or `{db}`. In addition, the core suite enforces unique keys, one of `automated`/`manual`/`gate` verification modes, non-empty acceptance criteria, a failure path longer than ten characters, and a non-aspirational statement. Keep definition templates deterministic: no clock, environment, or external lookup may influence rendered packet text.
 
 `render` picks the packet document the requirement appears in: `core`, `data`, `security`, `frontend`, `api`, `reliability`, `ai`.
 
