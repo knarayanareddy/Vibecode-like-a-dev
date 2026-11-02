@@ -64,8 +64,9 @@ jobs:
         uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          config-path: factory/gates/gitleaks.toml
+          # gitleaks-action v2 consumes configuration through this environment
+          # variable; it deliberately declares no action inputs.
+          GITLEAKS_CONFIG: factory/gates/gitleaks.toml
 
   node-22-minimum:
     name: Linux core suite — minimum Node 22

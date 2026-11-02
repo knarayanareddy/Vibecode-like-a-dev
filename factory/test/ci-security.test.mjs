@@ -62,7 +62,7 @@ test('CI separates deterministic evaluations/stress work and validates the porta
   mustNotMatch(ci, /tee portable-test\.log|NODE_OPTIONS=--test-reporter=dot/);
   mustMatch(ci, /deterministic outcome calibration/);
   mustNotMatch(ci, /--runner cmd|--unsafe-command/);
-  mustMatch(ci, /secret-history:[\s\S]*?fetch-depth: 0[\s\S]*?gitleaks\/gitleaks-action@[a-f0-9]{40}[\s\S]*?config-path: factory\/gates\/gitleaks\.toml/);
+  mustMatch(ci, /secret-history:[\s\S]*?fetch-depth: 0[\s\S]*?gitleaks\/gitleaks-action@[a-f0-9]{40}[\s\S]*?GITLEAKS_CONFIG: factory\/gates\/gitleaks\.toml/);
   mustNotMatch(ci, /actions\/[\w-]+@v\d/);
 });
 
