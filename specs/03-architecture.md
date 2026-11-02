@@ -77,7 +77,7 @@ A CLI is a thin adapter over a pure core. Keeping IO at the edges is what makes 
 
 Add an ADR for every dependency around an agent that would take more than a day to remove, and for every boundary decision a future reader would otherwise reverse-engineer from this repository.
 
-## 9. Fitness functions
+## 8. Fitness functions
 
 Architecture that is not executable is decoration, so each of these runs in CI for Vibecode Like A Dev rather than living in a review checklist.
 
@@ -89,7 +89,7 @@ Architecture that is not executable is decoration, so each of these runs in CI f
 | Requirement coverage | 3 anchored requirements have a passing test | `node specs/spec-check.mjs` | A test is deleted or renamed |
 | Assertion density | Every test asserts an outcome, not just absence of a throw | review | A test would pass if the behaviour were wrong |
 
-## 10. When this architecture should change
+## 9. When this architecture should change
 
 - A single agent operation needs to scale on a different curve from the rest, measured rather than predicted.
 - An agent write starts spanning more than two of the 1 contexts and cannot be made eventually consistent without rewriting the rules.

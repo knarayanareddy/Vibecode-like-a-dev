@@ -23,7 +23,7 @@ Every automated requirement carries one anchor line in the test that proves it. 
 // @req REQ-001  // @req-ignore: example inside a spec document
 test('runnable from a clean clone (AC-01)', async () => {
   // Given a fresh clone and an empty environment file, when the documented setup command runs, then it either succeeds or lists every missing required var
-  // assert the outcome, not the absence of a throw
+  expect(outcome).toBeDefined();
 });
 ```
 
@@ -35,8 +35,8 @@ test('runnable from a clean clone (AC-01)', async () => {
 
 Anchor column: suggested path, followed by `?` until the file exists. Toggle the last column when the test is green.
 
-| Req | Criteria | Verified by | Anchor |
-| --- | --- | --- | --- |
+| Req | Criteria | Verified by | Anchor | Status |
+| --- | --- | --- | --- | --- |
 | REQ-001 | A clean clone of Retro Board runs with one documented command, and a missing setting is named rather than guessed. | gate | manual script | ☐ |
 | REQ-002 | One board goes from created to finished end to end through the documented interface, with no manual step in the middle and nothing reachable only by a developer. | automated | `tests/core/core-primary-journey.test.ts?` | ☐ |
 | REQ-003 | The three things Retro Board will not do in v1 are written down, reviewed before the first sprint, and cited the first time someone asks for a fourth thing. | manual | manual script | ☐ |
@@ -102,5 +102,6 @@ The gates in section 4 are also a command: `node specs/enforcement/gates.mjs`, g
 - [ ] The traceability row is updated and its anchor is green.
 - [ ] No personal field of a team reaches a log, fixture or error detail.
 - [ ] Every new read of another team's board is authorized server-side.
+- [ ] New dependency? ADR present, pinned, removable in a day.
 
 Deliberately absent: a coverage percentage target (it rewards executing code, not checking it), mocks of the domain to test the domain, and tests of framework behaviour. Reasoning: `testing.test-budget` in the library.

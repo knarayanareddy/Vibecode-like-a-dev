@@ -483,7 +483,7 @@ export function parseRemoteRepo(target) {
 
   if (/^(?:https?:\/\/|ssh:\/\/|file:\/\/|git@)/i.test(raw)) {
     const displayUrl = redactRemoteUrl(raw).replace(/\/+$/, '');
-    const tail = displayUrl.split(/[/:]/).filter(Boolean).pop() ?? 'adopted-project';
+    const tail = displayUrl.split(/[\\/:]/).filter(Boolean).pop() ?? 'adopted-project';
     return { cloneUrl: raw, displayUrl, name: checkoutLeaf(tail), branch: null };
   }
 
