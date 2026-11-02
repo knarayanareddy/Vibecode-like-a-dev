@@ -52,7 +52,7 @@ export function writeJsonAtomic(file, value) {
 }
 
 export function ensureProjectDir(projectDir) {
-  const target = canonicalTemporaryPath(projectDir ?? '.');
+  const target = path.resolve(projectDir ?? '.');
   if (!existsSync(target)) {
     const error = new Error(`project directory does not exist: ${target}`);
     error.code = 'PROJECT_NOT_FOUND';
@@ -101,9 +101,14 @@ function realDirectory(target, label) {
  * The caller can use it for an existing file check before a later atomic write.
  */
 export function safeManagedFile(root, relative, label = 'managed file') {
-  const resolvedRoot = canonicalTemporaryPath(root);
-  const candidate = path.resolve(resolvedRoot, relative);
-  if (typeof relative !== 'string' || !relative || !containedPath(resolvedRoot, candidate) || candidate === resolvedRoot) {
+  const lexicalRoot = path.resolve(root);
+  const lexicalCandidate = path.resolve(lexicalRoot, relative);
+  if (typeof relative !== 'string' || !relative || !containedPath(lexicalRoot, lexicalCandidate) || lexicalCandidate === lexicalRoot) {
+    throw extensionError(`${label} escapes its managed root`, 'UNSAFE_MANAGED_PATH');
+  }
+  const resolvedRoot = canonicalTemporaryPath(lexicalRoot);
+  const candidate = canonicalTemporaryPath(lexicalCandidate);
+  if (!containedPath(resolvedRoot, candidate) || candidate === resolvedRoot) {
     throw extensionError(`${label} escapes its managed root`, 'UNSAFE_MANAGED_PATH');
   }
   realDirectory(resolvedRoot, 'managed root');
@@ -122,14 +127,19 @@ export function safeManagedFile(root, relative, label = 'managed file') {
   if (destination && (destination.isSymbolicLink() || !destination.isFile())) {
     throw extensionError(`${label} is a symbolic link or is not a regular file`, 'UNSAFE_MANAGED_PATH');
   }
-  return candidate;
+  return lexicalCandidate;
 }
 
 /** Create a managed directory one component at a time without traversing links. */
 export function ensureSafeManagedDirectory(root, relative, label = 'managed directory') {
-  const resolvedRoot = canonicalTemporaryPath(root);
-  const target = path.resolve(resolvedRoot, relative);
-  if (typeof relative !== 'string' || !containedPath(resolvedRoot, target)) {
+  const lexicalRoot = path.resolve(root);
+  const lexicalTarget = path.resolve(lexicalRoot, relative);
+  if (typeof relative !== 'string' || !containedPath(lexicalRoot, lexicalTarget)) {
+    throw extensionError(`${label} escapes its managed root`, 'UNSAFE_MANAGED_PATH');
+  }
+  const resolvedRoot = canonicalTemporaryPath(lexicalRoot);
+  const target = canonicalTemporaryPath(lexicalTarget);
+  if (!containedPath(resolvedRoot, target)) {
     throw extensionError(`${label} escapes its managed root`, 'UNSAFE_MANAGED_PATH');
   }
   realDirectory(resolvedRoot, 'managed root');
@@ -153,7 +163,7 @@ export function ensureSafeManagedDirectory(root, relative, label = 'managed dire
       throw extensionError(`${label} was replaced by an unsafe filesystem node`, 'UNSAFE_MANAGED_PATH');
     }
   }
-  return target;
+  return lexicalTarget;
 }
 
 /**
@@ -163,9 +173,14 @@ export function ensureSafeManagedDirectory(root, relative, label = 'managed dire
  * symlink must never be treated as an ordinary cache directory.
  */
 export function safeManagedDirectory(root, relative = '', label = 'managed directory') {
-  const resolvedRoot = canonicalTemporaryPath(root);
-  const target = path.resolve(resolvedRoot, relative);
-  if (typeof relative !== 'string' || !containedPath(resolvedRoot, target)) {
+  const lexicalRoot = path.resolve(root);
+  const lexicalTarget = path.resolve(lexicalRoot, relative);
+  if (typeof relative !== 'string' || !containedPath(lexicalRoot, lexicalTarget)) {
+    throw extensionError(`${label} escapes its managed root`, 'UNSAFE_MANAGED_PATH');
+  }
+  const resolvedRoot = canonicalTemporaryPath(lexicalRoot);
+  const target = canonicalTemporaryPath(lexicalTarget);
+  if (!containedPath(resolvedRoot, target)) {
     throw extensionError(`${label} escapes its managed root`, 'UNSAFE_MANAGED_PATH');
   }
   realDirectory(resolvedRoot, 'managed root');
@@ -179,7 +194,7 @@ export function safeManagedDirectory(root, relative = '', label = 'managed direc
       throw extensionError(`${label} has a symbolic-link or non-directory component`, 'UNSAFE_MANAGED_PATH');
     }
   }
-  return target;
+  return lexicalTarget;
 }
 
 /**
