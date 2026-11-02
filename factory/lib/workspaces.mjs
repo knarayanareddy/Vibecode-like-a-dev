@@ -12,6 +12,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, s
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
+  canonicalTemporaryPath,
   digest,
   ensureProjectDir,
   extensionError,
@@ -152,9 +153,10 @@ function safeExistingDirectory(target, label) {
 
 /** Create a parent directory only when no existing path component is a symlink. */
 function mkdirWithoutSymlinks(target, label) {
-  const parsed = path.parse(path.resolve(target));
+  const resolved = canonicalTemporaryPath(target);
+  const parsed = path.parse(resolved);
   let cursor = parsed.root;
-  for (const part of path.resolve(target).slice(parsed.root.length).split(path.sep).filter(Boolean)) {
+  for (const part of resolved.slice(parsed.root.length).split(path.sep).filter(Boolean)) {
     cursor = path.join(cursor, part);
     if (existsSync(cursor)) {
       safeExistingDirectory(cursor, label);

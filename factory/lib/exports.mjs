@@ -7,7 +7,7 @@
  */
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { digest, ensureSafeManagedDirectory, extensionError, stableJson, writeManagedFileAtomic } from './extension-utils.mjs';
+import { canonicalTemporaryPath, digest, ensureSafeManagedDirectory, extensionError, stableJson, writeManagedFileAtomic } from './extension-utils.mjs';
 import { verifyPacket } from './verify.mjs';
 
 const FORMATS = new Set(['spec-kit', 'kiro']);
@@ -125,7 +125,7 @@ export function exportPacket({ format, packetDir, outDir, force = false }) {
   requireFormat(format);
   if (!outDir) throw extensionError('export output directory is required', 'EXPORT_OUTPUT_REQUIRED');
   const source = readPacket(packetDir);
-  const out = path.resolve(outDir);
+  const out = canonicalTemporaryPath(outDir);
   if (out === source.packet || out.startsWith(`${source.packet}${path.sep}`)) {
     throw extensionError('export output must be outside the authoritative packet directory', 'EXPORT_OUTPUT_INSIDE_PACKET');
   }

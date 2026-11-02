@@ -7,7 +7,8 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 export const ID_PATTERN = /^[a-z0-9][a-z0-9-]{1,60}$/;
@@ -65,6 +66,20 @@ function containedPath(root, candidate) {
   return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
 }
 
+/**
+ * Canonicalize only the OS-selected temporary-directory anchor. On macOS `/var`
+ * can be a system alias for `/private/var`; callers still validate every requested
+ * descendant with lstat, so this never treats a caller-created link as trusted.
+ */
+export function canonicalTemporaryPath(value) {
+  let resolved = path.resolve(value);
+  const temporary = path.resolve(os.tmpdir());
+  if (containedPath(temporary, resolved)) {
+    try { resolved = path.resolve(realpathSync(temporary), path.relative(temporary, resolved)); } catch {}
+  }
+  return resolved;
+}
+
 function lstatOrNull(target, label) {
   try {
     return lstatSync(target);
@@ -86,7 +101,7 @@ function realDirectory(target, label) {
  * The caller can use it for an existing file check before a later atomic write.
  */
 export function safeManagedFile(root, relative, label = 'managed file') {
-  const resolvedRoot = path.resolve(root);
+  const resolvedRoot = canonicalTemporaryPath(root);
   const candidate = path.resolve(resolvedRoot, relative);
   if (typeof relative !== 'string' || !relative || !containedPath(resolvedRoot, candidate) || candidate === resolvedRoot) {
     throw extensionError(`${label} escapes its managed root`, 'UNSAFE_MANAGED_PATH');

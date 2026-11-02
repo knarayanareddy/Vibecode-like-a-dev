@@ -6,11 +6,11 @@
  * into .vld/stores.json so a team can review, pin and detect local drift.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync } from 'node:fs';
+import { existsSync, lstatSync, mkdtempSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
-import { digest, ensureProjectDir, ensureSafeManagedDirectory, extensionError, ID_PATTERN, readJson, safeManagedDirectory, safeManagedFile, stableJson, vldDir, writeManagedFileAtomic, writeManagedJsonAtomic } from './extension-utils.mjs';
+import { canonicalTemporaryPath, digest, ensureProjectDir, ensureSafeManagedDirectory, extensionError, ID_PATTERN, readJson, safeManagedDirectory, safeManagedFile, stableJson, vldDir, writeManagedFileAtomic, writeManagedJsonAtomic } from './extension-utils.mjs';
 
 const STATE_VERSION = 1;
 const STORE_VERSION = 1;
@@ -366,16 +366,10 @@ export function copyStoreAsset({ projectDir = '.', storeId, assetId, out = null,
 /** Create an authoring skeleton. Git initialization and publication are deliberate user actions. */
 export function initStore({ directory, id = null, title = null, force = false }) {
   if (!directory) throw extensionError('store directory is required', 'STORE_DIRECTORY_REQUIRED');
-  let requestedRoot = path.resolve(directory); const inferred = id ?? path.basename(requestedRoot); requireId(inferred);
-  // macOS may expose its OS-selected temporary root through `/var`, an early
-  // system symlink. Canonicalize that trusted anchor only; every requested
+  const requestedRoot = canonicalTemporaryPath(directory); const inferred = id ?? path.basename(requestedRoot); requireId(inferred);
+  // The OS-selected temporary anchor is canonicalized above; every requested
   // descendant is still walked with lstat below, so a user-created link is never
   // accepted as a store root.
-  const temporary = path.resolve(os.tmpdir());
-  const temporaryRelative = path.relative(temporary, requestedRoot);
-  if (temporaryRelative === '' || (!temporaryRelative.startsWith(`..${path.sep}`) && temporaryRelative !== '..' && !path.isAbsolute(temporaryRelative))) {
-    try { requestedRoot = path.resolve(realpathSync(temporary), temporaryRelative); } catch {}
-  }
   const parsed = path.parse(requestedRoot);
   const root = ensureSafeManagedDirectory(parsed.root, requestedRoot.slice(parsed.root.length), 'store root directory');
   const manifestFile = path.join(root, 'vld-store.json');

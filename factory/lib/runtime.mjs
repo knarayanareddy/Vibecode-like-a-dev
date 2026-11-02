@@ -12,6 +12,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import {
+  canonicalTemporaryPath,
   digest,
   ensureProjectDir,
   extensionError,
@@ -78,7 +79,7 @@ function safeDirectory(directory, label) {
 
 /** Create a directory tree without following an existing symlink component. */
 function mkdirWithoutSymlinks(target, label) {
-  const resolved = path.resolve(target);
+  const resolved = canonicalTemporaryPath(target);
   const parsed = path.parse(resolved);
   let cursor = parsed.root;
   for (const segment of resolved.slice(parsed.root.length).split(path.sep).filter(Boolean)) {
