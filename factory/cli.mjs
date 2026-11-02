@@ -14,6 +14,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { adoptRepo, isRemoteRepo, writeAdoptedProfile } from './lib/adopt.mjs';
 import { artifactStatus, initArtifact, listArtifacts, validateArtifact, verifyArtifacts } from './lib/artifacts.mjs';
+import { initDiscoverabilityReadiness, validateDiscoverabilityReadiness } from './lib/discoverability-readiness.mjs';
 import { agentStatus, installAgent, listAdapters } from './lib/agents.mjs';
 import { applyBundle, getBundle, listBundles } from './lib/bundles.mjs';
 import { CHANGE_TEMPLATE, applyChange, archiveChange, emitChange, planChange, verifyChange } from './lib/change.mjs';
@@ -75,6 +76,8 @@ Usage
   vld change init <dir>              write change.json to fill in
   vld artifact list|init|validate|verify|status <type> [id] [--from-store store/asset] [--project <dir>]
                                      generate, validate and cross-check product, architecture, delivery, review and QA artifacts
+  vld discoverability-readiness init|validate [--project <dir>] [--profile <file>] [--packet <dir>] [--file <path>]
+                                     locally link a human readiness record to an opted-in packet; advisory only, no crawler or provider claims
   vld export <spec-kit|kiro> <packet-dir> -o <dir> [--force]
                                      generate a bounded interoperability view; the VLD packet remains authoritative
   vld store init <directory> [--id <store-id>] | add <id> <git-url> | diff <id> | update <id> --acknowledge <commit>
@@ -641,6 +644,37 @@ function runArtifact() {
       return;
     }
     fail('Usage: vld artifact list|init|validate|verify|status');
+  } catch (error) { fail(error.message); }
+}
+
+function runDiscoverabilityReadiness() {
+  const [action] = positional;
+  const common = {
+    projectDir: option('--project', '.'),
+    profilePath: option('--profile', null),
+    packetDir: option('--packet', null)
+  };
+  try {
+    if (action === 'init') {
+      const result = initDiscoverabilityReadiness({ ...common, out: option('--out', option('--file', null)), force: hasFlag('--force') });
+      if (hasFlag('--json')) console.log(JSON.stringify(result, null, 2));
+      else console.log(`\n✓ wrote ${displayPath(result.file)}\n\n  Human-authored, locally verifiable, and advisory only. Fill the record, then run:\n  vld discoverability-readiness validate --project ${displayPath(result.project)} --strict\n`);
+      return;
+    }
+    if (action === 'validate') {
+      const report = validateDiscoverabilityReadiness({ ...common, file: option('--file', null), strict: hasFlag('--strict') });
+      if (hasFlag('--json')) console.log(JSON.stringify(report, null, 2));
+      else {
+        console.log(`\ndiscoverability readiness validate · ${displayPath(report.file)}\n`);
+        for (const pass of report.passes) console.log(`  ✓ ${pass}`);
+        for (const warning of report.warnings) console.log(`  ! ${warning}`);
+        for (const error of report.errors) console.log(`  ✗ ${error}`);
+        console.log(`\n${hasFlag('--strict') ? report.strictOk ? 'PASS' : 'FAIL' : report.ok ? 'PASS' : 'FAIL'} · advisory local evidence only\n`);
+      }
+      if (hasFlag('--strict') ? !report.strictOk : !report.ok) process.exit(1);
+      return;
+    }
+    fail('Usage: vld discoverability-readiness init|validate [--project <dir>] [--profile <file>] [--packet <dir>] [--file <path>]');
   } catch (error) { fail(error.message); }
 }
 
@@ -1521,6 +1555,9 @@ switch (command) {
     break;
   case 'artifact':
     runArtifact();
+    break;
+  case 'discoverability-readiness':
+    runDiscoverabilityReadiness();
     break;
   case 'export':
     runExport();
