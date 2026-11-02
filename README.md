@@ -92,6 +92,20 @@ Three consequences that make this different from a prompt template:
 | An existing packet and a change to make | `vld change <packet> <change.json>` | A delta spec: ADDED / MODIFIED / REMOVED, blast radius, probe, rollback, `spec.after.json` |
 | An agent that needs the library | `vld mcp` | 8 MCP tools so the agent queries selection instead of reading 34 files |
 
+### Optional public web discoverability
+
+A public web application can opt into a small, deterministic discoverability contract. This is **not** an SEO crawler or ranking promise: it selects explicit requirements for public/indexable route boundaries, canonical URLs, rendered metadata, and truthful structured data. It never calls a search provider, opens a browser, uses credentials, or makes a live score part of the packet.
+
+```json
+{
+  "kind": "web-app",
+  "risks": { "publicFacing": true },
+  "discoverability": { "enabled": true }
+}
+```
+
+All three fields are required. `vld adopt` deliberately never enables this from repository evidence: a route being reachable does not establish that the product owner wants it indexed. The generated requirement asks for locally testable route-level evidence, not a rank, traffic, indexing, or AI-citation claim. APIs, private dashboards, native clients, and public websites that do not opt in are intentionally excluded.
+
 ### `vld adopt` — meet the repo where it is
 
 Adoption accepts either a local directory or a remote Git URL (`https://github.com/org/repo`, `https://github.com/org/repo/tree/branch`, `github:org/repo#branch`, SSH) via shallow clone. It reads polyglot manifests up to four levels deep (`package.json` including `@scope/*` packages, `pyproject.toml`/`requirements*.txt`, `go.mod` including `/vN` module paths, `Cargo.toml`, `Gemfile`, `composer.json`, `pubspec.yaml`), `docker-compose*.yml` service images, committed `.env.example` variable names (never live `.env` values), raw SQL & ORM migration schemas (`ON DELETE CASCADE`, tenant/PII columns), CI, deployment config and test tooling. It reports **every inference with the observation behind it and a confidence mark**, then asks only what code cannot answer.
@@ -584,23 +598,23 @@ What this proves: the loop closes — profile in, packet out, guard passes, and 
 `npm run eval` runs four suites in CI on every commit — two deterministic library/packet checks and the two Tier-3 benchmarks from [`docs/LANDSCAPE.md`](docs/LANDSCAPE.md) §8:
 
 ```bash
-node scripts/eval-library.mjs       # 34 practices x 36 profiles: self-recall, collisions, obligations, consequences
+node scripts/eval-library.mjs       # 35 practices x 37 profiles: self-recall, collisions, obligations, consequences
 node scripts/eval-specificity.mjs   # 157 same-tier packet pairs: shared prose ceiling
-node scripts/eval-routing.mjs       # 74 practitioner prompts -> expected practices (supports --driver mcp|openai|anthropic|cmd)
+node scripts/eval-routing.mjs       # 75 practitioner prompts -> expected practices (supports --driver mcp|openai|anthropic|cmd)
 node scripts/eval-outcome.mjs       # 24 tasks x 3 arms: no-spec vs generic-spec vs vld-packet (--runner calibration|cmd|openai|anthropic)
 ```
 
 ### 1. MCP practice routing (`eval-routing.mjs`)
 
-74 labelled practitioner prompts (34 single-practice, 14 distractor-heavy, 6 multi-practice, 12 colloquial, 8 off-topic negatives) across all 34 practices, enforcing CI floors of **precision ≥ 90%** and **recall ≥ 70%**:
+75 labelled practitioner prompts (35 single-practice, 14 distractor-heavy, 6 multi-practice, 12 colloquial, 8 off-topic negatives) across all 35 practices, enforcing CI floors of **precision ≥ 90%** and **recall ≥ 70%**:
 
 | Configuration | Micro-precision | Micro-recall | F1 | Negative prompts quiet |
 | --- | --- | --- | --- | --- |
 | Uncalibrated top-10 search (`limit: 10`) | 9.7% | 100.0% | 17.7% | 0 / 8 |
-| Title-only ablation (`summary + triggers + tags` stripped) | 58.2% | 63.9% | 60.9% | 8 / 8 |
-| **`search_primitives({ activate: true })` (shipped)** | **94.7%** | **100.0%** | **97.3%** | **8 / 8** |
+| Title-only ablation (`summary + triggers + tags` stripped) | 58.8% | 64.4% | 61.5% | 8 / 8 |
+| **`search_primitives({ activate: true })` (shipped)** | **94.8%** | **100.0%** | **97.3%** | **8 / 8** |
 
-Practice metadata (`summary`, `triggers`, `tags`) contributes **+36.5pp precision** and **+36.1pp recall** over title matching, all **34/34** practices activate on their labelled prompts with **0** false-positive absorbers, and corrupting a practice's metadata fails CI (`factory/test/routing-eval.test.mjs`). Passing `--driver openai`, `--driver anthropic`, or `--driver cmd --cmd "<router>"` runs the identical 74-prompt benchmark with a live model in the loop choosing which `SKILL.md` practices to open from `primitives/index.json`.
+Practice metadata (`summary`, `triggers`, `tags`) contributes **+36.0pp precision** and **+35.6pp recall** over title matching, all **35/35** practices activate on their labelled prompts with **0** false-positive absorbers, and corrupting a practice's metadata fails CI (`factory/test/routing-eval.test.mjs`). Passing `--driver openai`, `--driver anthropic`, or `--driver cmd --cmd "<router>"` runs the identical 75-prompt benchmark with a live model in the loop choosing which `SKILL.md` practices to open from `primitives/index.json`.
 
 ### 2. Multi-arm outcome harness (`eval-outcome.mjs`)
 
@@ -670,7 +684,7 @@ They solved the first half — making the spec a real artifact. What follows is 
 
 ## The primitive library
 
-34 practices, each a self-contained `SKILL.md` with a trigger-shaped summary, the failure mode it prevents, a checklist, the red flags that say it is being skipped, a table of the excuses people make while skipping it, anti-patterns, and an `obligation:` line the compiler fills with this product's own nouns. Agents read `primitives/index.json` and open only what they need.
+35 practices, each a self-contained `SKILL.md` with a trigger-shaped summary, the failure mode it prevents, a checklist, the red flags that say it is being skipped, a table of the excuses people make while skipping it, anti-patterns, and an `obligation:` line the compiler fills with this product's own nouns. Agents read `primitives/index.json` and open only what they need.
 
 | Module | Primitives |
 | --- | --- |
@@ -695,7 +709,7 @@ Adding a primitive is data, not code: write a `SKILL.md`, add a routing rule wit
 ## Repository map
 
 ```
-primitives/            34 practices, grouped by module, each with SKILL.md
+primitives/            35 practices, grouped by module, each with SKILL.md
   index.json           generated catalog agents traverse
 prompts/
   bootstrap.md         agent-driven path: one prompt, no CLI
@@ -705,9 +719,9 @@ factory/
   policy.json          tiers, risk signals, gates, size ceilings
   routing.json         which practice applies when, and why
   catalog/
-    requirements.json  27 requirement templates with acceptance criteria
+    requirements.json  28 requirement templates with acceptance criteria
   evals/
-    routing-cases.json 74 labelled practitioner prompts across all 34 practices
+    routing-cases.json 75 labelled practitioner prompts across all 35 practices
     tasks/             24 executable multi-arm outcome tasks (greenfield, brownfield, bugfix, refactor, systems)
   lib/                 frontmatter, predicates, planner, emitter, verifier,
                        scan + adopt, change (delta specs), mcp (server),
@@ -726,7 +740,7 @@ scripts/
   stress-adversarial.mjs  24 hostile packets and 6 inputs that must be refused
   eval-library.mjs     library health: self-recall@1, trigger collisions, dead weight
   eval-specificity.mjs  is a packet about this product, or a form letter with a name in it
-  eval-routing.mjs     74-prompt MCP routing precision/recall + metadata ablation (--driver mcp|openai|anthropic|cmd)
+  eval-routing.mjs     75-prompt MCP routing precision/recall + metadata ablation (--driver mcp|openai|anthropic|cmd)
   eval-outcome.mjs     24-task x 3-arm outcome harness (--runner calibration|cmd|openai|anthropic)
   lib/packet-audit.mjs    the shared judgement both suites use
 examples/retro-board/  a profile and its compiled packet
@@ -736,7 +750,7 @@ docs/                  research notes, authoring guide, stress test, landscape s
 
 ```bash
 npm test        # complete Node test suite
-npm run eval    # library health + packet specificity + 74-prompt routing + 24-task outcome calibration
+npm run eval    # library health + packet specificity + 75-prompt routing + 24-task outcome calibration
 npm run stress  # 10 representative + 24 hostile ideas, and 6 refusals; scored on soundness
 npm run check   # lint + index + tests + verify + self-guard + gates + eval + stress
 ```

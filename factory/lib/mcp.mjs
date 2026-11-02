@@ -322,7 +322,8 @@ const TOOLS = [
           type: 'object',
           description: 'Boolean flags: pii, payments, regulated, multiTenant, destructiveWrites, publicFacing, integrations',
           additionalProperties: { type: 'boolean' }
-        }
+        },
+        discoverability: { type: 'object', properties: { enabled: { type: 'boolean' } }, required: ['enabled'], additionalProperties: false, description: 'Explicit public-web discovery contract; never inferred.' }
       }
     }
   },
@@ -340,7 +341,8 @@ const TOOLS = [
         name: { type: 'string' },
         scale: { type: 'string', enum: ['small', 'medium', 'large'] },
         traits: { type: 'array', items: { type: 'string' } },
-        risks: { type: 'object', additionalProperties: { type: 'boolean' } }
+        risks: { type: 'object', additionalProperties: { type: 'boolean' } },
+        discoverability: { type: 'object', properties: { enabled: { type: 'boolean' } }, required: ['enabled'], additionalProperties: false, description: 'Explicit public-web discovery contract; never inferred.' }
       }
     }
   },
@@ -386,7 +388,8 @@ const TOOLS = [
         name: { type: 'string' },
         scale: { type: 'string', enum: ['small', 'medium', 'large'] },
         traits: { type: 'array', items: { type: 'string' } },
-        risks: { type: 'object', additionalProperties: { type: 'boolean' } }
+        risks: { type: 'object', additionalProperties: { type: 'boolean' } },
+        discoverability: { type: 'object', properties: { enabled: { type: 'boolean' } }, required: ['enabled'], additionalProperties: false, description: 'Explicit public-web discovery contract; never inferred.' }
       }
     }
   },
@@ -413,7 +416,8 @@ const TOOLS = [
         name: { type: 'string' },
         scale: { type: 'string', enum: ['small', 'medium', 'large'] },
         traits: { type: 'array', items: { type: 'string' } },
-        risks: { type: 'object', additionalProperties: { type: 'boolean' } }
+        risks: { type: 'object', additionalProperties: { type: 'boolean' } },
+        discoverability: { type: 'object', properties: { enabled: { type: 'boolean' } }, required: ['enabled'], additionalProperties: false, description: 'Explicit public-web discovery contract; never inferred.' }
       }
     }
   },
@@ -432,7 +436,8 @@ function profileFrom(args) {
     stage: args.stage,
     users: { scale: args.scale ?? 'small' },
     traits: args.traits ?? [],
-    risks: args.risks ?? {}
+    risks: args.risks ?? {},
+    ...(args.discoverability === undefined ? {} : { discoverability: args.discoverability })
   });
 }
 

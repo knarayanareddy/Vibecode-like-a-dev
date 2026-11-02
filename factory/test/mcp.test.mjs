@@ -71,6 +71,24 @@ test('select_primitives returns reasons and records what was skipped', () => {
   assert.ok(result.skipped.length > 0, 'a tier-3 api still skips frontend practices');
 });
 
+test('MCP preserves the explicit public-web discoverability decision used by CLI planning', () => {
+  const profile = {
+    name: 'discoverable-docs',
+    idea: 'A public documentation website that explains how engineering teams safely adopt a developer product.',
+    kind: 'web-app',
+    stage: 'mvp',
+    risks: { publicFacing: true },
+    discoverability: { enabled: true }
+  };
+  const selected = payload(call('select_primitives', profile));
+  assert.ok(selected.selected.some((primitive) => primitive.id === 'product.public-web-discoverability'));
+  const requirements = payload(call('get_requirements', profile));
+  assert.ok(requirements.requirements.some((requirement) => requirement.key === 'web.discoverability'));
+
+  const disabled = payload(call('select_primitives', { ...profile, discoverability: { enabled: false } }));
+  assert.ok(!disabled.selected.some((primitive) => primitive.id === 'product.public-web-discoverability'));
+});
+
 test('a prototype selection stays small', () => {
   const result = payload(
     call('select_primitives', {

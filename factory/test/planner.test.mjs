@@ -114,6 +114,54 @@ test('a payments project gets the money-critical requirements and gates', () => 
   assert.ok(gateIds.includes('G1-AC-TRACE'), 'lower-tier gates accumulate');
 });
 
+test('public web discoverability is an explicit opt-in with no generic fallback', () => {
+  const publicWebsite = normalizeProfile({
+    name: 'docs-site',
+    idea: 'A public documentation website that helps developers evaluate and adopt a command line product.',
+    kind: 'web-app',
+    stage: 'mvp',
+    risks: { publicFacing: true },
+    discoverability: { enabled: true }
+  });
+  const plan = buildPlan(publicWebsite, { index });
+  assert.ok(plan.primitives.some((primitive) => primitive.id === 'product.public-web-discoverability'));
+  assert.ok(plan.requirements.some((requirement) => requirement.key === 'web.discoverability'));
+
+  const noOptIn = { ...publicWebsite };
+  delete noOptIn.discoverability;
+  const variants = [
+    { label: 'missing opt-in', profile: noOptIn },
+    { label: 'not public', profile: { ...publicWebsite, risks: { publicFacing: false } } },
+    { label: 'not a web app', profile: { ...publicWebsite, kind: 'api' } }
+  ];
+  for (const { label, profile } of variants) {
+    const absent = buildPlan(profile, { index });
+    assert.ok(!absent.primitives.some((primitive) => primitive.id === 'product.public-web-discoverability'), label);
+    assert.ok(!absent.requirements.some((requirement) => requirement.key === 'web.discoverability'), label);
+  }
+  const ordinaryPlan = buildPlan(noOptIn, { index });
+  assert.ok(!ordinaryPlan.skipped.some((primitive) => primitive.id === 'product.public-web-discoverability'), 'no opt-in leaves existing packets unchanged');
+  const disabledPlan = buildPlan({ ...publicWebsite, discoverability: { enabled: false } }, { index });
+  assert.ok(disabledPlan.skipped.some((primitive) => primitive.id === 'product.public-web-discoverability'), 'an explicit disabled choice remains reviewable');
+});
+
+test('discoverability input is closed and does not weaken existing profile validation', () => {
+  const base = {
+    name: 'discoverability-check',
+    idea: 'A public website with a reviewable route and metadata contract for its published documentation.',
+    kind: 'web-app',
+    stage: 'mvp',
+    risks: { publicFacing: true }
+  };
+  assert.deepEqual(validateProfile(normalizeProfile({ ...base, discoverability: { enabled: true } })), []);
+  assert.ok(!Object.hasOwn(normalizeProfile(base), 'discoverability'), 'the opt-in is absent unless explicitly supplied');
+  const bad = validateProfile(normalizeProfile({ ...base, discoverability: { enabled: 'yes', score: 100 } }));
+  assert.ok(bad.some((error) => /discoverability\.enabled: must be true or false/.test(error)), bad.join('\n'));
+  assert.ok(bad.some((error) => /discoverability\.score: unknown field/.test(error)), bad.join('\n'));
+  const missing = validateProfile(normalizeProfile({ ...base, discoverability: {} }));
+  assert.ok(missing.some((error) => /discoverability\.enabled: .*required/.test(error)), missing.join('\n'));
+});
+
 test('skipped and deferred practices are recorded with reasons, never dropped silently', () => {
   const plan = buildPlan(payout, { index });
   for (const entry of [...plan.skipped, ...plan.deferred]) {

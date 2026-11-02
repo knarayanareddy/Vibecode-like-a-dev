@@ -112,12 +112,17 @@ export function selectPrimitives(profile, index, routing, rigor) {
     }
 
     if (!evaluate(rule.when, context)) {
-      skipped.push({
-        id: primitive.id,
-        title: primitive.title,
-        reason: 'predicate',
-        detail: `not applicable: ${explain(rule.when)}`
-      });
+      // An explicit optional discipline can stay absent from packets that never
+      // declared the feature. Once supplied, a failed predicate remains visible
+      // so the profile owner can see why it was not selected.
+      if (!rule.reportSkippedWhen || evaluate(rule.reportSkippedWhen, context)) {
+        skipped.push({
+          id: primitive.id,
+          title: primitive.title,
+          reason: 'predicate',
+          detail: `not applicable: ${explain(rule.when)}`
+        });
+      }
       return;
     }
 
