@@ -683,23 +683,33 @@ export function serve({ input = process.stdin, output = process.stdout } = {}) {
     if (message) output.write(`${JSON.stringify(message)}\n`);
   };
 
+  const processLine = (raw) => {
+    const line = raw.trim();
+    if (!line) return;
+    try {
+      send(handleMessage(JSON.parse(line)));
+    } catch (error) {
+      send(rpcError(null, -32700, `Parse error: ${error.message}`));
+    }
+  };
+
   input.on('data', (chunk) => {
     buffer += chunk.toString('utf8');
     let newline = buffer.indexOf('\n');
     while (newline !== -1) {
-      const line = buffer.slice(0, newline).trim();
+      processLine(buffer.slice(0, newline));
       buffer = buffer.slice(newline + 1);
       newline = buffer.indexOf('\n');
-      if (!line) continue;
-      try {
-        send(handleMessage(JSON.parse(line)));
-      } catch (error) {
-        send(rpcError(null, -32700, `Parse error: ${error.message}`));
-      }
     }
   });
 
-  input.on('end', () => process.exit(0));
+  input.on('end', () => {
+    // JSON-RPC streams commonly delimit messages with newlines, but EOF still
+    // terminates a complete final JSON value. Process it before Node naturally
+    // exits; calling process.exit() here previously lost the final request.
+    processLine(buffer);
+    buffer = '';
+  });
   return { send };
 }
 

@@ -26,8 +26,14 @@ function fileFor(project, kind, id, explicit) {
 }
 function packetRequirements(packet) {
   const file = path.join(packet, 'spec.json');
-  if (!existsSync(file)) return [];
-  try { return JSON.parse(readFileSync(file, 'utf8')).requirements ?? []; } catch { return []; }
+  if (!existsSync(file)) return { requirements: [], error: `compiled packet is missing spec.json: ${file}` };
+  try {
+    const manifest = JSON.parse(readFileSync(file, 'utf8'));
+    if (!Array.isArray(manifest.requirements)) return { requirements: [], error: `compiled packet has no requirements list: ${file}` };
+    return { requirements: manifest.requirements, error: null };
+  } catch (error) {
+    return { requirements: [], error: `compiled packet has invalid spec.json: ${error.message}` };
+  }
 }
 function headingBody(content, heading) {
   const lines = content.split(/\r?\n/);
@@ -56,7 +62,8 @@ export function initArtifact({ kind, projectDir='.', packetDir=null, profilePath
   const project=ensureProjectDir(projectDir), type=typeOrThrow(kind); requireVerifiedModules(project,[type.module]);
   const file=fileFor(project,kind,id,out); if (existsSync(file)&&!force) throw extensionError(`${file} exists; pass --force to replace it`, 'ARTIFACT_EXISTS');
   let profile={}; const p=path.resolve(profilePath ?? path.join(project,'profile.json')); if (existsSync(p)) try { profile=JSON.parse(readFileSync(p,'utf8')); } catch {}
-  const requirements=packetRequirements(path.resolve(packetDir ?? path.join(project,'specs'))); let source=null;
+  const packet = packetRequirements(path.resolve(packetDir ?? path.join(project, 'specs')));
+  const requirements = packet.requirements; let source=null;
   let content=template(kind,{profile,requirements,id});
   if (fromStore) {
     const reference=storeReference(fromStore); const imported=readStoreAsset({ projectDir: project, ...reference, kind: 'artifact-template' });
@@ -66,16 +73,31 @@ export function initArtifact({ kind, projectDir='.', packetDir=null, profilePath
   }
   mkdirSync(path.dirname(file),{recursive:true}); writeFileSync(file,content,'utf8'); return {project,kind,file,requirements:requirements.length,source};
 }
-export function validateArtifact({ kind, projectDir='.', packetDir=null, requirementsOverride=null, id=null, file=null, strict=false }) {
+export function validateArtifact({ kind, projectDir='.', packetDir=null, requirementsOverride=null, packetResult=null, includePacketAuthorityError=true, id=null, file=null, strict=false }) {
   const project=ensureProjectDir(projectDir), type=typeOrThrow(kind); requireVerifiedModules(project,[type.module]);
   const target=fileFor(project,kind,id,file), errors=[], warnings=[]; if(!existsSync(target)) return {ok:false,strictOk:false,file:target,errors:[`missing artifact: ${target}`],warnings,requirements:[]};
   const content=readFileSync(target,'utf8'); if(!content.startsWith(`# ${type.title === 'Architecture Decision' ? 'ADR:' : type.title}`)) errors.push('title does not match artifact type');
   for(const section of type.sections){ const body=headingBody(content,section); if(!body) errors.push(`missing or empty ## ${section}`); else if(body.length<20) warnings.push(`## ${section} is too thin`); }
   if(PLACEHOLDER.test(content)) warnings.push('contains an unfilled template placeholder'); if(DRAFT.test(content)) warnings.push('artifact status is still Draft, Proposed or Pending');
-  const requirements=Array.isArray(requirementsOverride) ? requirementsOverride : packetRequirements(path.resolve(packetDir ?? path.join(project,'specs'))), known=new Set(requirements.map(r=>r.id)), referenced=links(content);
-  for(const req of referenced) if(!known.has(req)&&requirements.length) errors.push(`${req} is not in the packet`);
-  if(requirements.length&&referenced.length===0) warnings.push('does not link to a packet requirement');
-  if(kind==='qa-plan') { if(!requirements.length) errors.push('QA plan requires a compiled packet'); else { const missing=requirements.filter(r=>r.verify==='automated'&&!referenced.includes(r.id)).map(r=>r.id); if(missing.length) errors.push(`QA coverage is missing automated requirement(s): ${missing.join(', ')}`); } }
+  const packet = Array.isArray(requirementsOverride)
+    ? { requirements: requirementsOverride, error: null }
+    : packetResult ?? packetRequirements(path.resolve(packetDir ?? path.join(project, 'specs')));
+  const requirements = packet.requirements, known = new Set(requirements.map((requirement) => requirement.id)), referenced = links(content);
+  if (packet.error) {
+    if (includePacketAuthorityError) errors.push(packet.error);
+  } else {
+    for (const req of referenced) if (!known.has(req)) errors.push(`${req} is not in the packet`);
+    if (requirements.length && referenced.length === 0) warnings.push('does not link to a packet requirement');
+  }
+  if (kind === 'qa-plan') {
+    if (packet.error || !requirements.length) {
+      if (includePacketAuthorityError) errors.push('QA plan requires a compiled packet');
+    }
+    else {
+      const missing = requirements.filter((requirement) => requirement.verify === 'automated' && !referenced.includes(requirement.id)).map((requirement) => requirement.id);
+      if (missing.length) errors.push(`QA coverage is missing automated requirement(s): ${missing.join(', ')}`);
+    }
+  }
   const ok=errors.length===0; return {ok,strictOk:ok&&warnings.length===0,file:target,errors,warnings,requirements:referenced};
 }
 function requestedKinds(kinds) {
@@ -110,9 +132,9 @@ export function verifyArtifacts({ projectDir='.', packetDir=null, kinds=null }) 
   const errors = [], warnings = [], passes = [], reports = [];
   if (!types.length) errors.push('no artifact modules are enabled');
   const packet = path.resolve(packetDir ?? path.join(project, 'specs'));
-  const packetFile = path.join(packet, 'spec.json');
-  if (!existsSync(packetFile)) errors.push(`artifact verification requires a compiled packet: ${packetFile}`);
-  const requirements = packetRequirements(packet);
+  const packetInfo = packetRequirements(packet);
+  if (packetInfo.error) errors.push(packetInfo.error);
+  const requirements = packetInfo.requirements;
   for (const kind of types) {
     const type = typeOrThrow(kind);
     if (!enabled.has(type.module)) {
@@ -131,7 +153,7 @@ export function verifyArtifacts({ projectDir='.', packetDir=null, kinds=null }) 
       }
       let report;
       try {
-        report = validateArtifact({ kind, projectDir: project, packetDir: packet, id: target.id, file: target.file, strict: true });
+        report = validateArtifact({ kind, projectDir: project, packetDir: packet, packetResult: packetInfo, includePacketAuthorityError: false, id: target.id, file: target.file, strict: true });
       } catch (error) {
         errors.push(`${kind}${target.id ? `/${target.id}` : ''}: ${error.message}`);
         continue;
@@ -142,7 +164,7 @@ export function verifyArtifacts({ projectDir='.', packetDir=null, kinds=null }) 
       if (report.ok && !report.strictOk) errors.push(`${kind}${target.id ? `/${target.id}` : ''}: strict validation has warnings`);
     }
   }
-  if (existsSync(packetFile) && !requirements.length) errors.push('compiled packet has no requirements');
+  if (!packetInfo.error && !requirements.length) errors.push('compiled packet has no requirements');
   const productReports = reports.filter((report) => report.kind === 'product-brief');
   if (requirements.length && productReports.length) {
     const linked = new Set(productReports.flatMap((report) => report.requirements));

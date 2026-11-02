@@ -53,3 +53,21 @@ test('cross-artifact verification enforces strict review and QA traceability aga
  writeFileSync(path.join(project,'docs','qa-plan.md'),readFileSync(path.join(project,'docs','qa-plan.md'),'utf8').replace(automatedId,'REQ-999'));
  const failed=verifyArtifacts({projectDir:project,kinds:['review-brief','qa-plan']}); assert.equal(failed.ok,false); assert.match(failed.errors.join('\n'),/not in the packet|QA coverage is missing automated/);
 });
+
+test('artifact validation fails closed when packet authority is malformed', (t) => {
+ const project=mkdtempSync(path.join(os.tmpdir(),'vld-artifact-corrupt-'));t.after(()=>rmSync(project,{recursive:true,force:true}));
+ enableModules({projectDir:project,ids:'review'}); mkdirSync(path.join(project,'docs')); mkdirSync(path.join(project,'specs'));
+ writeFileSync(path.join(project,'specs','spec.json'),'{"requirements":');
+ writeFileSync(path.join(project,'docs','review-brief.md'),'# Review Brief: lab\n\n**Status:** Approved\n\n## Change Summary\n\nThe reviewed change preserves required behavior and evidence.\n\n## Requirements Under Review\n\n- REQ-999 — an intentionally unknown requirement.\n\n## Risk and Invariants\n\nAuthorization and audit boundaries remain protected.\n\n## Evidence\n\nThe required verification commands completed successfully.\n\n## Review Questions\n\nDoes evidence remain linked to a falsifiable requirement?\n\n## Decision\n\nApproved after accountable review of the supplied evidence.\n');
+ const report=validateArtifact({kind:'review-brief',projectDir:project,strict:true});
+ assert.equal(report.ok,false); assert.equal(report.strictOk,false); assert.match(report.errors.join('\n'),/invalid spec\.json/);
+ const verified=verifyArtifacts({projectDir:project,kinds:['review-brief']});
+ assert.equal(verified.ok,false); assert.equal(verified.errors.filter((error)=>/invalid spec\.json/.test(error)).length,1,'cross-artifact validation reports corrupt authority once');
+ assert.deepEqual(verified.artifacts[0].errors,[],'the shared authority failure does not hide separate artifact diagnostics');
+ rmSync(path.join(project,'specs','spec.json'));
+ const missing=validateArtifact({kind:'review-brief',projectDir:project,strict:true});
+ assert.equal(missing.strictOk,false); assert.match(missing.errors.join('\n'),/missing spec\.json/);
+ writeFileSync(path.join(project,'specs','spec.json'),JSON.stringify({requirements:[{id:'REQ-999',title:'Reviewed requirement',verify:'manual'}]}));
+ const known=validateArtifact({kind:'review-brief',projectDir:project,strict:true});
+ assert.equal(known.strictOk,true,known.errors.join('\n'));
+});

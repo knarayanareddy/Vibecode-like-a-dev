@@ -19,7 +19,7 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 22
+          node-version: 22.x
 
       # No install step: the CLI and the shipped spec checker have no dependencies.
       - name: Lint
@@ -73,6 +73,19 @@ jobs:
           done
           echo "example packet is in sync"
 
+  node-22-minimum:
+    name: Linux core suite — minimum Node 22
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # Pin the supported floor separately from the 22.x lanes, which follow
+      # the newest available Node 22 release.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.0.0
+      - name: Full core Node test suite at the supported floor
+        run: npm test
+
   integration:
     name: Linux integration fixtures
     runs-on: ubuntu-latest
@@ -80,10 +93,14 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 22
+          node-version: 22.x
 
       - name: Adoption runs against this repository
         run: node factory/cli.mjs adopt . -o /tmp/self-profile.json --force
+
+      - name: VS Code Studio extension package tests
+        working-directory: factory/studio/vscode
+        run: npm test
 
       - name: MCP server answers tools/list
         run: |
@@ -128,7 +145,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 22
+          node-version: 22.x
 
       # A source checkout can hide omitted package files or an invalid bin link. Exercise
       # the tarball users receive, including compiler, export, mission, module, artifact and
@@ -248,7 +265,7 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 22
+          node-version: 22.x
 
       # The optional adapter stays outside Core's dependency tree. This isolated
       # job proves its locked stable-SDK bridge against the fake ACP peer.
@@ -279,7 +296,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 22
+          node-version: 22.x
       # Calibration uses only checked-in fixtures. It is not live-agent evidence.
       - name: ${{ matrix.label }}
         run: ${{ matrix.command }}
@@ -299,7 +316,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 22
+          node-version: 22.x
       - name: ${{ matrix.label }}
         run: ${{ matrix.command }}
 
@@ -314,7 +331,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 22
+          node-version: 22.x
       # The dependency-free Node CLI and its portable test suite must work under
       # each supported runner shell. Linux retains the shell-heavy pack journey.
       - name: Full portable test suite
@@ -327,12 +344,13 @@ jobs:
   check:
     name: check
     if: ${{ always() }}
-    needs: [core, integration, packed-distribution, acp-v1-bridge, evaluations, stress, portable-smoke]
+    needs: [core, node-22-minimum, integration, packed-distribution, acp-v1-bridge, evaluations, stress, portable-smoke]
     runs-on: ubuntu-latest
     steps:
       - name: Require all validation jobs
         env:
           CORE: ${{ needs.core.result }}
+          NODE_22_MINIMUM: ${{ needs.node-22-minimum.result }}
           INTEGRATION: ${{ needs.integration.result }}
           PACKED_DISTRIBUTION: ${{ needs.packed-distribution.result }}
           ACP: ${{ needs.acp-v1-bridge.result }}
@@ -341,6 +359,7 @@ jobs:
           PORTABLE: ${{ needs.portable-smoke.result }}
         run: |
           test "$CORE" = success
+          test "$NODE_22_MINIMUM" = success
           test "$INTEGRATION" = success
           test "$PACKED_DISTRIBUTION" = success
           test "$ACP" = success

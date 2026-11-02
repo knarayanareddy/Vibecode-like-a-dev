@@ -186,6 +186,38 @@ test('protocol errors follow JSON-RPC', () => {
   assert.equal(handleMessage({ jsonrpc: '2.0', method: 'some/notification' }), null);
 });
 
+function runMcpUntilEof(source) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [path.join(ROOT, 'factory', 'cli.mjs'), 'mcp'], { stdio: ['pipe', 'pipe', 'pipe'] });
+    let stdout = ''; let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code !== 0) return reject(new Error(`MCP exited ${code}: ${stderr}`));
+      const lines = stdout.trim() ? stdout.trim().split('\n').map(JSON.parse) : [];
+      resolve(lines);
+    });
+    child.stdin.end(source);
+  });
+}
+
+test('MCP processes a complete final message at EOF without requiring a trailing newline', async () => {
+  const list = { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} };
+  const invalid = '{not-json';
+  const single = await runMcpUntilEof(JSON.stringify(list));
+  assert.equal(single.length, 1);
+  assert.equal(single[0].id, 1);
+  assert.equal(single[0].result.tools.length, TOOLS.length);
+
+  const final = await runMcpUntilEof(`${JSON.stringify(list)}\n${JSON.stringify({ ...list, id: 2 })}`);
+  assert.deepEqual(final.map((message) => message.id), [1, 2]);
+
+  const malformed = await runMcpUntilEof(invalid);
+  assert.equal(malformed.length, 1);
+  assert.equal(malformed[0].error.code, -32700);
+});
+
 test('a real stdio session works end to end', async () => {
   const child = spawn(process.execPath, [path.join(ROOT, 'factory', 'cli.mjs'), 'mcp'], {
     stdio: ['pipe', 'pipe', 'ignore']

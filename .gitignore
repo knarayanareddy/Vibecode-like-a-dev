@@ -25,8 +25,13 @@ coverage/
 .vscode/*
 !.vscode/extensions.json
 
-# local Runtime state: event ledgers, ephemeral locks and per-launch local API data
+# Local VLD state only. Keep reviewable locks, trust metadata and workflow definitions
+# under .vld/ in version control; these execution caches/state files are machine-local.
 .vld/runtime/
+.vld/agents/
+.vld/workspaces.json
+.vld/catalogs/
+.vld/stores/
 
 # local scratch
 tmp/

@@ -102,6 +102,20 @@ test('cli contract: data on stdout, diagnostics on stderr, non-zero exit on misu
   const missingProfile = await cli(['plan', '/nonexistent/profile.json']);
   assert.equal(missingProfile.code, 2);
 
+  const misspelledRisk = path.join(os.tmpdir(), `vld-misspelled-risk-${process.pid}.json`);
+  writeFileSync(misspelledRisk, JSON.stringify({ ...PROFILE, risk: { payments: true } }));
+  try {
+    const invalid = await cli(['plan', misspelledRisk]);
+    assert.equal(invalid.code, 2);
+    assert.match(invalid.stderr, /profile\.risk: unknown field; did you mean "risks"\?/);
+  } finally {
+    rmSync(misspelledRisk, { force: true });
+  }
+
+  const longRunningJson = await cli(['runtime', 'serve', 'unused-mission.json', '--json']);
+  assert.equal(longRunningJson.code, 2);
+  assert.match(longRunningJson.stderr, /long-running local service; --json is not a one-shot response/);
+
   const invalidProfile = path.join(os.tmpdir(), `vld-invalid-${process.pid}.json`);
   writeFileSync(invalidProfile, JSON.stringify({ ...PROFILE, kind: 'spaceship' }));
   try {
@@ -306,3 +320,15 @@ test('vld adopt accepts a Git repository URL, and spec-check/verify enforce [CLA
   }
 });
 
+
+test('adopt returns a non-zero exit when the requested profile output is refused', async (t) => {
+  const project = mkdtempSync(path.join(os.tmpdir(), 'vld-adopt-refused-'));
+  t.after(() => rmSync(project, { recursive: true, force: true }));
+  const output = path.join(project, 'profile.json');
+  writeFileSync(output, '{"preserve":"this existing profile"}\n');
+  const result = await cli(['adopt', project, '--idea', 'A reviewed profile must be written only when the target is available.', '-o', output]);
+  assert.notEqual(result.code, 0, result.stdout);
+  assert.match(result.stdout, /adopt ·/);
+  assert.match(result.stderr, /profile not written: .*already exists/);
+  assert.equal(readFileSync(output, 'utf8'), '{"preserve":"this existing profile"}\n');
+});

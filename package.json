@@ -8,10 +8,52 @@
     "vld": "./factory/cli.mjs"
   },
   "files": [
-    "factory",
+    "factory/cli.mjs",
+    "factory/adapters",
+    "factory/bundles",
+    "factory/catalog",
+    "factory/evals",
+    "factory/gates",
+    "factory/integrations/acp-v1/README.md",
+    "factory/integrations/acp-v1/contract.mjs",
+    "factory/integrations/acp-v1/index.mjs",
+    "factory/integrations/acp-v1/package-lock.json",
+    "factory/integrations/acp-v1/package.json",
+    "factory/integrations/github-v1/README.md",
+    "factory/integrations/github-v1/index.mjs",
+    "factory/integrations/github-v1/package.json",
+    "factory/lib",
+    "factory/modules",
+    "factory/overlays",
+    "factory/policy.json",
+    "factory/routing.json",
+    "factory/schema",
+    "factory/studio/vscode/extension.cjs",
+    "factory/studio/vscode/package.json",
+    "factory/studio/vscode/test/extension.test.cjs",
+    "factory/templates",
+    "factory/test",
+    "factory/workflows",
     "primitives",
+    "docs",
+    "prompts",
+    "examples/ideas/01-photo-sorter.json",
+    "examples/ideas/02-bike-market.json",
+    "examples/ideas/03-standup-bot.json",
+    "examples/ideas/04-clinic-bookings.json",
+    "examples/ideas/05-payout-ledger.json",
+    "examples/ideas/06-habit-sync.json",
+    "examples/ideas/07-events-etl.json",
+    "examples/ideas/08-flags-sdk.json",
+    "examples/ideas/09-docs-assistant.json",
+    "examples/ideas/10-log-shipper.json",
+    "examples/ideas/adversarial/cases.json",
+    "examples/retro-board",
     "AGENTS.md",
-    "README.md"
+    "README.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "index": "node factory/cli.mjs index",
@@ -37,5 +79,13 @@
     "engineering-principles",
     "ddd",
     "tdd"
-  ]
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/knarayanareddy/Vibecode-like-a-dev.git"
+  },
+  "bugs": {
+    "url": "https://github.com/knarayanareddy/Vibecode-like-a-dev/issues"
+  },
+  "homepage": "https://github.com/knarayanareddy/Vibecode-like-a-dev#readme"
 }

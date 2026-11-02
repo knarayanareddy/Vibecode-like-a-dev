@@ -38,6 +38,20 @@ test('a prototype stays at tier 0 with a single-file packet', () => {
   assert.equal(rigor.packet, 'single-file');
 });
 
+test('profile validation rejects unknown keys instead of silently lowering rigor', () => {
+  const intended = { ...payout, risks: { ...payout.risks } };
+  assert.deepEqual(validateProfile(normalizeProfile(intended)), []);
+  assert.equal(computeRigor(normalizeProfile(intended), policy).tier, 3);
+
+  const typo = { ...intended, risk: intended.risks };
+  delete typo.risks;
+  const errors = validateProfile(normalizeProfile(typo));
+  assert.ok(errors.some((error) => /profile\.risk: unknown field; did you mean "risks"/.test(error)), errors.join('\n'));
+
+  const nested = validateProfile(normalizeProfile({ ...intended, constraints: { ...intended.constraints, deliveryWindow: 'overnight' } }));
+  assert.ok(nested.some((error) => /constraints\.deliveryWindow: unknown field/.test(error)), nested.join('\n'));
+});
+
 test('risk signals raise the tier and stage caps it back down', () => {
   const riskyMvp = normalizeProfile({
     ...payout,

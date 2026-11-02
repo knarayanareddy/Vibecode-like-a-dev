@@ -7,8 +7,11 @@
 
 import { aggregatesFor, contextsFor, termsFor } from '../domain-hints.mjs';
 import { articleFor, ideaNouns, pluralOf, singularOf, vocabularyFor } from './vocabulary.mjs';
+import packageMetadata from '../../../package.json' with { type: 'json' };
 
-export const FACTORY_VERSION = '0.3.0';
+// The package manifest is the release authority; generated provenance must never
+// carry a hand-maintained second version.
+export const FACTORY_VERSION = packageMetadata.version;
 
 // ---------- text helpers ----------
 

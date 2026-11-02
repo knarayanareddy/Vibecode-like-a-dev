@@ -38,13 +38,17 @@ test('CI pins every third-party action, has read-only permissions and keeps one 
   }
   mustMatch(ci, /^permissions:\n  contents: read$/m);
   mustMatch(live, /^permissions:\n  contents: read$/m);
-  mustMatch(ci, /^  check:\n    name: check\n    if: \$\{\{ always\(\) \}\}\n    needs: \[core, integration, packed-distribution, acp-v1-bridge, evaluations, stress, portable-smoke\]/m);
+  mustMatch(ci, /^  check:\n    name: check\n    if: \$\{\{ always\(\) \}\}\n    needs: \[core, node-22-minimum, integration, packed-distribution, acp-v1-bridge, evaluations, stress, portable-smoke\]/m);
   assert.match(read('.github', 'dependabot.yml'), /package-ecosystem: github-actions/);
 });
 
 test('CI separates deterministic evaluations/stress work and validates the portable Node suite', () => {
   const ci = read('.github', 'workflows', 'ci.yml');
+  mustMatch(ci, /^  node-22-minimum:/m);
+  mustMatch(ci, /name: Linux core suite — minimum Node 22[\s\S]*?node-version: 22\.0\.0[\s\S]*?run: npm test/);
+  mustMatch(ci, /node-version: 22\.x/);
   mustMatch(ci, /^  integration:/m);
+  mustMatch(ci, /VS Code Studio extension package tests[\s\S]*?working-directory: factory\/studio\/vscode[\s\S]*?run: npm test/);
   mustMatch(ci, /^  packed-distribution:/m);
   mustMatch(ci, /^  evaluations:/m);
   mustMatch(ci, /^  stress:/m);
