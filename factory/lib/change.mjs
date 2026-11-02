@@ -15,8 +15,9 @@
  * over a backup.
  */
 
-import { cpSync, existsSync, mkdtempSync, readFileSync, renameSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import os from 'node:os';
 import path from 'node:path';
 import { ARTIFACTS, validateArtifact } from './artifacts.mjs';
 import { earsError } from './ears.mjs';
@@ -563,7 +564,16 @@ export function applyChange(plan, { force = false } = {}) {
 }
 
 function ensureRealDirectory(directory, label) {
-  const resolved = path.resolve(directory);
+  let resolved = path.resolve(directory);
+  // macOS presents its OS-owned temporary hierarchy through a `/var` alias.
+  // Canonicalize that trusted anchor before walking descendants so a system alias
+  // does not look like a caller-controlled parent link. Links below it remain
+  // forbidden by ensureSafeManagedDirectory.
+  const temporary = path.resolve(os.tmpdir());
+  const temporaryRelative = path.relative(temporary, resolved);
+  if (temporaryRelative === '' || (!temporaryRelative.startsWith(`..${path.sep}`) && temporaryRelative !== '..' && !path.isAbsolute(temporaryRelative))) {
+    try { resolved = path.resolve(realpathSync(temporary), temporaryRelative); } catch {}
+  }
   const parsed = path.parse(resolved);
   return ensureSafeManagedDirectory(parsed.root, resolved.slice(parsed.root.length), label);
 }
