@@ -1,6 +1,6 @@
 # Input, Protocol, Artifact, and Distribution Remediation Plan
 
-**Status:** Implemented locally — hosted CI pending
+**Status:** Complete — local and hosted validation passed
 **Scope:** Remediate the confirmed profile-validation, MCP framing, artifact-validation, version-provenance, package/distribution, extension-test, and contributor-governance findings. Preserve VLD's deterministic compiler and its explicit distinction between durable reviewed project state and ephemeral local state.
 
 ## Review decisions and boundaries
@@ -108,7 +108,7 @@
 - [x] VS Code package `npm test`.
 - [x] ACP optional-package install/test.
 - [x] `git diff --check`
-- [ ] Hosted CI green on Linux, macOS, Windows, minimum Node 22, and latest Node 22.
+- [x] Hosted CI green on Linux, macOS, Windows, minimum Node 22, and latest Node 22.
 
 ## Completion checklist
 
@@ -116,4 +116,4 @@
 - [x] Generated packets are synchronized where generator output changes.
 - [x] No broad `.vld` ignore rule obscures durable reviewed authority.
 - [x] Local validation matrix passes.
-- [ ] Hosted CI passes.
+- [x] Hosted CI passes.
