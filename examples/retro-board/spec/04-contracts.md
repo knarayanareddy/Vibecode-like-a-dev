@@ -26,7 +26,7 @@ These are the four that other code will be written against. Naming them now is c
 
 ## 3. Conventions that bind you
 
-Only the conventions this profile makes load-bearing are listed. The rest are in the library practice `engineering.api-conventions`, which this packet selected at compile time.
+Only the conventions this profile makes load-bearing are listed. The selected-practice table in 00-constitution.md names every additional obligation this packet actually selected; no unselected library practice is implied.
 
 | Concern | Rule |
 | --- | --- |

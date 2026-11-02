@@ -257,7 +257,18 @@ const SECRET = [
   /xox[baprs]-[A-Za-z0-9-]{10,}/,
   /(?:password|secret|token|api[_-]?key)\s*[:=]\s*['"][^'"\s]{16,}['"]/i
 ];
-const SECRET_ALLOW = /(?:<|\.\.\.|example|placeholder|dummy|redacted|your[_-]?|xxx+|changeme|process\.env|os\.environ)/i;
+// A fixture allowance must name the exact inert value, not an unrelated word on
+// the source line. Broad line-wide exemptions turn comments such as "example" or
+// punctuation such as "<" into a bypass for a real credential.
+const SECRET_PLACEHOLDER_VALUES = new Set([
+  'changeme-placeholder',
+  'example-auth-material',
+  'parent-secret-must-not-reach-child'
+]);
+function isExplicitSecretPlaceholder(line) {
+  const value = /(?:password|secret|token|api[_-]?key)\s*[:=]\s*['"]([^'"\s]+)['"]/i.exec(line)?.[1];
+  return value !== undefined && SECRET_PLACEHOLDER_VALUES.has(value);
+}
 
 function check(rule) {
   switch (rule.kind) {
@@ -331,8 +342,7 @@ function check(rule) {
         if (/\.(lock|min|map)$/.test(file)) continue;
         const text = read(file);
         for (const line of text.split('\n')) {
-          if (SECRET_ALLOW.test(line)) continue;
-          if (SECRET.some((pattern) => pattern.test(line))) hits.push(`${file}: ${line.trim().slice(0, 60)}`);
+          if (SECRET.some((pattern) => pattern.test(line)) && !isExplicitSecretPlaceholder(line)) hits.push(`${file}: ${line.trim().slice(0, 60)}`);
         }
       }
       return hits.length === 0
