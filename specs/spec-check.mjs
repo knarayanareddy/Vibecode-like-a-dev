@@ -22,7 +22,7 @@
  *     error under --strict. This lets a packet boot on day one and still ratchet.
  */
 
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, lstatSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -69,10 +69,12 @@ function walk(dir, out = []) {
     const full = path.join(dir, entry);
     let stats;
     try {
-      stats = statSync(full);
+      stats = lstatSync(full);
     } catch {
       continue;
     }
+    // Never follow repository links: scans must neither escape their root nor loop.
+    if (stats.isSymbolicLink()) continue;
     if (stats.isDirectory()) walk(full, out);
     else if (/\.(ts|tsx|js|jsx|mjs|cjs|py|go|rb|java|kt|cs|php|rs|sh|feature|exs)$/.test(entry)) out.push(full);
   }

@@ -38,6 +38,20 @@ test('a prototype stays at tier 0 with a single-file packet', () => {
   assert.equal(rigor.packet, 'single-file');
 });
 
+test('profile validation rejects unknown keys instead of silently lowering rigor', () => {
+  const intended = { ...payout, risks: { ...payout.risks } };
+  assert.deepEqual(validateProfile(normalizeProfile(intended)), []);
+  assert.equal(computeRigor(normalizeProfile(intended), policy).tier, 3);
+
+  const typo = { ...intended, risk: intended.risks };
+  delete typo.risks;
+  const errors = validateProfile(normalizeProfile(typo));
+  assert.ok(errors.some((error) => /profile\.risk: unknown field; did you mean "risks"/.test(error)), errors.join('\n'));
+
+  const nested = validateProfile(normalizeProfile({ ...intended, constraints: { ...intended.constraints, deliveryWindow: 'overnight' } }));
+  assert.ok(nested.some((error) => /constraints\.deliveryWindow: unknown field/.test(error)), nested.join('\n'));
+});
+
 test('risk signals raise the tier and stage caps it back down', () => {
   const riskyMvp = normalizeProfile({
     ...payout,
@@ -209,12 +223,14 @@ test('a requirement keeps its id when the catalog grows around it', () => {
 });
 
 // @req REQ-005
-test('planning is deterministic apart from the timestamp', () => {
+test('planning is exactly deterministic with no generated timestamp', () => {
   const a = buildPlan(payout, { index });
   const b = buildPlan(payout, { index });
   assert.deepEqual(a.primitives.map((p) => p.id), b.primitives.map((p) => p.id));
   assert.deepEqual(a.requirements.map((r) => r.id), b.requirements.map((r) => r.id));
   assert.deepEqual(a.gates.map((g) => g.id), b.gates.map((g) => g.id));
+  assert.deepEqual(a, b, 'the whole plan is clock-free, not merely its selected IDs');
+  assert.doesNotMatch(JSON.stringify(a), /generatedAt|\d{4}-\d{2}-\d{2}T\d{2}:/i);
 });
 
 test('requirement ids are stable and criteria are enumerated', () => {

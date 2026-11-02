@@ -50,6 +50,19 @@ export const RISK_FLAGS = [
 ];
 
 const ID_PATTERN = /^[a-z0-9][a-z0-9-]{1,60}$/;
+const PROFILE_KEYS = new Set(['name', 'idea', 'kind', 'stage', 'users', 'traits', 'risks', 'constraints', 'overlays', '$comment', '$adopted']);
+const USER_KEYS = new Set(['scale']);
+const CONSTRAINT_KEYS = new Set(['team', 'weeks', 'stack', 'mustUse']);
+
+function unknownKeys(value, allowed, label, errors) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+  for (const key of Object.keys(value)) {
+    if (!allowed.has(key)) {
+      const hint = label === 'profile' && key === 'risk' ? '; did you mean "risks"?' : '';
+      errors.push(`${label}.${key}: unknown field${hint}`);
+    }
+  }
+}
 
 export function normalizeProfile(raw) {
   const profile = {
@@ -81,6 +94,18 @@ export function normalizeProfile(raw) {
 
 export function validateProfile(profile) {
   const errors = [];
+
+  // The profile controls rigor, requirements, and gates. Preserve no unknown
+  // policy-bearing field as inert data: a typo such as `risk` must fail instead
+  // of quietly compiling a lower-rigor packet.
+  unknownKeys(profile, PROFILE_KEYS, 'profile', errors);
+  unknownKeys(profile.users, USER_KEYS, 'users', errors);
+  unknownKeys(profile.constraints, CONSTRAINT_KEYS, 'constraints', errors);
+
+  // Adoption records inference provenance under these namespaced metadata fields.
+  // They are deliberately not router inputs, but must retain basic safe shapes.
+  if ('$comment' in profile && typeof profile.$comment !== 'string') errors.push('profile.$comment: must be a string');
+  if ('$adopted' in profile && (!profile.$adopted || typeof profile.$adopted !== 'object' || Array.isArray(profile.$adopted))) errors.push('profile.$adopted: must be an object');
 
   if (!profile.name || !ID_PATTERN.test(profile.name)) {
     errors.push('name: required, lowercase kebab-case, 2-60 chars (e.g. "retro-board")');

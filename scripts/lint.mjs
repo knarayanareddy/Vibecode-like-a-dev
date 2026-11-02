@@ -10,11 +10,15 @@
  *   node scripts/lint.mjs
  */
 
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, lstatSync } from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
-const ROOT = path.resolve(import.meta.dirname, '..');
+const args = process.argv.slice(2);
+const rootFlag = args.indexOf('--root');
+// `--root` keeps the scanner testable against a disposable checkout; normal use
+// remains the repository root.
+const ROOT = path.resolve(rootFlag === -1 || !args[rootFlag + 1] ? path.join(import.meta.dirname, '..') : args[rootFlag + 1]);
 const IGNORED = new Set(['node_modules', '.git', 'dist', 'build', 'out', 'coverage', 'specs']);
 const problems = [];
 let modules = 0;
@@ -24,7 +28,10 @@ function walk(dir, out = []) {
   for (const entry of readdirSync(dir)) {
     if (IGNORED.has(entry)) continue;
     const full = path.join(dir, entry);
-    if (statSync(full).isDirectory()) walk(full, out);
+    const stats = lstatSync(full);
+    // Lint only tracked filesystem nodes below this checkout; links can escape it or loop.
+    if (stats.isSymbolicLink()) continue;
+    if (stats.isDirectory()) walk(full, out);
     else out.push(full);
   }
   return out;

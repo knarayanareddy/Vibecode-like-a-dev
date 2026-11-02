@@ -7,7 +7,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 export const ID_PATTERN = /^[a-z0-9][a-z0-9-]{1,60}$/;
@@ -56,6 +56,87 @@ export function ensureProjectDir(projectDir) {
     const error = new Error(`project directory does not exist: ${target}`);
     error.code = 'PROJECT_NOT_FOUND';
     throw error;
+  }
+  return target;
+}
+
+function containedPath(root, candidate) {
+  const relative = path.relative(root, candidate);
+  return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
+}
+
+function lstatOrNull(target, label) {
+  try {
+    return lstatSync(target);
+  } catch (error) {
+    if (error?.code === 'ENOENT') return null;
+    throw extensionError(`${label} cannot be inspected`, 'UNSAFE_MANAGED_PATH');
+  }
+}
+
+function realDirectory(target, label) {
+  const stats = lstatOrNull(target, label);
+  if (!stats || stats.isSymbolicLink() || !stats.isDirectory()) {
+    throw extensionError(`${label} must be an existing real directory`, 'UNSAFE_MANAGED_PATH');
+  }
+}
+
+/**
+ * Resolve a managed relative path without following symlinks below a real root.
+ * The caller can use it for an existing file check before a later atomic write.
+ */
+export function safeManagedFile(root, relative, label = 'managed file') {
+  const resolvedRoot = path.resolve(root);
+  const candidate = path.resolve(resolvedRoot, relative);
+  if (typeof relative !== 'string' || !relative || !containedPath(resolvedRoot, candidate) || candidate === resolvedRoot) {
+    throw extensionError(`${label} escapes its managed root`, 'UNSAFE_MANAGED_PATH');
+  }
+  realDirectory(resolvedRoot, 'managed root');
+  let cursor = resolvedRoot;
+  const parts = path.relative(resolvedRoot, candidate).split(path.sep).filter(Boolean);
+  for (const part of parts.slice(0, -1)) {
+    cursor = path.join(cursor, part);
+    const stats = lstatOrNull(cursor, label);
+    // A missing parent ends the inspection: no later descendant can exist yet.
+    if (!stats) break;
+    if (stats.isSymbolicLink() || !stats.isDirectory()) {
+      throw extensionError(`${label} has a symbolic-link or non-directory parent`, 'UNSAFE_MANAGED_PATH');
+    }
+  }
+  const destination = lstatOrNull(candidate, label);
+  if (destination && (destination.isSymbolicLink() || !destination.isFile())) {
+    throw extensionError(`${label} is a symbolic link or is not a regular file`, 'UNSAFE_MANAGED_PATH');
+  }
+  return candidate;
+}
+
+/** Create a managed directory one component at a time without traversing links. */
+export function ensureSafeManagedDirectory(root, relative, label = 'managed directory') {
+  const resolvedRoot = path.resolve(root);
+  const target = path.resolve(resolvedRoot, relative);
+  if (typeof relative !== 'string' || !containedPath(resolvedRoot, target)) {
+    throw extensionError(`${label} escapes its managed root`, 'UNSAFE_MANAGED_PATH');
+  }
+  realDirectory(resolvedRoot, 'managed root');
+  let cursor = resolvedRoot;
+  for (const part of path.relative(resolvedRoot, target).split(path.sep).filter(Boolean)) {
+    cursor = path.join(cursor, part);
+    const stats = lstatOrNull(cursor, label);
+    if (stats) {
+      if (stats.isSymbolicLink() || !stats.isDirectory()) {
+        throw extensionError(`${label} has a symbolic-link or non-directory parent`, 'UNSAFE_MANAGED_PATH');
+      }
+      continue;
+    }
+    try {
+      mkdirSync(cursor);
+    } catch (error) {
+      if (error?.code !== 'EEXIST') throw error;
+    }
+    const created = lstatOrNull(cursor, label);
+    if (!created || created.isSymbolicLink() || !created.isDirectory()) {
+      throw extensionError(`${label} was replaced by an unsafe filesystem node`, 'UNSAFE_MANAGED_PATH');
+    }
   }
   return target;
 }

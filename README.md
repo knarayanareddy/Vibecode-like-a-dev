@@ -4,6 +4,24 @@
 
 Not a prompt. Not a checklist. A packet with requirements, acceptance criteria, gates, architecture decisions, and a script that **fails the build when the spec and the code stop agreeing**.
 
+## Quick start
+
+VLD requires **Node.js 22 or newer** (`node --version`). Choose the npm package for normal use, or a source checkout when contributing.
+
+```bash
+# Use the supported package directly from GitHub without a manual checkout.
+npx --yes github:knarayanareddy/Vibecode-like-a-dev init my-app
+npx --yes github:knarayanareddy/Vibecode-like-a-dev plan my-app/profile.json
+npx --yes github:knarayanareddy/Vibecode-like-a-dev compile my-app/profile.json -o specs
+
+# Or install that package once, then use its `vld` command.
+npm install --global github:knarayanareddy/Vibecode-like-a-dev
+vld adopt .
+vld compile profile.json -o specs
+```
+
+For development from source, clone the repository and invoke the checked-out CLI directly:
+
 ```bash
 git clone https://github.com/knarayanareddy/Vibecode-like-a-dev
 cd Vibecode-like-a-dev
@@ -293,6 +311,12 @@ vld runtime recover missions/report-export/mission.json --project .
 ```
 
 The fixed M3 policy denies network, process execution, Git push/merge and credential access. The host validates the lifecycle (`ready → allocated → running → changes_ready → verifying → in_review → approved → queued → merged`), roles, independent review, expected version and lease token before a receipt is appended. The loopback JSON API requires a bearer token, caps request bodies and rejects non-loopback browser Origins. Actor identities are deterministic local/fake identities in M3—not an agent adapter or external human authentication system. See [ADR-0005](docs/adr/0005-local-runtime-host-and-fake-run-state.md) for boundaries and recovery semantics.
+
+`vld runtime serve` is deliberately a long-running service rather than a one-shot JSON command, so it rejects `--json`. It prints only connection details to stderr; the one-time operator token is an interactive local handoff, not stable machine-readable readiness output. Automation should manage the process and use the authenticated `/v1/runtime` API only after its own local readiness policy.
+
+### What to commit from `.vld/`
+
+`.vld/` is not a disposable directory. Commit its reviewable authority: module locks, catalog/store trust and pins, and declarative workflow definitions. Keep machine-local execution state out of Git: `.vld/runtime/`, generated `.vld/agents/` handoff state, `.vld/workspaces.json`, and cloned `.vld/catalogs/` and `.vld/stores/` caches. The supplied `.gitignore` uses those targeted paths rather than hiding all `.vld/` state.
 
 ### Scoped adapter host — explicit fake or unconfined local process
 

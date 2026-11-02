@@ -110,7 +110,7 @@ The drift guard exists twice on purpose — `factory/lib/verify.mjs` for `vld ve
 Two invariants hold the packet together, and both have tests:
 
 - **A no-op recompile is byte-identical to a fresh compile.** If you add a field that depends on the previous packet, gate it on an actual change, or the "committed packet is in sync with the generator" CI check will fail for the wrong reason.
-- **Same profile, same bytes.** No clock, no randomness, no environment lookups. `generatedAt` is the single exception and is stripped by the sync check.
+- **Same profile, same bytes.** No clock, no randomness and no environment lookups. Compiler output contains no generated timestamp, so a fresh compile and a no-op recompile must be byte-identical.
 
 ## Review checklist for a new primitive
 

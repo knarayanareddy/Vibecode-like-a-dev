@@ -10,7 +10,7 @@
 
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -126,6 +126,28 @@ test('a missing document fails the gate that needs it, and names the fix', () =>
     assert.equal(run7.status, 'fail');
     assert.match(run7.detail, /README\.md/);
     assert.ok(run7.how, 'a failing gate must explain what it wanted');
+  } finally {
+    p.cleanup();
+  }
+});
+
+test('the generated gate runner skips linked external files and directory loops', () => {
+  const p = packet();
+  try {
+    const repo = satisfyingRepo(p, path.join(p.root, 'repo'));
+    const outside = path.join(p.root, 'outside');
+    mkdirSync(outside);
+    // This external file would otherwise both invent an unknown anchor and trip
+    // the secret scan. A repository link must not become enforcement evidence.
+    const fakeKey = ['ghp', '2'.repeat(36)].join('_');
+    const strayMarker = ['@', 'req '].join('');
+    writeFileSync(path.join(outside, 'outside.test.ts'), `// ${strayMarker}REQ-999\nconst token = "${fakeKey}";\n`);
+    symlinkSync(path.join(outside, 'outside.test.ts'), path.join(repo, 'linked.test.ts'));
+    symlinkSync(repo, path.join(repo, 'loop'), 'dir');
+
+    const summary = JSON.parse(run(p.outDir, ['--repo', repo, '--json']).stdout);
+    assert.equal(summary.fail, 0, JSON.stringify(summary.results.filter((entry) => entry.status === 'fail')));
+    assert.equal(summary.pending, 0);
   } finally {
     p.cleanup();
   }

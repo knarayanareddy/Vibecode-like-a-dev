@@ -7,7 +7,7 @@
  * gate passed without the command's evidence.
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { ROOT } from './indexer.mjs';
 import { moduleStatus } from './modules.mjs';
@@ -17,7 +17,9 @@ import {
   digest,
   ensureProjectDir,
   extensionError,
+  ensureSafeManagedDirectory,
   readJson,
+  safeManagedFile,
   vldDir,
   writeJsonAtomic
 } from './extension-utils.mjs';
@@ -70,6 +72,10 @@ export function getAdapter(id) {
   const adapter = catalogue.adapters.find((entry) => entry.id === id);
   if (!adapter) throw extensionError(`unknown agent adapter "${id}". Known: ${catalogue.adapters.map((entry) => entry.id).join(', ')}`, 'UNKNOWN_AGENT_ADAPTER');
   return adapter;
+}
+
+function installedStateRelative(id) {
+  return path.join('.vld', 'agents', `${id}.json`);
 }
 
 function installedStatePath(project, id) {
@@ -177,6 +183,11 @@ export function agentStatus(projectDir = '.', id = null) {
   if (id && choices.length === 0) errors.push(`unknown agent adapter "${id}"`);
   const adapters = choices.map((adapter) => {
     const stateFile = installedStatePath(project, adapter.id);
+    try {
+      safeManagedFile(project, installedStateRelative(adapter.id), 'agent adapter state');
+    } catch (error) {
+      return { id: adapter.id, installed: true, stateFile, files: [], drift: [error.message] };
+    }
     if (!existsSync(stateFile)) return { id: adapter.id, installed: false, stateFile, files: [], drift: [] };
     try {
       const state = readJson(stateFile);
@@ -212,13 +223,21 @@ export function installAgent({ id, projectDir = '.', force = false }) {
   const adapter = getAdapter(id);
   const modules = enabledModuleNames(project);
   const files = renderedFiles(adapter, modules);
-  const target = path.join(project, adapter.target);
-  const planned = [...files.entries()].map(([relative, content]) => ({
-    relative,
-    path: path.join(target, relative),
-    content,
-    digest: digest(content)
-  }));
+  // Check every managed destination before writing the handoff, so a state-path
+  // link cannot leave a partially-installed adapter behind.
+  ensureSafeManagedDirectory(project, path.join('.vld', 'agents'), 'agent state directory');
+  const stateFile = safeManagedFile(project, installedStateRelative(adapter.id), 'agent adapter state');
+  const target = ensureSafeManagedDirectory(project, adapter.target, 'agent handoff target');
+  const planned = [...files.entries()].map(([relative, content]) => {
+    const projectRelative = path.join(adapter.target, relative);
+    return {
+      relative,
+      projectRelative,
+      path: safeManagedFile(project, projectRelative, 'agent handoff file'),
+      content,
+      digest: digest(content)
+    };
+  });
 
   for (const entry of planned) {
     if (existsSync(entry.path) && readFileSync(entry.path, 'utf8') !== entry.content && !force) {
@@ -228,11 +247,15 @@ export function installAgent({ id, projectDir = '.', force = false }) {
 
   const written = [];
   for (const entry of planned) {
-    mkdirSync(path.dirname(entry.path), { recursive: true });
-    const existed = existsSync(entry.path);
-    const prior = existed ? readFileSync(entry.path, 'utf8') : null;
-    if (prior !== entry.content) writeFileSync(entry.path, entry.content, 'utf8');
-    written.push({ path: path.relative(project, entry.path).split(path.sep).join('/'), digest: entry.digest, changed: prior !== entry.content });
+    const parentRelative = path.relative(project, path.dirname(entry.path));
+    ensureSafeManagedDirectory(project, parentRelative, 'agent handoff parent directory');
+    // Revalidate after creating parents so a pre-existing generated file cannot
+    // be exchanged for a symbolic link between planning and write.
+    const file = safeManagedFile(project, entry.projectRelative, 'agent handoff file');
+    const existed = existsSync(file);
+    const prior = existed ? readFileSync(file, 'utf8') : null;
+    if (prior !== entry.content) writeFileSync(file, entry.content, 'utf8');
+    written.push({ path: path.relative(project, file).split(path.sep).join('/'), digest: entry.digest, changed: prior !== entry.content });
   }
 
   const state = {
@@ -243,7 +266,6 @@ export function installAgent({ id, projectDir = '.', force = false }) {
     modules,
     files: written.map(({ path: relative, digest: fileDigest }) => ({ path: relative, digest: fileDigest }))
   };
-  const stateFile = installedStatePath(project, adapter.id);
   writeJsonAtomic(stateFile, state);
   return { project, adapter, stateFile, modules, files: written, changed: written.some((entry) => entry.changed) };
 }

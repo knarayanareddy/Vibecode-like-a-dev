@@ -49,7 +49,7 @@ No dependencies, no build step, Node 22+. If a change requires a dependency, sto
 
 ## Rules
 
-1. **The packet is a pure function of the profile.** No model calls, no clock-derived decisions except `generatedAt`, no randomness. Two compiles of the same profile must differ only in the timestamp.
+1. **The packet is a pure function of the profile.** No model calls, clock-derived decisions or randomness. Two compiles of the same profile must be byte-identical; compiler output carries no generated timestamp.
 2. **Every decision must be explainable in one line.** A practice is selected by a predicate and carries a `why`. If you cannot state why in one sentence, it is not a rule yet.
 3. **Nothing is dropped silently.** Practices that do not apply are recorded as skipped with a reason; practices that do not fit the budget are recorded as deferred. Both appear in the packet.
 4. **Keep the packet small.** Each tier has a hard line ceiling in `policy.json`, and `verify` fails when a packet exceeds it. Trim prose; never trim acceptance criteria or gates.

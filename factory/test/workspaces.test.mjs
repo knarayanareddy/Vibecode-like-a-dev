@@ -20,6 +20,7 @@ import {
   inspectWorkspaceLock,
   recoverWorkspaces,
   removeWorkspace,
+  setWorkspaceLockTestHook,
   workspaceStatus
 } from '../lib/workspaces.mjs';
 
@@ -310,6 +311,49 @@ test('an active repository lock blocks mutation, and competing CLI allocators ne
   const state = JSON.parse(readFileSync(path.join(fixture.project, '.vld', 'workspaces.json'), 'utf8'));
   assert.equal(state.allocations.filter((entry) => entry.packageId === 'export-api').length, 1);
   assert.equal(workspaceEntries(fixture.project).length, 2, 'concurrent requests produce at most one allocated worktree');
+});
+
+test('workspace acquisition retries once when an EEXIST lock disappears before reinspection', (t) => {
+  const fixture = createFixture(t);
+  const lock = inspectWorkspaceLock(fixture.project);
+  let collisions = 0;
+  setWorkspaceLockTestHook(({ phase, directory, attempt }) => {
+    if (phase === 'before-exclusive-create' && attempt === 1) {
+      writeFileSync(directory, JSON.stringify({ schemaVersion: 1, pid: process.pid, token: 'vanishing-owner' }));
+    }
+    if (phase === 'after-eexist') {
+      collisions += 1;
+      rmSync(directory, { force: true });
+    }
+  });
+  t.after(() => setWorkspaceLockTestHook());
+
+  const created = createWorkspace({ missionFile: fixture.missionFile, packageId: 'export-api', projectDir: fixture.project });
+  assert.equal(collisions, 1, 'the hook removes the lock after exclusive creation reports EEXIST');
+  assert.equal(created.changed, true, 'the bounded fresh attempt acquires the now-free lock');
+  assert.equal(workspaceEntries(fixture.project).length, 2);
+});
+
+test('workspace acquisition stops after its bounded vanished-collision retry', (t) => {
+  const fixture = createFixture(t);
+  let collisions = 0;
+  setWorkspaceLockTestHook(({ phase, directory }) => {
+    if (phase === 'before-exclusive-create') {
+      writeFileSync(directory, JSON.stringify({ schemaVersion: 1, pid: process.pid, token: `vanishing-${collisions}` }));
+    }
+    if (phase === 'after-eexist') {
+      collisions += 1;
+      rmSync(directory, { force: true });
+    }
+  });
+  t.after(() => setWorkspaceLockTestHook());
+
+  assert.throws(
+    () => createWorkspace({ missionFile: fixture.missionFile, packageId: 'export-api', projectDir: fixture.project }),
+    (error) => error.code === 'WORKSPACE_LOCK_RACE'
+  );
+  assert.equal(collisions, 2, 'only the initial collision and one bounded retry are inspected');
+  assert.equal(workspaceEntries(fixture.project).length, 1, 'a failed acquisition creates no worktree');
 });
 
 test('workspace recovery fails closed for a partial owner and blocks mutation behind a recovery guard', (t) => {

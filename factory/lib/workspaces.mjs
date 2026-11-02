@@ -27,6 +27,13 @@ const COMMIT = /^[a-f0-9]{40}$/;
 const BRANCH = /^vld\/[a-z0-9][a-z0-9-]{1,60}\/[a-z0-9][a-z0-9-]{1,60}$/;
 const ALLOCATION_STATUS = new Set(['allocated', 'removing']);
 const MAX_RECEIPTS = 100;
+// One retry covers a lock holder that releases between exclusive-create's EEXIST
+// and our required lstat inspection. More retries would hide sustained contention.
+const LOCK_COLLISION_RETRY_LIMIT = 1;
+
+// Kept unset in production. The explicit setter lets the regression test
+// interleave the otherwise nanosecond-sized EEXIST -> inspection window.
+let workspaceLockTestHook = null;
 
 function isWithin(root, candidate) {
   const relative = path.relative(root, candidate);
@@ -301,9 +308,19 @@ function clearStaleLock(repo) {
 
 function lockExistsError(repo) {
   const inspected = inspectWorkspaceLock(repo.project);
+  // An exclusive create can report EEXIST just as the holder removes its lock.
+  // Let the caller make one fresh acquisition attempt; all existing node types
+  // remain fail-closed below.
+  if (!inspected.exists) return false;
   if (inspected.kind !== 'file') throw extensionError(`workspace lock has an unsafe filesystem type: ${inspected.kind}`, 'INVALID_WORKSPACE_LOCK');
   const reason = inspected.active ? `pid ${inspected.owner.pid} is active` : 'a stale lock requires `vld workspace recover`';
   throw extensionError(`workspace repository is locked: ${reason}`, inspected.active ? 'WORKSPACE_LOCKED' : 'STALE_WORKSPACE_LOCK');
+}
+
+/** @internal Test-only interleaving hook; production callers must leave this unset. */
+export function setWorkspaceLockTestHook(hook = null) {
+  if (hook !== null && typeof hook !== 'function') throw new TypeError('workspace lock test hook must be a function or null');
+  workspaceLockTestHook = hook;
 }
 
 function acquireWorkspaceLock(repo, { allowRecovery = false } = {}) {
@@ -315,11 +332,22 @@ function acquireWorkspaceLock(repo, { allowRecovery = false } = {}) {
   const existing = inspectWorkspaceLock(repo.project);
   if (existing.exists) lockExistsError(repo);
   const owner = { schemaVersion: 1, pid: process.pid, token: randomUUID() };
-  try {
-    writeFileSync(directory, `${JSON.stringify(owner)}\n`, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
-  } catch (error) {
-    if (error?.code === 'EEXIST') lockExistsError(repo);
-    throw error;
+  let retries = 0;
+  while (true) {
+    workspaceLockTestHook?.({ phase: 'before-exclusive-create', repo, directory, attempt: retries + 1 });
+    try {
+      writeFileSync(directory, `${JSON.stringify(owner)}\n`, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+      break;
+    } catch (error) {
+      if (error?.code !== 'EEXIST') throw error;
+      workspaceLockTestHook?.({ phase: 'after-eexist', repo, directory, attempt: retries + 1 });
+      const disappeared = lockExistsError(repo) === false;
+      if (!disappeared) throw error; // lockExistsError always throws for an existing node.
+      if (retries >= LOCK_COLLISION_RETRY_LIMIT) {
+        throw extensionError('workspace lock disappeared repeatedly during acquisition; retry the command', 'WORKSPACE_LOCK_RACE');
+      }
+      retries += 1;
+    }
   }
   let stats;
   try { stats = lstatSync(directory); } catch { throw extensionError('workspace lock disappeared during acquisition', 'INVALID_WORKSPACE_LOCK'); }

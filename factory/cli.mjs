@@ -362,8 +362,7 @@ function runAdopt(repoPath) {
     console.log(`\n✓ wrote ${written}`);
   } catch (error) {
     if (error.code === 'INVALID_PROFILE') fail(error.message);
-    console.log(`\n  ! profile not written: ${error.message}`);
-    return;
+    fail(`profile not written: ${error.message}`);
   }
 
   const stepOne = explicitIdea
@@ -1421,6 +1420,7 @@ async function runRuntime() {
     }
     if (action === 'serve') {
       if (!missionFile) fail('Usage: vld runtime serve <mission.json> [--port <0-65535>] [--token <local-token>] [--project <dir>]');
+      if (json) fail('runtime serve is a long-running local service; --json is not a one-shot response or readiness protocol');
       startStudioServer({ missionFile, project, label: 'Runtime' });
       return;
     }
