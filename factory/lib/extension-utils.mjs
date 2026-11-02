@@ -127,7 +127,7 @@ export function safeManagedFile(root, relative, label = 'managed file') {
 
 /** Create a managed directory one component at a time without traversing links. */
 export function ensureSafeManagedDirectory(root, relative, label = 'managed directory') {
-  const resolvedRoot = path.resolve(root);
+  const resolvedRoot = canonicalTemporaryPath(root);
   const target = path.resolve(resolvedRoot, relative);
   if (typeof relative !== 'string' || !containedPath(resolvedRoot, target)) {
     throw extensionError(`${label} escapes its managed root`, 'UNSAFE_MANAGED_PATH');
@@ -163,7 +163,7 @@ export function ensureSafeManagedDirectory(root, relative, label = 'managed dire
  * symlink must never be treated as an ordinary cache directory.
  */
 export function safeManagedDirectory(root, relative = '', label = 'managed directory') {
-  const resolvedRoot = path.resolve(root);
+  const resolvedRoot = canonicalTemporaryPath(root);
   const target = path.resolve(resolvedRoot, relative);
   if (typeof relative !== 'string' || !containedPath(resolvedRoot, target)) {
     throw extensionError(`${label} escapes its managed root`, 'UNSAFE_MANAGED_PATH');
