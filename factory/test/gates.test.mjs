@@ -303,6 +303,8 @@ test('only the mechanisms this packet needs are emitted', () => {
     const dir = path.join(root, 'packet');
     for (const [name, content] of files) write(dir, name, content);
     assert.ok(files.has('enforcement/mutation.config.json'), 'a tier-3 packet needs a mutation config');
+    assert.ok(files.has('enforcement/semantic-oracles.json'), 'a tier-3 packet supplies a semantic-oracle manifest starter');
+    assert.match(files.get('enforcement/semantic-oracles.json'), /"schemaVersion": 1/);
     assert.ok(files.has('enforcement/README.md'));
     assert.match(files.get('enforcement/README.md'), /What this mechanism does not prove/);
     // Every emitted mechanism file is real content, not an empty placeholder.
@@ -335,7 +337,7 @@ test('every gate the planner can emit has a registered mechanism', () => {
     const mechanism = gateMechanism(id);
     assert.ok(mechanism.how, `${id} does not say what it checks`);
     assert.ok(mechanism.mechanism, `${id} does not say what the check cannot see`);
-    assert.ok(['exists', 'contains', 'mutation', 'ci', 'anchors', 'drift', 'attest', 'no-secrets'].includes(mechanism.check.kind), `${id} uses an unknown check kind`);
+    assert.ok(['exists', 'contains', 'mutation', 'semantic-oracles', 'ci', 'anchors', 'drift', 'attest', 'no-secrets'].includes(mechanism.check.kind), `${id} uses an unknown check kind`);
   }
   assert.ok(loadGateRegistry().gates);
 });
@@ -448,6 +450,10 @@ test('the mutation gate accepts current Stryker config names or configured Pytho
     assert.equal(mutation?.status, 'fail', `mutation gate should require configuration: ${JSON.stringify(mutation)}`);
 
     write(repo, 'stryker.config.mjs', 'export default { mutate: ["src/**/*.ts"] };\n');
+    const automated = p.spec.requirements.filter((requirement) => requirement.verify === 'automated');
+    const oracles = automated.map((requirement) => ({ id: requirement.id, test: `tests/semantic-oracles/${requirement.id.toLowerCase()}.test.mjs` }));
+    write(repo, 'semantic-oracles.json', `${JSON.stringify({ schemaVersion: 1, oracles }, null, 2)}\n`);
+    for (const oracle of oracles) write(repo, oracle.test, `import assert from 'node:assert/strict';\n// @req ${oracle.id}\nassert.ok(true);\n`);
     summary = JSON.parse(run(p.outDir, ['--repo', repo, '--json']).stdout);
     mutation = summary.results.find((entry) => entry.id === 'G3-MUTATION');
     assert.equal(mutation?.status, 'pass', `Stryker config was not recognised: ${JSON.stringify(mutation)}`);
@@ -515,3 +521,35 @@ test('polyglot CI static checks (go vet), *Test.php authz denial tests, and .dar
 
 
 
+
+
+test('secret gate scans uncommon extensions and generated-looking directories outside the packet', () => {
+  const p = packet();
+  try {
+    const repo = satisfyingRepo(p, path.join(p.root, 'repo'));
+    const fixtureToken = ['A1b2C3d4', 'E5f6G7h8', 'I9j0'].join('');
+    write(repo, 'vendor/release.credential', `token = "${fixtureToken}"\n`);
+    const result = run(p.outDir, ['--repo', repo, '--json']);
+    const summary = JSON.parse(result.stdout);
+    const secrets = summary.results.find((entry) => entry.id === 'G1-SECRETS');
+    assert.equal(secrets.status, 'fail');
+    assert.match(secrets.detail, /vendor\/release\.credential/);
+  } finally { p.cleanup(); }
+});
+
+test('G3 mutation gate requires independent semantic-oracle evidence for every automated requirement', () => {
+  const p = packet({ stage: 'production', traits: ['auth', 'payments', 'persistence'], risks: { pii: true, payments: true, regulated: true, multiTenant: true, destructiveWrites: true, publicFacing: true, integrations: true } });
+  try {
+    assert.ok(p.spec.gates.some((gate) => gate.id === 'G3-MUTATION'));
+    const repo = satisfyingRepo(p, path.join(p.root, 'repo'));
+    let result = run(p.outDir, ['--repo', repo, '--json']); let summary = JSON.parse(result.stdout);
+    assert.equal(summary.results.find((entry) => entry.id === 'G3-MUTATION').status, 'fail');
+    write(repo, 'mutation.config.json', '{"mutate":["src/domain/**/*.mjs"]}\n');
+    const automated = p.spec.requirements.filter((requirement) => requirement.verify === 'automated');
+    const oracles = automated.map((requirement) => ({ id: requirement.id, test: `tests/semantic-oracles/${requirement.id.toLowerCase()}.test.mjs` }));
+    write(repo, 'semantic-oracles.json', `${JSON.stringify({ schemaVersion: 1, oracles }, null, 2)}\n`);
+    for (const oracle of oracles) write(repo, oracle.test, `import assert from 'node:assert/strict';\n// @req ${oracle.id}\nassert.ok(true);\n`);
+    result = run(p.outDir, ['--repo', repo, '--json']); summary = JSON.parse(result.stdout);
+    assert.equal(summary.results.find((entry) => entry.id === 'G3-MUTATION').status, 'pass');
+  } finally { p.cleanup(); }
+});

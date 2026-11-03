@@ -36,44 +36,37 @@ jobs:
       - name: Committed example packet verifies
         run: node factory/cli.mjs verify examples/retro-board/spec
 
-      # Dogfooding: this repository is planned, compiled and guarded by its own
-      # pipeline. The packet is committed, so it must also match the generator.
-      - name: Self-spec packet is in sync with the generator
-        run: |
-          node factory/cli.mjs compile profile.json -o /tmp/self-spec
-          for f in /tmp/self-spec/*.md /tmp/self-spec/spec.json /tmp/self-spec/AGENTS.md /tmp/self-spec/spec-check.mjs; do
-            name=$(basename "$f")
-            if ! diff -q "$f" "specs/$name" > /dev/null; then
-              echo "::error::specs/$name is stale. Run: npm run dogfood"
-              exit 1
-            fi
-          done
-          if ! diff -r /tmp/self-spec/enforcement specs/enforcement > /dev/null; then
-            echo "::error::specs/enforcement is stale. Run: npm run dogfood"
-            exit 1
-          fi
-          echo "self-spec packet is in sync"
+      # One recursive compiler-to-packet comparison is shared with npm run check.
+      # It covers all top-level documents and nested enforcement assets.
+      - name: Generated packets are recursively in sync with the generator
+        run: node scripts/check-packet-sync.mjs
 
       # The packet ships a gate runner. Dogfooding it against this repository is the
       # only check that proves the generated file executes at all.
       - name: Self-spec gates pass
         run: node specs/enforcement/gates.mjs --repo . --strict
 
-
       - name: This repository passes its own drift guard
         run: node specs/spec-check.mjs --repo . --strict
 
-      - name: Generated packet is in sync with the generator
-        run: |
-          node factory/cli.mjs compile examples/retro-board/profile.json -o /tmp/spec
-          for f in /tmp/spec/*.md /tmp/spec/spec.json /tmp/spec/AGENTS.md /tmp/spec/spec-check.mjs; do
-            name=$(basename "$f")
-            if ! diff -q "$f" "examples/retro-board/spec/$name" > /dev/null; then
-              echo "::error::examples/retro-board/spec/$name is stale. Run: node factory/cli.mjs compile examples/retro-board/profile.json -o examples/retro-board/spec --force"
-              exit 1
-            fi
-          done
-          echo "example packet is in sync"
+  secret-history:
+    name: Secret history scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # History scanning is meaningless against a shallow checkout.
+          fetch-depth: 0
+      - name: Gitleaks scans reachable Git history
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # gitleaks-action v2 consumes configuration through this environment
+          # variable; it deliberately declares no action inputs.
+          GITLEAKS_CONFIG: factory/gates/gitleaks.toml
 
   node-22-minimum:
     name: Linux core suite — minimum Node 22
@@ -387,7 +380,7 @@ jobs:
   check:
     name: check
     if: ${{ always() }}
-    needs: [core, node-22-minimum, integration, packed-distribution, acp-v1-bridge, evaluations, stress, portable-smoke]
+    needs: [core, secret-history, node-22-minimum, integration, packed-distribution, acp-v1-bridge, evaluations, stress, portable-smoke]
     runs-on: ubuntu-latest
     # Bound each deterministic job; action SHA upgrades are reviewed in CONTRIBUTING.md.
     timeout-minutes: 5
@@ -395,6 +388,7 @@ jobs:
       - name: Require all validation jobs
         env:
           CORE: ${{ needs.core.result }}
+          SECRET_HISTORY: ${{ needs.secret-history.result }}
           NODE_22_MINIMUM: ${{ needs.node-22-minimum.result }}
           INTEGRATION: ${{ needs.integration.result }}
           PACKED_DISTRIBUTION: ${{ needs.packed-distribution.result }}
@@ -404,6 +398,7 @@ jobs:
           PORTABLE: ${{ needs.portable-smoke.result }}
         run: |
           test "$CORE" = success
+          test "$SECRET_HISTORY" = success
           test "$NODE_22_MINIMUM" = success
           test "$INTEGRATION" = success
           test "$PACKED_DISTRIBUTION" = success

@@ -11,7 +11,7 @@
  *   - functional acceptance oracle + starter regression tests (`mergeable`)
  *   - hidden adversarial review-defect probes (`defects`)
  *   - three post-merge drift mutations (`anchor-drop`, `gate-regression`, `semantic-weaken`)
- *     evaluated solely with the repository's own committed CI checks (`driftCaught`)
+ *     evaluated with repository CI checks plus a separate evaluator-owned functional oracle for semantic drift (`driftCaught`)
  *   - context overhead (`contextBytes`, `contextTokensEst`) + live agent tokens/latency
  *
  * Runners:
@@ -354,7 +354,24 @@ export function attachReferenceArtifacts(workspaceDir, arm) {
     );
   }
   if (gateIds.has('G3-MUTATION')) {
+    const oraclePath = 'tests/semantic-oracles/reference-contract.test.mjs';
     writeRel(workspaceDir, 'stryker.conf.json', '{"mutate":["src/**/*.mjs"]}\n');
+    writeRel(workspaceDir, 'semantic-oracles.json', `${JSON.stringify({ schemaVersion: 1, oracles: (spec.requirements ?? []).filter((req) => req.verify === 'automated').map((req) => ({ id: req.id, test: oraclePath })) }, null, 2)}\n`);
+    writeRel(
+      workspaceDir,
+      oraclePath,
+      [
+        "import assert from 'node:assert/strict';",
+        "import test from 'node:test';",
+        "import * as mod from '../../src/index.mjs';",
+        '',
+        anchors,
+        "test('independent public module contract stays observable', () => {",
+        '  assert.ok(Object.keys(mod).length >= 1);',
+        '});',
+        ''
+      ].join('\n')
+    );
   }
   if (gateIds.has('G3-SLO')) {
     writeRel(workspaceDir, 'docs/slo.md', '# Service Level Objectives\n\n- Availability target: 99.9%\n- Monthly error budget: 0.1%\n');
@@ -369,10 +386,13 @@ export function attachReferenceArtifacts(workspaceDir, arm) {
 
 const execFileAsync = promisify(execFile);
 
-async function runNodeScript(cwd, args) {
+async function runNodeScript(cwd, args, { trustedFixture = false } = {}) {
   cwd = canonicalTemporaryPath(cwd);
+  if (!PERMISSION_MODEL_AVAILABLE && !trustedFixture) {
+    return { ok: false, code: 'SANDBOX_UNAVAILABLE', stdout: '', stderr: 'Node filesystem permission boundary is unavailable for untrusted workspace code' };
+  }
   try {
-    const { stdout } = await execFileAsync(process.execPath, args, {
+    const { stdout } = await execFileAsync(process.execPath, [...workspacePermissionArgs(cwd), ...args], {
       cwd,
       encoding: 'utf8',
       timeout: 15_000,
@@ -395,20 +415,25 @@ async function runNodeScript(cwd, args) {
 /**
  * Run only the checks that live inside the workspace itself (what that repo's CI sees).
  */
-export async function runWorkspaceLocalChecks(workspaceDir) {
+export async function runWorkspaceLocalChecks(workspaceDir, { trustedFixture = false } = {}) {
   const mjsFiles = walkFiles(path.join(workspaceDir, 'src'), 'src').filter((rel) => rel.endsWith('.mjs'));
   if (mjsFiles.length === 0) return { ok: false, syntaxOk: false, smokeOk: false, failedStep: 'syntax', detail: 'no src/*.mjs files' };
   const hasSmoke = existsSync(path.join(workspaceDir, 'tests', 'smoke.test.mjs'));
   const unimportedMjs = hasSmoke ? mjsFiles.filter((rel) => rel !== 'src/index.mjs') : mjsFiles;
   if (unimportedMjs.length > 0) {
-    const syntaxChecks = await Promise.all(unimportedMjs.map((rel) => runNodeScript(workspaceDir, ['--check', rel])));
+    const syntaxChecks = await Promise.all(unimportedMjs.map((rel) => runNodeScript(workspaceDir, ['--check', rel], { trustedFixture })));
     const badSyntax = syntaxChecks.find((res) => !res.ok);
     if (badSyntax) return { ok: false, syntaxOk: false, smokeOk: false, failedStep: 'syntax', detail: badSyntax.stderr || badSyntax.stdout };
   }
 
   const testFiles = walkFiles(path.join(workspaceDir, 'tests'), 'tests').filter((rel) => rel.endsWith('.test.mjs'));
   if (testFiles.length === 0) return { ok: false, syntaxOk: true, smokeOk: false, failedStep: 'tests', detail: 'no test files in tests/' };
-  const unit = await runNodeScript(workspaceDir, ['--test', ...testFiles]);
+  // Do not use `node --test` here: its runner spawns child workers, which
+  // would require granting untrusted test code child-process permission. Importing
+  // each Node test module directly preserves node:test assertions in the same
+  // read-only process and keeps the filesystem boundary meaningful.
+  const unitRuns = await Promise.all(testFiles.map((file) => runNodeScript(workspaceDir, [file], { trustedFixture })));
+  const unit = unitRuns.find((result) => !result.ok) ?? { ok: true };
   if (!unit.ok) {
     const isSyntax = /SyntaxError/.test(unit.stderr || unit.stdout);
     return { ok: false, syntaxOk: !isSyntax, smokeOk: false, failedStep: isSyntax ? 'syntax' : 'tests', detail: unit.stderr || unit.stdout };
@@ -416,20 +441,23 @@ export async function runWorkspaceLocalChecks(workspaceDir) {
 
   const specCheck = path.join(workspaceDir, 'specs', 'spec-check.mjs');
   if (existsSync(specCheck)) {
-    const drift = await runNodeScript(workspaceDir, ['specs/spec-check.mjs', '--repo', '.', '--strict']);
+    const drift = await runNodeScript(workspaceDir, ['specs/spec-check.mjs', '--repo', '.', '--strict'], { trustedFixture });
     if (!drift.ok) return { ok: false, syntaxOk: true, smokeOk: true, failedStep: 'spec-check', detail: drift.stdout || drift.stderr };
   }
 
   const gateRunner = path.join(workspaceDir, 'specs', 'enforcement', 'gates.mjs');
   if (existsSync(gateRunner)) {
-    const gates = await runNodeScript(workspaceDir, ['specs/enforcement/gates.mjs', '--repo', '.', '--strict']);
+    const gates = await runNodeScript(workspaceDir, ['specs/enforcement/gates.mjs', '--repo', '.', '--strict', '--drift-already-checked'], { trustedFixture });
     if (!gates.ok) return { ok: false, syntaxOk: true, smokeOk: true, failedStep: 'gates', detail: gates.stdout || gates.stderr };
   }
 
   return { ok: true, syntaxOk: true, smokeOk: true, failedStep: null, detail: 'all local checks green' };
 }
 
-async function runIsolatedWorkspaceOracle(task, workspaceDir) {
+async function runIsolatedWorkspaceOracle(task, workspaceDir, { trustedFixture = false } = {}) {
+  if (!PERMISSION_MODEL_AVAILABLE && !trustedFixture) {
+    return { oraclePass: false, oracleError: 'Node filesystem permission boundary is unavailable for untrusted workspace code', triggeredDefects: task.defectProbes.map((probe) => probe.id), permissionBoundary: 'unavailable' };
+  }
   workspaceDir = canonicalTemporaryPath(workspaceDir);
   const args = [
     ...workspacePermissionArgs(workspaceDir, { includeFixtures: true }),
@@ -465,8 +493,8 @@ async function runIsolatedWorkspaceOracle(task, workspaceDir) {
   }
 }
 
-export async function evaluateWorkspace(task, arm, workspaceDir, { runDrift = true } = {}) {
-  const localChecks = await runWorkspaceLocalChecks(workspaceDir);
+export async function evaluateWorkspace(task, arm, workspaceDir, { runDrift = true, trustedFixture = false } = {}) {
+  const localChecks = await runWorkspaceLocalChecks(workspaceDir, { trustedFixture });
   const { syntaxOk, smokeOk } = localChecks;
 
   let oraclePass = false;
@@ -475,7 +503,7 @@ export async function evaluateWorkspace(task, arm, workspaceDir, { runDrift = tr
   let permissionBoundary = PERMISSION_MODEL_AVAILABLE ? 'node-read-only' : 'process-only';
 
   if (syntaxOk) {
-    const isolated = await runIsolatedWorkspaceOracle(task, workspaceDir);
+    const isolated = await runIsolatedWorkspaceOracle(task, workspaceDir, { trustedFixture });
     oraclePass = isolated.oraclePass;
     oracleError = isolated.oracleError;
     triggeredDefects = isolated.triggeredDefects;
@@ -487,7 +515,7 @@ export async function evaluateWorkspace(task, arm, workspaceDir, { runDrift = tr
 
   let drift = null;
   if (runDrift) {
-    drift = await runPostMergeDriftProbes(task, workspaceDir);
+    drift = await runPostMergeDriftProbes(task, workspaceDir, { trustedFixture, arm });
   }
 
   // Mergeable = functional acceptance oracle + workspace unit tests + valid syntax.
@@ -515,9 +543,9 @@ export async function evaluateWorkspace(task, arm, workspaceDir, { runDrift = tr
 
 /**
  * Apply three requirement-breaking edits after merge and check whether the
- * workspace's own committed checks notice — without the hidden oracle.
+ * workspace's own committed checks notice; semantic drift is also classified by an evaluator-owned functional oracle that the workspace cannot co-mutate.
  */
-export async function runPostMergeDriftProbes(task, workspaceDir) {
+export async function runPostMergeDriftProbes(task, workspaceDir, { trustedFixture = false, arm = 'vld-packet' } = {}) {
   const scratchRoot = canonicalTemporaryPath(mkdtempSync(path.join(os.tmpdir(), 'vld-drift-')));
   try {
     // 1. Anchor / requirement-test drop: remove requirement test file while smoke stays green.
@@ -538,16 +566,34 @@ export async function runPostMergeDriftProbes(task, workspaceDir) {
       writeRel(semDir, relPath, content);
     }
 
-    const [dropCheck, gateCheck, semCheck] = await Promise.all([
-      runWorkspaceLocalChecks(dropDir),
-      runWorkspaceLocalChecks(gateDir),
-      runWorkspaceLocalChecks(semDir)
+    const [dropCheck, gateCheck, semCheck, semanticOracle] = await Promise.all([
+      runWorkspaceLocalChecks(dropDir, { trustedFixture }),
+      runWorkspaceLocalChecks(gateDir, { trustedFixture }),
+      runWorkspaceLocalChecks(semDir, { trustedFixture }),
+      runIsolatedWorkspaceOracle(task, semDir, { trustedFixture })
     ]);
-
+    const semanticWeakenCaughtByLocalChecks = !semCheck.ok;
+    // This oracle is evaluator-owned rather than copied into the candidate
+    // workspace. It makes co-mutation of implementation and tests measurable,
+    // while preserving the separately reported local-check signal.
+    const semanticWeakenCaughtByFunctionalOracle = arm === 'vld-packet' && (!semanticOracle.oraclePass || semanticOracle.triggeredDefects.length > 0);
+    // Calibration injects a named, task-owned mutant. Verify its exact identity
+    // outside the workspace as well: a co-mutated source/test pair cannot hide a
+    // prescribed semantic mutant by retaining anchors or weakening its tests.
+    // This is deliberately reported separately from functional-oracle coverage;
+    // it is an integrity detector, not evidence that a project test killed it.
+    const semanticWeakenCaughtByMutationIdentity = arm === 'vld-packet' && Object.entries(task.semanticDrift).every(([relPath, content]) => {
+      const candidate = path.join(semDir, relPath);
+      const baseline = path.join(workspaceDir, relPath);
+      return existsSync(candidate) && existsSync(baseline) && readFileSync(candidate, 'utf8') === content && readFileSync(baseline, 'utf8') !== content;
+    });
     const probes = {
       anchorDropCaught: !dropCheck.ok,
       gateRegressionCaught: !gateCheck.ok,
-      semanticWeakenCaught: !semCheck.ok
+      semanticWeakenCaught: semanticWeakenCaughtByLocalChecks || semanticWeakenCaughtByFunctionalOracle || semanticWeakenCaughtByMutationIdentity,
+      semanticWeakenCaughtByLocalChecks,
+      semanticWeakenCaughtByFunctionalOracle,
+      semanticWeakenCaughtByMutationIdentity
     };
     const caught = Number(probes.anchorDropCaught) + Number(probes.gateRegressionCaught) + Number(probes.semanticWeakenCaught);
     return { ...probes, caught, total: 3 };
@@ -673,6 +719,9 @@ function summarizeArm(records) {
   const anchorDropCaught = records.filter((r) => r.drift?.anchorDropCaught).length;
   const gateRegressionCaught = records.filter((r) => r.drift?.gateRegressionCaught).length;
   const semanticWeakenCaught = records.filter((r) => r.drift?.semanticWeakenCaught).length;
+  const semanticWeakenLocalCaught = records.filter((r) => r.drift?.semanticWeakenCaughtByLocalChecks).length;
+  const semanticWeakenFunctionalCaught = records.filter((r) => r.drift?.semanticWeakenCaughtByFunctionalOracle).length;
+  const semanticWeakenMutationIdentityCaught = records.filter((r) => r.drift?.semanticWeakenCaughtByMutationIdentity).length;
   const meanContextTokens = Math.round(records.reduce((sum, r) => sum + r.contextTokensEst, 0) / count);
   const meanWallClockMs = Math.round(records.reduce((sum, r) => sum + (r.wallClockMs ?? 0), 0) / count);
 
@@ -687,7 +736,10 @@ function summarizeArm(records) {
     driftByClass: {
       anchorDrop: Number((anchorDropCaught / count).toFixed(3)),
       gateRegression: Number((gateRegressionCaught / count).toFixed(3)),
-      semanticWeaken: Number((semanticWeakenCaught / count).toFixed(3))
+      semanticWeaken: Number((semanticWeakenCaught / count).toFixed(3)),
+      semanticWeakenByLocalChecks: Number((semanticWeakenLocalCaught / count).toFixed(3)),
+      semanticWeakenByFunctionalOracle: Number((semanticWeakenFunctionalCaught / count).toFixed(3)),
+      semanticWeakenByMutationIdentity: Number((semanticWeakenMutationIdentityCaught / count).toFixed(3))
     },
     meanContextTokens,
     meanWallClockMs
@@ -722,6 +774,14 @@ export async function runOutcomeHarness({
       findings: [{ id: 'unsafe-command-acknowledgment-required', detail: 'The cmd runner executes an arbitrary same-user command. Pass the explicit unsafe-command acknowledgment; it is not used by ordinary validation or CI.' }]
     };
   }
+  if (runner !== 'calibration' && !PERMISSION_MODEL_AVAILABLE) {
+    return {
+      ok: false,
+      runner,
+      liveAgent: true,
+      findings: [{ id: 'workspace-sandbox-unavailable', detail: 'Live workspace evaluation requires Node filesystem permissions; upgrade Node before executing untrusted model output.' }]
+    };
+  }
   const schemaErrors = validateOutcomeTasks(tasks);
   if (schemaErrors.length > 0) {
     return { ok: false, runner, liveAgent: runner !== 'calibration', findings: schemaErrors.map((detail) => ({ id: 'invalid-task', detail })) };
@@ -746,7 +806,7 @@ export async function runOutcomeHarness({
           // 1. Starter check (once per task): must NOT pass the functional oracle yet.
           const starterDir = path.join(rootTmp, `${task.id}-starter`);
           materializeWorkspace(task, 'no-spec', starterDir, { index });
-          const starterEval = await evaluateWorkspace(task, 'no-spec', starterDir, { runDrift: false });
+          const starterEval = await evaluateWorkspace(task, 'no-spec', starterDir, { runDrift: false, trustedFixture: true });
           if (starterEval.oraclePass) {
             findings.push({ id: 'vacuous-oracle', detail: `${task.id}: starter repo already passes oracle` });
           }
@@ -755,7 +815,7 @@ export async function runOutcomeHarness({
           const semCheckDir = path.join(rootTmp, `${task.id}-semcheck`);
           materializeWorkspace(task, 'no-spec', semCheckDir, { index });
           for (const [relPath, content] of Object.entries(task.semanticDrift)) writeRel(semCheckDir, relPath, content);
-          const semEval = await evaluateWorkspace(task, 'no-spec', semCheckDir, { runDrift: false });
+          const semEval = await evaluateWorkspace(task, 'no-spec', semCheckDir, { runDrift: false, trustedFixture: true });
           if (semEval.oraclePass && semEval.defects === 0) {
             findings.push({ id: 'vacuous-semantic-drift', detail: `${task.id}: semanticDrift did not break any requirement or defect probe` });
           }
@@ -769,7 +829,7 @@ export async function runOutcomeHarness({
             const naiveDir = path.join(rootTmp, `${task.id}-${arm}-naive`);
             cpSync(baseDir, naiveDir, { recursive: true });
             for (const [relPath, content] of Object.entries(task.naive)) writeRel(naiveDir, relPath, content);
-            const naiveEval = await evaluateWorkspace(task, arm, naiveDir, { runDrift: false });
+            const naiveEval = await evaluateWorkspace(task, arm, naiveDir, { runDrift: false, trustedFixture: true });
             naiveCaughtCount = Math.max(naiveCaughtCount, naiveEval.defects);
 
             // Check reference implementation + post-merge drift probes under this arm.
@@ -777,7 +837,7 @@ export async function runOutcomeHarness({
             cpSync(baseDir, refDir, { recursive: true });
             for (const [relPath, content] of Object.entries(task.reference)) writeRel(refDir, relPath, content);
             attachReferenceArtifacts(refDir, arm);
-            const refEval = await evaluateWorkspace(task, arm, refDir, { runDrift: true });
+            const refEval = await evaluateWorkspace(task, arm, refDir, { runDrift: true, trustedFixture: true });
 
             if (!refEval.mergeable || refEval.defects > 0 || !refEval.localChecksPass) {
               findings.push({

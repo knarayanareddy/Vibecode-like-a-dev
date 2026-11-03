@@ -227,8 +227,9 @@
     },
     "G3-MUTATION": {
       "check": {
-        "kind": "mutation",
-        "glob": [
+        "kind": "semantic-oracles",
+        "config": "semantic-oracles.json",
+        "mutationGlob": [
           "enforcement/mutation.config.json",
           "mutation.config.*",
           "**/mutation.config.*",
@@ -238,6 +239,11 @@
           "**/stryker.conf.*",
           ".mutmut*",
           "**/.mutmut*"
+        ],
+        "testGlob": [
+          "tests/semantic-oracles/**/*.test.*",
+          "test/semantic-oracles/**/*.test.*",
+          "**/semantic-oracles/**/*.test.*"
         ],
         "pythonGlob": [
           "pyproject.toml",
@@ -253,8 +259,8 @@
           "path": "enforcement/mutation.config.json"
         }
       ],
-      "how": "A mutation configuration exists and names the domain scope.",
-      "mechanism": "The config, run with Stryker (TS), mutmut (Python) or PIT (Java). The runner checks the config, not the score: the score lives in CI output."
+      "how": "A mutation configuration and a separate semantic-oracle manifest bind every automated requirement to a black-box or property test outside its ordinary unit test file.",
+      "mechanism": "The runner rejects an absent/malformed manifest, a missing requirement oracle, or an oracle with no @req anchor/assertion. CI must run the selected mutation tool; the structural runner cannot measure its score or prove the oracle is complete."
     },
     "G3-PROPERTY": {
       "check": {

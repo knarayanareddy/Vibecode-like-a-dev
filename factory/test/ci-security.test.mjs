@@ -38,9 +38,9 @@ test('CI pins every third-party action, has read-only permissions and keeps one 
   }
   mustMatch(ci, /^permissions:\n  contents: read$/m);
   mustMatch(live, /^permissions:\n  contents: read$/m);
-  mustMatch(ci, /^  check:\n    name: check\n    if: \$\{\{ always\(\) \}\}\n    needs: \[core, node-22-minimum, integration, packed-distribution, acp-v1-bridge, evaluations, stress, portable-smoke\]/m);
+  mustMatch(ci, /^  check:\n    name: check\n    if: \$\{\{ always\(\) \}\}\n    needs: \[core, secret-history, node-22-minimum, integration, packed-distribution, acp-v1-bridge, evaluations, stress, portable-smoke\]/m);
   assert.match(read('.github', 'dependabot.yml'), /package-ecosystem: github-actions/);
-  for (const job of ['core', 'node-22-minimum', 'integration', 'packed-distribution', 'acp-v1-bridge', 'evaluations', 'stress', 'portable-smoke', 'check']) {
+  for (const job of ['core', 'secret-history', 'node-22-minimum', 'integration', 'packed-distribution', 'acp-v1-bridge', 'evaluations', 'stress', 'portable-smoke', 'check']) {
     mustMatch(ci, new RegExp(`^  ${job}:\\n[\\s\\S]*?^    timeout-minutes: \\d+$`, 'm'), `${job} needs an explicit job timeout`);
   }
   mustMatch(read('CONTRIBUTING.md'), /Workflow jobs have explicit time limits[\s\S]*pinned to full commit SHAs/);
@@ -62,6 +62,7 @@ test('CI separates deterministic evaluations/stress work and validates the porta
   mustNotMatch(ci, /tee portable-test\.log|NODE_OPTIONS=--test-reporter=dot/);
   mustMatch(ci, /deterministic outcome calibration/);
   mustNotMatch(ci, /--runner cmd|--unsafe-command/);
+  mustMatch(ci, /secret-history:[\s\S]*?fetch-depth: 0[\s\S]*?gitleaks\/gitleaks-action@[a-f0-9]{40}[\s\S]*?GITLEAKS_CONFIG: factory\/gates\/gitleaks\.toml/);
   mustNotMatch(ci, /actions\/[\w-]+@v\d/);
 });
 

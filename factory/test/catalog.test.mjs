@@ -36,8 +36,8 @@ function rootFixture(directory, signingKey, { version = 1, previousRootDigest = 
 function makeCatalog(directory, signingKey, { catalogId = 'team-catalog', coreCompatibility = '^0.19.0', payloadType = 'guidance', payload = '# Signed guidance\n\nKeep this inert and review the provenance.\n', tamperIndex = false } = {}) {
   const source = path.join(directory, 'catalog-source'); const packageDir = path.join(source, 'packages', 'review-content'); mkdirSync(packageDir, { recursive: true });
   const payloadPath = payloadType === 'guidance' ? 'guidance.md' : `${payloadType}.json`; const payloadId = payloadType === 'guidance' ? 'review-guidance' : 'review-workflow';
-  const payloadFile = path.join(packageDir, payloadPath); writeFileSync(payloadFile, payload);
-  const payloadEntry = { id: payloadId, type: payloadType, path: payloadPath, digest: digest(payload), bytes: Buffer.byteLength(payload) };
+  const payloadFile = path.join(packageDir, payloadPath); const payloadBytes = Buffer.isBuffer(payload) ? payload : Buffer.from(payload); writeFileSync(payloadFile, payloadBytes);
+  const payloadEntry = { id: payloadId, type: payloadType, path: payloadPath, digest: digest(payloadBytes), bytes: payloadBytes.length };
   const manifest = signed({
     schemaVersion: 1, type: 'vld-catalog-package', name: 'review-content', version: '1.0.0', license: 'MIT', coreCompatibility,
     payloads: [payloadEntry], publisher: { id: 'test-publisher' }, releaseTimestamp: '2030-01-01T00:00:00.000Z', revoked: false, capabilities: ['content-only']
@@ -155,4 +155,18 @@ test('M7 root rotation requires exact acknowledgement and old-root threshold sig
   const result = trustCatalogRoot({ projectDir: project, rootFile: rotated.file, acknowledge: nextDigest, now: FUTURE });
   assert.equal(result.root.version, 2);
   assert.equal(readFileSync(path.join(project, '.vld', 'catalog-root.json'), 'utf8').includes('PRIVATE KEY'), false);
+});
+
+
+test('catalog payload verification binds raw bytes rather than lossy UTF-8 replacement text', (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'vld-catalog-bytes-')); t.after(() => rmSync(root, { recursive: true, force: true }));
+  const signer = key(); const trust = rootFixture(root, signer);
+  // Both bytes decode to U+FFFD with Buffer#toString('utf8'), so a text hash would
+  // accept the substitution despite the signed blob having changed.
+  const source = makeCatalog(root, signer, { payload: Buffer.from([0x80]) }); const project = path.join(root, 'consumer'); mkdirSync(project);
+  trustCatalogRoot({ projectDir: project, rootFile: trust.file, now: FUTURE });
+  addCatalog({ projectDir: project, id: 'team-catalog', repository: `file://${source}`, now: FUTURE });
+  const cached = path.join(project, '.vld', 'catalogs', 'team-catalog', 'packages', 'review-content', 'guidance.md');
+  writeFileSync(cached, Buffer.from([0x81]));
+  assert.equal(catalogStatus(project, null, { now: FUTURE }).ok, false, 'same decoded replacement text may not satisfy a raw-byte digest');
 });

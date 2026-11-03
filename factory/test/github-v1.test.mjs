@@ -40,10 +40,10 @@ test('M8 GitHub adapter creates exact PR plans and rejects altered tuple/remote 
 test('M8 GitHub adapter reads fixture checks/reviews and requests merge only after exact remote gates', async () => {
   const reviewed = plan(); const calls = []; const client = fixtureClient([
     response(pull()),
-    response({ check_runs: [{ name: 'check', status: 'completed', conclusion: 'success' } ] }),
+    response({ check_runs: [{ name: 'check', head_sha: SHA, status: 'completed', conclusion: 'success' } ] }),
     response([{ id: 1, submitted_at: '2026-11-02T00:00:00Z', commit_id: SHA, state: 'APPROVED', user: { login: 'independent-reviewer' } }]),
     response(pull()),
-    response({ check_runs: [{ name: 'check', status: 'completed', conclusion: 'success' } ] }),
+    response({ check_runs: [{ name: 'check', head_sha: SHA, status: 'completed', conclusion: 'success' } ] }),
     response([{ id: 1, submitted_at: '2026-11-02T00:00:00Z', commit_id: SHA, state: 'APPROVED', user: { login: 'independent-reviewer' } }]),
     response({ merged: true, sha: 'e'.repeat(40), message: 'Pull Request successfully merged' })
   ], calls);
@@ -52,7 +52,7 @@ test('M8 GitHub adapter reads fixture checks/reviews and requests merge only aft
   const merged = await requestGitHubMerge({ client, plan: reviewed, pullNumber: 42 });
   assert.equal(merged.mergedSha, 'e'.repeat(40)); assert.equal(calls.at(-1).request.method, 'PUT'); assert.equal(JSON.parse(calls.at(-1).request.body).sha, SHA);
 
-  const blocked = fixtureClient([response(pull()), response({ check_runs: [{ name: 'check', status: 'completed', conclusion: 'failure' }] }), response([])], []);
+  const blocked = fixtureClient([response(pull()), response({ check_runs: [{ name: 'check', head_sha: SHA, status: 'completed', conclusion: 'failure' }] }), response([])], []);
   await assert.rejects(() => requestGitHubMerge({ client: blocked, plan: reviewed, pullNumber: 42 }), (error) => error.code === 'GITHUB_MERGE_GATES_UNMET');
 });
 
@@ -69,7 +69,7 @@ test('M8 GitHub adapter normalizes credential, rate-limit and malformed-response
   const timeout = createGitHubV1Client({ token: 'example-auth-material', timeoutMs: 100, fetchImpl: (_url, request) => new Promise((_, reject) => request.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true })) });
   await assert.rejects(() => publishGitHubPullRequest({ client: timeout, plan: plan() }), (error) => error.code === 'GITHUB_NETWORK_FAILED');
   const ambiguous = fixtureClient([
-    response(pull()), response({ check_runs: [{ name: 'check', status: 'completed', conclusion: 'success' }] }), response([{ id: 1, submitted_at: '2026-11-02T00:00:00Z', commit_id: SHA, state: 'APPROVED', user: { login: 'independent-reviewer' } }]), response({ merged: false, sha: SHA })
+    response(pull()), response({ check_runs: [{ name: 'check', head_sha: SHA, status: 'completed', conclusion: 'success' }] }), response([{ id: 1, submitted_at: '2026-11-02T00:00:00Z', commit_id: SHA, state: 'APPROVED', user: { login: 'independent-reviewer' } }]), response({ merged: false, sha: SHA })
   ], []);
   await assert.rejects(() => requestGitHubMerge({ client: ambiguous, plan: plan(), pullNumber: 42 }), (error) => error.code === 'GITHUB_MERGE_AMBIGUOUS');
 });
@@ -110,4 +110,23 @@ test('M8 GitHub preflight exhausts pages and fails closed on newer pending/failu
   assert.equal(facts.requiredChecksPassed, false, 'a newer pending rerun defeats an older success');
   assert.equal(facts.githubApproval, false, 'only the latest review on the exact planned SHA can approve');
   assert.deepEqual(facts.checks, [{ name: 'check', status: 'in_progress', conclusion: null, id: 2 }]);
+});
+
+test('M8 GitHub preflight rejects missing or stale check head SHA and foreign pagination links', async () => {
+  const reviewed = plan();
+  for (const head_sha of [undefined, 'd'.repeat(40)]) {
+    const client = fixtureClient([
+      response(pull()),
+      response({ check_runs: [{ name: 'check', ...(head_sha === undefined ? {} : { head_sha }), status: 'completed', conclusion: 'success' }] }),
+      response([])
+    ], []);
+    const facts = await inspectGitHubPullRequest({ client, plan: reviewed, pullNumber: 42 });
+    assert.equal(facts.requiredChecksPassed, false, `head SHA ${head_sha ?? 'missing'} must not authorize a merge`);
+  }
+  const client = fixtureClient([
+    response(pull()),
+    response({ check_runs: [] }, { headers: { link: '<https://attacker.invalid/checks>; rel="next"' } }),
+    response([])
+  ], []);
+  await assert.rejects(() => inspectGitHubPullRequest({ client, plan: reviewed, pullNumber: 42 }), (error) => error.code === 'GITHUB_RESPONSE_INVALID');
 });

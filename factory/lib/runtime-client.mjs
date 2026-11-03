@@ -7,6 +7,7 @@
  */
 
 import { extensionError } from './extension-utils.mjs';
+import { readBoundedRuntimeText } from './bounded-runtime-response.mjs';
 import { assertRuntimeResponse, assertRuntimeRequest, newRuntimeRequestId, RUNTIME_API_VERSION } from './runtime-contracts.mjs';
 
 const TOKEN = /^[^\s\r\n\0]{16,200}$/;
@@ -36,10 +37,12 @@ function token(value) {
 }
 
 async function boundedJson(response, maxBytes) {
-  const length = Number(response.headers?.get?.('content-length') ?? 0);
-  if (Number.isFinite(length) && length > maxBytes) throw extensionError(`Runtime response exceeds ${maxBytes} bytes`, 'RUNTIME_RESPONSE_TOO_LARGE');
-  const text = await response.text();
-  if (Buffer.byteLength(text, 'utf8') > maxBytes) throw extensionError(`Runtime response exceeds ${maxBytes} bytes`, 'RUNTIME_RESPONSE_TOO_LARGE');
+  let text;
+  try { text = await readBoundedRuntimeText(response, maxBytes); }
+  catch (error) {
+    if (error?.code === 'RUNTIME_RESPONSE_TOO_LARGE') throw extensionError(error.message, error.code);
+    throw error;
+  }
   try { return JSON.parse(text); } catch { throw extensionError('Runtime response is not valid JSON', 'INVALID_RUNTIME_RESPONSE'); }
 }
 

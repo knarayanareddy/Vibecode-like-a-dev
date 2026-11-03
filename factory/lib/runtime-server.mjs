@@ -49,15 +49,22 @@ function readBody(request) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
+    let settled = false;
+    const tooLarge = () => {
+      if (settled) return;
+      settled = true;
+      // Do not destroy the request: destroying its socket races the catch block
+      // and turns the documented JSON 413 into ECONNRESET. Keep consuming input
+      // while the server sends the bounded error envelope.
+      reject(extensionError('runtime request body exceeds 64 KiB', 'RUNTIME_REQUEST_TOO_LARGE'));
+    };
     request.on('data', (chunk) => {
       size += chunk.length;
-      if (size > MAX_BODY_BYTES) {
-        reject(extensionError('runtime request body exceeds 64 KiB', 'RUNTIME_REQUEST_TOO_LARGE'));
-        request.destroy();
-      } else chunks.push(chunk);
+      if (size > MAX_BODY_BYTES) tooLarge();
+      else if (!settled) chunks.push(chunk);
     });
-    request.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
-    request.on('error', reject);
+    request.on('end', () => { if (!settled) { settled = true; resolve(Buffer.concat(chunks).toString('utf8')); } });
+    request.on('error', (error) => { if (!settled) { settled = true; reject(error); } });
   });
 }
 

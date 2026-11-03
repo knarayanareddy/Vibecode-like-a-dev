@@ -70,6 +70,7 @@ export function studioDashboardScript() {
   const elements = { token: $('token'), connect: $('connect'), refresh: $('refresh'), connection: $('connection'), mission: $('mission'), packages: $('packages'), runs: $('runs'), evidence: $('evidence'), packageId: $('package-id'), assignee: $('assignee'), leaseMs: $('lease-ms'), allocate: $('allocate'), recover: $('recover') };
   let token = '';
   let capabilities = { allocate: false, recover: false };
+  const MAX_RUNTIME_RESPONSE_BYTES = 1000000;
   function requestId() { return 'studio-' + (globalThis.crypto && crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + '-' + Math.random().toString(16).slice(2)); }
   function text(value) { if (value === null || value === undefined || value === '') return '—'; return Array.from(String(value), (character) => { const code = character.codePointAt(0); return code <= 31 || (code >= 127 && code <= 159) || (code >= 0x202a && code <= 0x202e) || (code >= 0x2066 && code <= 0x2069) ? '�' : character; }).join(''); }
   function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
@@ -78,10 +79,24 @@ export function studioDashboardScript() {
   function card(title) { const node = element('article', undefined, 'card'); node.append(element('h3', title)); return node; }
   function setConnection(message, failed) { elements.connection.textContent = message; elements.connection.className = failed ? 'notice' : 'muted'; }
   function applyCapabilities(studio) { capabilities = studio && studio.actions ? studio.actions : { allocate: false, recover: false }; elements.allocate.disabled = !capabilities.allocate; elements.recover.disabled = !capabilities.recover; }
+  async function boundedJson(response) {
+    const declared = Number((response.headers && response.headers.get && response.headers.get('content-length')) || 0);
+    if (Number.isFinite(declared) && declared > MAX_RUNTIME_RESPONSE_BYTES) throw new Error('Runtime response exceeds ' + MAX_RUNTIME_RESPONSE_BYTES + ' bytes.');
+    const reader = response.body && response.body.getReader ? response.body.getReader() : null;
+    let text = '';
+    if (!reader) text = await response.text();
+    else {
+      const decoder = new TextDecoder(); let bytes = 0;
+      try { for (;;) { const next = await reader.read(); if (next.done) break; bytes += next.value.byteLength; if (bytes > MAX_RUNTIME_RESPONSE_BYTES) { await reader.cancel(); throw new Error('Runtime response exceeds ' + MAX_RUNTIME_RESPONSE_BYTES + ' bytes.'); } text += decoder.decode(next.value, { stream: true }); } text += decoder.decode(); }
+      finally { if (reader.releaseLock) reader.releaseLock(); }
+    }
+    if (new TextEncoder().encode(text).byteLength > MAX_RUNTIME_RESPONSE_BYTES) throw new Error('Runtime response exceeds ' + MAX_RUNTIME_RESPONSE_BYTES + ' bytes.');
+    try { return JSON.parse(text); } catch { throw new Error('Runtime returned an invalid response.'); }
+  }
   async function call(method, params) {
     if (!token) throw new Error('A Runtime token is required.');
     const response = await fetch('/v1/runtime', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + token }, body: JSON.stringify({ schemaVersion: 1, requestId: requestId(), method, params }) });
-    let body; try { body = await response.json(); } catch { throw new Error('Runtime returned an invalid response.'); }
+    const body = await boundedJson(response);
     if (!response.ok || !body.ok) throw new Error((body && body.error && body.error.message) || 'Runtime request failed.');
     return body.result;
   }

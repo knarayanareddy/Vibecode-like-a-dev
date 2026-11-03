@@ -54,6 +54,12 @@ function runtimeStatus(endpoint, token, { maxBytes = MAX_RUNTIME_RESPONSE_BYTES 
       method: 'POST',
       headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload), authorization: `Bearer ${token}` }
     }, (response) => {
+      const declared = Number(response.headers['content-length'] || 0);
+      if (Number.isFinite(declared) && declared > maxBytes) {
+        response.resume();
+        reject(new Error(`Runtime response exceeds ${maxBytes} bytes`));
+        return;
+      }
       let body = '';
       let bytes = 0;
       let rejected = false;

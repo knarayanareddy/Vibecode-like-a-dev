@@ -662,8 +662,11 @@ function validateToolCall(params, id) {
     if (args.maxTier !== undefined && (!Number.isInteger(args.maxTier) || args.maxTier < 0 || args.maxTier > 3)) return invalidParams(id, 'search_primitives maxTier must be an integer from 0 to 3');
     if (args.limit !== undefined && (!Number.isInteger(args.limit) || args.limit < 1 || args.limit > 50)) return invalidParams(id, 'search_primitives limit must be an integer from 1 to 50');
   }
-  if (params.name === 'get_gates' && args.tier !== undefined && (!Number.isInteger(args.tier) || args.tier < 0 || args.tier > 3)) {
-    return invalidParams(id, 'get_gates tier must be an integer from 0 to 3');
+  if (params.name === 'get_gates' && (!Number.isInteger(args.tier) || args.tier < 0 || args.tier > 3)) {
+    return invalidParams(id, 'get_gates tier is required and must be an integer from 0 to 3');
+  }
+  if (params.name === 'get_primitive' && typeof args.id !== 'string') {
+    return invalidParams(id, 'get_primitive id is required and must be a string');
   }
   return null;
 }
@@ -703,18 +706,21 @@ export function handleMessage(message) {
   if (method === 'tools/list') return rpcResult(id, { tools: TOOLS });
 
   if (method === 'tools/call') {
+    const notification = id === undefined;
     const validationError = validateToolCall(params, id);
-    if (validationError) return validationError;
+    if (validationError) return notification ? null : validationError;
     const name = params.name;
     const handler = HANDLERS[name];
-    if (!handler) return rpcError(id, -32602, `Unknown tool: ${name}`);
+    if (!handler) return notification ? null : rpcError(id, -32602, `Unknown tool: ${name}`);
     try {
       const value = handler(params?.arguments ?? {});
+      if (notification) return null;
       return rpcResult(id, {
         content: [{ type: 'text', text: JSON.stringify(value, null, 2) }],
         isError: false
       });
     } catch (error) {
+      if (notification) return null;
       return rpcResult(id, {
         content: [{ type: 'text', text: `Error: ${error.message}` }],
         isError: true

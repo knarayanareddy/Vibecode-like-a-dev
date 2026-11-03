@@ -29,6 +29,7 @@ const STEP_TYPES = new Set(['human-input', 'agent-handoff', 'command', 'validati
 const EXECUTABLE_TYPES = new Set(['command', 'validation', 'artifact-validation', 'gate']);
 const MANUAL_TYPES = new Set(['human-input', 'agent-handoff', 'approval']);
 const ALLOWED_COMMANDS = new Set(['plan', 'compile', 'verify']);
+export const WORKFLOW_COMMAND_TIMEOUT_MS = 60_000;
 
 function workflowPath(id) {
   return path.join(WORKFLOWS_DIR, `${id}.json`);
@@ -266,7 +267,7 @@ function resolveArg(token, context) {
   return String(token).replace(/\{(profile|packet|repo|project)\}/g, (_, name) => context[name]);
 }
 
-function runStep(step, context) {
+export function runWorkflowStep(step, context, { execFileSyncImpl = execFileSync, timeoutMs = WORKFLOW_COMMAND_TIMEOUT_MS } = {}) {
   if (step.type === 'artifact-validation') {
     try {
       const report = verifyArtifacts({ projectDir: context.project, packetDir: context.packet, kinds: step.artifacts });
@@ -288,16 +289,19 @@ function runStep(step, context) {
   if (!ALLOWED_COMMANDS.has(action)) throw extensionError(`workflow step "${step.id}" has a disallowed action`, 'DISALLOWED_WORKFLOW_COMMAND');
   const cli = path.join(ROOT, 'factory', 'cli.mjs');
   try {
-    const output = execFileSync(process.execPath, [cli, ...argv], {
+    const output = execFileSyncImpl(process.execPath, [cli, ...argv], {
       cwd: context.project,
       encoding: 'utf8',
       maxBuffer: 1024 * 1024,
+      timeout: timeoutMs,
+      killSignal: 'SIGTERM',
       stdio: ['ignore', 'pipe', 'pipe']
     });
     return { status: 'complete', evidence: { type: 'command', argv, outputDigest: digest(output) } };
   } catch (error) {
     const stdout = String(error.stdout ?? '');
     const stderr = String(error.stderr ?? '');
+    const timedOut = error?.code === 'ETIMEDOUT' || error?.signal === 'SIGTERM' || error?.killed === true;
     return {
       status: 'failed',
       evidence: {
@@ -305,7 +309,8 @@ function runStep(step, context) {
         argv,
         exitCode: Number.isInteger(error.status) ? error.status : 1,
         outputDigest: digest(`${stdout}\n${stderr}`),
-        summary: `${action} exited ${Number.isInteger(error.status) ? error.status : 1}`
+        ...(timedOut ? { failure: { code: 'WORKFLOW_COMMAND_TIMEOUT', timeoutMs } } : {}),
+        summary: timedOut ? `${action} timed out after ${timeoutMs}ms` : `${action} exited ${Number.isInteger(error.status) ? error.status : 1}`
       }
     };
   }
@@ -325,7 +330,7 @@ export function runWorkflow({ id, projectDir = '.', context = {}, execute = fals
   while (true) {
     const ready = statusFor(workflow, state).find((step) => step.status === 'ready');
     if (!ready || !EXECUTABLE_TYPES.has(ready.type)) break;
-    const result = runStep(ready, state.context);
+    const result = runWorkflowStep(ready, state.context);
     state.steps[ready.id] = result;
     executed.push({ id: ready.id, status: result.status, evidence: result.evidence });
     writeJsonAtomic(started.file, state);

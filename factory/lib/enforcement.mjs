@@ -84,8 +84,18 @@ export function enforcementFiles(plan) {
     }
   }
 
+  if (ids.includes('G3-MUTATION')) files.set('enforcement/semantic-oracles.json', semanticOracleTemplate(plan));
   files.set('enforcement/README.md', readme(plan, ids, rules, registry));
   return files;
+}
+
+function semanticOracleTemplate(plan) {
+  const automated = (plan.requirements ?? []).filter((requirement) => requirement.verify === 'automated');
+  return `${JSON.stringify({
+    schemaVersion: 1,
+    $comment: 'Copy this file to the repository root as semantic-oracles.json. For every automated requirement, name an independently reviewed black-box/property test under tests/semantic-oracles/. Do not point at the ordinary implementation unit test.',
+    oracles: automated.map((requirement) => ({ id: requirement.id, test: `tests/semantic-oracles/${requirement.id.toLowerCase()}.test.mjs`, purpose: requirement.acceptance?.[0]?.text ?? requirement.title }))
+  }, null, 2)}\n`;
 }
 
 function readme(plan, ids, rules, registry) {
