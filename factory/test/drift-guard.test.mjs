@@ -234,3 +234,25 @@ test('asserts on nothing in particular', () => { assert.equal(Date.now() > 0, tr
   assert.equal(result.code, 1);
   assert.match(result.out, /imports nothing/);
 });
+
+/**
+ * The flag exists and works; this pins that the repository actually *uses* it.
+ *
+ * `--require-assertions` is off by default upstream because a half-written test is
+ * normal during development. That default is right for an emitted packet and wrong
+ * for this repository, whose own drift guard is the check that is supposed to catch
+ * a weakened test. Without the flag the report prints the notice and the job exits 0,
+ * so an agent can hollow a test out and CI still goes green — the exact failure the
+ * audit named. A follow-up that drops the flag would restore that gap silently, so
+ * the workflow file itself is asserted here.
+ */
+test('this repository runs its drift guard with --require-assertions', () => {
+  const workflow = readFileSync(path.join(HERE, '..', '..', '.github', 'workflows', 'ci.yml'), 'utf8');
+  const specCheckLines = workflow
+    .split('\n')
+    .filter((line) => /run:.*spec-check\.mjs/.test(line) && /--repo \./.test(line));
+  assert.ok(specCheckLines.length > 0, 'ci.yml must run the repository drift guard');
+  for (const line of specCheckLines) {
+    assert.match(line, /--require-assertions/, `drift guard must pass --require-assertions: ${line.trim()}`);
+  }
+});
