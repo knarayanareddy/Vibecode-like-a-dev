@@ -903,12 +903,13 @@ test('documented commands point at the real output directory and run', (t) => {
   }
 
   // Every `node <path>/<script>.mjs` command in the docs must resolve on disk.
-  // The path class has to admit a Windows drive path (`D:/a/.../spec-check.mjs`) or a
-  // backslash separator, otherwise this test passes on Linux and collects nothing on
-  // Windows — which is how it reported "no documented command" there.
+  // The target has to span any non-space run, not an allowlist of characters: a
+  // Windows runner's temp path is `C:/Users/RUNNER~1/AppData/...`, and a tilde or a
+  // drive colon is enough to make an allowlist class stop short and silently collect
+  // nothing, which is how this failed on Windows but passed on Linux.
   const commands = new Set();
   for (const text of markdown) {
-    for (const match of text.matchAll(/node\s+([\w./\\:-]*(?:spec-check|gates)\.mjs)/g)) {
+    for (const match of text.matchAll(/node\s+(\S*(?:spec-check|gates)\.mjs)/g)) {
       commands.add(match[1]);
     }
   }
