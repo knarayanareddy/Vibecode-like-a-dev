@@ -164,3 +164,29 @@ the headline-level tests had not caught, all now fixed:
    under `--strict`; `compile --strict` now exits 2 instead of printing a note.
 3. **Lenient mode was silent.** `spec-check.mjs` now names which mode it ran in and
    says that CI should use the strict flags.
+
+### What CI found that local runs could not
+
+The first push was green on Linux and on this machine, and failed four CI checks. Each
+failure was in the verification written for this work, not in the product — which is
+exactly the class of defect a local run of the same suite cannot find, because the local
+suite is the same one that just passed.
+
+| Check | Failure | Cause |
+| --- | --- | --- |
+| `spec-check --strict` (self) | `cites unknown requirement REQ-999` in `ci-init.test.mjs` | A fixture quotes a bad anchor literally, so the repository's own drift guard read it as a real citation |
+| `gates --strict` (self) | `G1-SECRETS` flagged `gates.test.mjs:614` | A fixture plants an `AKIA…` value to test the secret scan; the literal value is itself credential-shaped |
+| Portable smoke, Windows | `documented commands point at the real output directory` — no commands collected | The collector's character class excluded `~`, and a Windows temp path is `C:/Users/RUNNER~1/…` |
+| Portable smoke, Windows | `the CLI refuses a runtime below the documented minimum` — exit 1, not 2 | The probe imported the CLI from a bare absolute path; on Windows the loader reads a drive letter as a package name and throws `ERR_UNSUPPORTED_ESM_URL_SCHEME` |
+
+Two more Windows hazards were removed while looking: `new URL(import.meta.url).pathname`
+yields `/D:/a/…`, which `path.resolve` then mangles, and it is now `fileURLToPath`.
+
+The fix for each was to make the *check* platform-correct rather than to relax it. The
+fixtures build their traps at runtime, which is the convention the existing anchor tests
+already use, so the scans still see real input and the repository still passes its own
+enforcement. The Windows collector now matches any non-space run ending in the script
+name, and is verified against a relative path, a `/tmp` path and the exact `RUNNER~1`
+shape that failed.
+
+All fifteen checks pass at `1a4c956`, including both portable runners.
