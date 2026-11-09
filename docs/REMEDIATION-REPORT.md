@@ -5,8 +5,11 @@ twelve bugs. Each entry states what was wrong, what changed, and **how it was pr
 The proof is the point: a fix without a reproduction that now behaves differently is a
 claim, and this repository has enough of those.
 
-Status: **15 of 16 fixed, 1 open (BLK-3)**. The open one needs paid provider
-credentials and is documented below rather than approximated.
+Status: **16 of 16 headlines fixed except BLK-3, which needs paid credentials.**
+Headline is not the same as every numbered sub-step: see
+[Sub-steps that were deliberately not done](#sub-steps-that-were-deliberately-not-done),
+which lists the eight recommendations this work declined and why. Read that section
+before treating an item as fully closed.
 
 Verification baseline at the end of this work:
 
@@ -128,3 +131,36 @@ because it is in the published CLI contract and scripts depend on it.
   caught by mutation testing or a reviewer, not by this guard.
 - `--lean` has not been measured against a live model either, so it is offered as an
   arm to test, not as the better default.
+
+
+## Sub-steps that were deliberately not done
+
+The review's 16 items contain far more than 16 changes. Each headline is fixed; these
+numbered recommendations were **not** implemented, and saying so is part of the work.
+
+| Item | Sub-step not done | Why |
+| --- | --- | --- |
+| BUG-7 | Emit per-area requirement files (`security.md`, `data.md`) linked from an index | Budgeting what is read already removes the squeeze that motivated the item. Splitting the documents is a restructuring of the packet contract, and it interacts badly with the single-file tier-0 packet; it should be its own change with its own review. |
+| BUG-9 | Publish `@vld/core` and `@vld/runtime` as two packages | A packaging release, not a patch. The property the split protects — the compiler does not depend on the runtime — is enforced by a test. See the BUG-9 section. |
+| BLK-4 | Browser bundle and a static "profile → packet.zip" page | The dependency-free ESM is already there; the bundling and hosting are new surface area. `vld ci init` addresses the stated problem (enforcement must not require the agent to cooperate) without it. |
+| BLK-3 | Publish a live result; make the winning arm the default | Cannot be done without a paid provider key. The lean arm exists; nothing claims it is better. |
+| BLK-2 | `--local` as the *replacement* for the default lenient mode | The generator still emits strict, so CI is strict by default. The checker cannot flip its own default without failing every team mid-adoption, so it now names the lenient mode and says what CI should run. |
+| BLK-2 | Make `G3-MUTATION` mandatory at tier 2 | Attempted and reverted. The gate id encodes its tier and six tests enforce that invariant; promoting it required renaming the gate across the policy, the registry, `mutation.config.json` and the outcome suite. That is a policy release, not a defect fix. Tier 3 still requires it. |
+| BUG-8 | Map `--phase` onto the milestones in `06-delivery-plan.md` | `--phase` takes a milestone number, but the mapping is authored in `gates.json` by hand rather than derived from the delivery plan, so the two can drift. Deriving it means parsing the plan's phase headings. |
+| BUG-2 | Track coverage precision and recall in `npm run eval` | The three-state classifier and its golden cases are in place; the labelled corpus and the precision/recall reporting are not. |
+| BUG-1 | Add `carepath-telehealth` to `examples/ideas` | The vocabulary cases live in `factory/test/vocabulary.test.mjs` (11 ideas, 9 correct). A separate examples corpus would duplicate it. |
+
+### What was found while checking
+
+Re-auditing the sub-steps against the shipped code surfaced three genuine defects that
+the headline-level tests had not caught, all now fixed:
+
+1. **A weak noun was still a guess.** `"Something nice for people who like things."`
+   produced the adjective `nice`, rendered as "One nice goes from created to finished"
+   in every template. A weak pick that is a modifier or a participle now falls back to
+   the kind's neutral noun. `"Inventory sync."` still yields `inventory`, because the
+   rule is about the word's shape, not the score.
+2. **`regulated: true` with no regime only warned.** The review asked for a refusal
+   under `--strict`; `compile --strict` now exits 2 instead of printing a note.
+3. **Lenient mode was silent.** `spec-check.mjs` now names which mode it ran in and
+   says that CI should use the strict flags.

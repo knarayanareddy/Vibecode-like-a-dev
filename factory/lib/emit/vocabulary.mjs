@@ -124,7 +124,14 @@ const ADJECTIVE_WORDS = new Set([
   'correct', 'wrong', 'right', 'clean', 'safe', 'private', 'public', 'custom', 'standard',
   'modern', 'main', 'primary', 'secondary', 'extra', 'open', 'closed', 'free', 'paid', 'live', 'dead',
   'boutique', 'small-business', 'enterprise', 'premium', 'budget', 'local', 'global', 'internal',
-  'external', 'personal', 'professional', 'independent', 'upcoming', 'current', 'previous'
+  'external', 'personal', 'professional', 'independent', 'upcoming', 'current', 'previous',
+  // Quality adjectives: they read as praise, not as a thing a product owns.
+  // "Something nice for people who like things" produced the noun `nice`, and the
+  // packet rendered "One nice goes from created to finished" in every template.
+  'nice', 'good', 'bad', 'great', 'better', 'best', 'easy', 'hard', 'simple', 'complex',
+  'beautiful', 'pretty', 'awesome', 'amazing', 'cool', 'useful', 'helpful', 'powerful',
+  'smart', 'clever', 'efficient', 'reliable', 'robust', 'scalable', 'secure', 'modern',
+  'intuitive', 'seamless', 'flexible', 'lightweight', 'quick', 'instant', 'automatic'
 ]);
 
 /**
@@ -547,7 +554,19 @@ export function vocabularyFor(profile) {
   // talks about the user instead of the product.
   const actorFallback = primaryPool.find((candidate) => isActorWord(candidate.word)) ?? primaryPool[0] ?? null;
   const primaryPick = topObject ?? actorFallback;
-  const primary = primaryPick ? singularOf(primaryPick.word) : fallback[0];
+  // BUG-1 step 5 of the review: a weak pick that is not a *thing* is a guess, not a
+  // decision. "Something nice for people who like things" used to yield the
+  // adjective `nice`, which rendered as "One nice goes from created to finished" in
+  // every template. The kind's neutral noun is more useful than a wrong one — but a
+  // genuine noun the idea happened to write without a determiner ("Inventory sync")
+  // must survive, so the test is the word's shape, not its score.
+  const weak = confident.length === 0;
+  const weakNotAThing =
+    weak &&
+    primaryPick !== null &&
+    !isActorWord(primaryPick.word) &&
+    (isModifierToken(primaryPick.word) || PARTICIPLE.test(primaryPick.word) || ABSTRACT_OUTCOME.test(primaryPick.word));
+  const primary = primaryPick && !weakNotAThing ? singularOf(primaryPick.word) : fallback[0];
   // Below the confidence floor we do not guess. The old fallback took the next
   // candidate whatever its score, which is how "A platform to manage medical
   // appointments" produced the actor `manage` and a CLI idea produced `compress`:
@@ -563,7 +582,7 @@ export function vocabularyFor(profile) {
   const topActor = actorCandidates[0] ?? null;
   const secondaryPick = topActor ?? restPool[0] ?? null;
   const secondary = secondaryPick ? singularOf(secondaryPick.word) : fallback[1];
-  const source = primaryPick ? (confident.length > 0 ? 'idea' : 'weak') : 'kind';
+  const source = primary !== fallback[0] && primaryPick ? (weak ? 'weak' : 'idea') : 'kind';
 
   return {
     primary,

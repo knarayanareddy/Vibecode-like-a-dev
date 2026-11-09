@@ -7,6 +7,7 @@
  *
  *   node specs/spec-check.mjs              # check, pending requirements are notices
  *   node specs/spec-check.mjs --repo .     # scan this repository for @req anchors
+ *   node specs/spec-check.mjs --local      # name the lenient mode explicitly
  *   node specs/spec-check.mjs --strict     # pending automated requirements fail the build
  *   node specs/spec-check.mjs --require-assertions
  *                                          # an anchored test must contain an assertion
@@ -49,6 +50,16 @@ const option = (name, fallback) => {
 
 const STRICT = flag('--strict');
 const REQUIRE_ASSERTIONS = flag('--require-assertions');
+// BLK-2 step 1 of the review: the safe path should be the default and the lenient
+// one should be chosen. The checker cannot make itself strict by default without
+// breaking every team mid-adoption, so what it can do is refuse to be quiet: when
+// neither flag is passed it says, once, that this is the lenient mode and how to
+// get the strict one. `--local` names that choice explicitly.
+const LOCAL = flag('--local');
+if (LOCAL && (STRICT || REQUIRE_ASSERTIONS)) {
+  console.error('\n✗ --local cannot be combined with --strict or --require-assertions: pick one mode.\n');
+  process.exit(2);
+}
 const REPO = path.resolve(option('--repo', process.cwd()));
 // `status: done` in spec.json is a sentence someone typed. `--report` makes it a
 // claim about a test run instead: the anchored test name must appear as passed in a
@@ -458,6 +469,13 @@ if (strictFailure) {
 }
 
 const failed = errors.length > 0 || strictFailure;
+// Lenient is the absence of both flags, so it is reported as a mode rather than
+// left implicit: a green run that proves nothing is the complaint this fix answers.
+if (!STRICT && !REQUIRE_ASSERTIONS) {
+  console.log(
+    `\n· lenient mode (${LOCAL ? '--local' : 'no flags'}): pending requirements and hollow tests are notices. CI should run --strict --require-assertions.`
+  );
+}
 console.log(
   `\n${failed ? 'FAIL' : 'PASS'} · ${errors.length} error(s) · ${pending} pending` +
     (suppressed > 0 ? ` · ${suppressed} ignored` : '') +

@@ -535,6 +535,14 @@ function runCompile(profilePath) {
   const plan = loadPlanOrFail(profilePath, { previousIds: previousRequirementIds(out) });
   const compileWarnings = [enforceAdoptedIdea(plan), regulatedWithoutRegime(plan), ...injectionWarning(plan)].filter(Boolean);
   if (compileWarnings.length > 0) console.error(`\n! ${compileWarnings.join('\n! ')}\n`);
+  // A profile that declares itself regulated but names no regime is a gap the
+  // compiler cannot fill: the tier rises and no obligation arrives. Under --strict
+  // that is a refusal, not a note, because the packet would otherwise ship with a
+  // compliance claim nobody can check.
+  const unregulated = regulatedWithoutRegime(plan);
+  if (unregulated && hasFlag('--strict')) {
+    fail(`${unregulated}\n  --strict refuses a regulated profile with no named regime.`);
+  }
 
   let result;
   try {

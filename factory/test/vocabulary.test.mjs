@@ -252,3 +252,23 @@ test('an explicit domain block overrides inference', () => {
   assert.equal(vocabulary.tenantNoun, 'clinic');
   assert.equal(vocabulary.privilegedActor, 'practice-manager');
 });
+
+test('a weak pick that is only praise falls back to the kind, not to the adjective', () => {
+  // BUG-1 step 5 of the external review: confidence that names nothing is a guess
+  // dressed as a decision. The packet rendered "One nice goes from created to
+  // finished" in every requirement because `nice` scored as the only candidate.
+  for (const idea of [
+    'Something nice for people who like things.',
+    'A beautiful app.',
+    'A cool tool.'
+  ]) {
+    const vocab = vocabularyFor({ name: 'praise', idea, kind: 'web-app', traits: [], risks: {} });
+    assert.equal(vocab.source, 'kind', `"${idea}" must not present a guess as a decision`);
+    assert.equal(vocab.primary, 'record');
+  }
+
+  // A real noun without a determiner is still a noun: the rule is about the word's
+  // shape, not about how sure the scorer happens to be.
+  const inventory = vocabularyFor({ name: 'inventory', idea: 'Inventory sync.', kind: 'data-pipeline', traits: [], risks: {} });
+  assert.equal(inventory.primary, 'inventory');
+});
