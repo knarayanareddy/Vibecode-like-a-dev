@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { PACKAGE_VERSION } from '../lib/version.mjs';
 import { FACTORY_VERSION } from '../lib/emit/derive.mjs';
 
@@ -42,7 +42,7 @@ test('the optional ACP bridge obtains client metadata from the shared version au
 test('the CLI refuses a runtime below the documented minimum', () => {
   const probe = `
     Object.defineProperty(process.versions, 'node', { value: '20.20.2', configurable: true });
-    await import(${JSON.stringify(path.join(ROOT, 'factory', 'cli.mjs'))});
+    await import(${JSON.stringify(pathToFileURL(path.join(ROOT, 'factory', 'cli.mjs')).href)});
     console.error('guard did not fire');
     process.exit(0);
   `;
