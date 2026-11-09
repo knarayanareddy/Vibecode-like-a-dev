@@ -271,3 +271,23 @@ profile does not declare — is not written yet.
 `spec-check.mjs` does. The third audit's BLK-1 named `spec-check`, so that is what was
 fixed. The two checkers disagreeing about a hollow test is the same class of problem as
 the one fixed in the second round, and it remains.
+
+### What CI caught in the third round
+
+The BUG-6 fix removed a silent cap of six on "rules your idea already states". That
+cap was hiding a real disagreement between two promises: no rule is dropped in
+silence, and a single on-demand document stays under 200 lines. The adversarial corpus
+contains an idea stating 110 near-identical rules, so removing the cap made
+`02-domain-model.md` 204 lines and the adversarial stress job failed.
+
+Two attempts made it worse before it got better. A one-line-per-rule table still
+overflowed; and spreading the return value of `ordered` — which returns a string, not
+an array — emitted one character per line, turning a 200-line document into 2834.
+
+The resolution is to group rules that are identical once digits are normalised. An
+idea that states the same invariant 110 times has one invariant; the document says
+"110 variants that differ only in their numbers" and quotes one complete sentence.
+Nothing is dropped, nothing is truncated mid-sentence, and the ceiling holds.
+
+The same section also carried a mixed-noun defect the third review noticed: the
+sentence read "beside the rule it protects" because the primary noun was `rule`.
