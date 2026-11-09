@@ -6,6 +6,35 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
     labels: [dependencies]
+  # The optional ACP adapter's SDK lives outside the root manifest, so the entry
+  # above never sees it. Without this, a real dependency sat pinned at an exact
+  # version with nothing watching it.
+  #
+  # Minors and patches are safe to take automatically: the adapter imports only the
+  # stable root entry point (`client`, `methods`, `ndJsonStream`), and the isolated
+  # `acp-v1-bridge` CI job installs the package and runs its fake-peer suite, so a
+  # bump that breaks the stable v1 surface fails there.
+  #
+  # Ignoring majors is a stability choice, not a v1 guard: `experimental/v2` ships
+  # INSIDE major 2, so what keeps this on stable v1 is the import (`@agentclientprotocol/sdk`
+  # root only, never `unstable` or `experimental/v2`), which `factory/test/acp-v1.test.mjs`
+  # asserts. Ignoring majors keeps the supported major from moving without a human
+  # reading the changelog. Minors still require that same review to merge: the CI
+  # suite runs against a fake peer written as raw JSON-RPC, not against the SDK's own
+  # fixtures or real agents, so green means "still speaks v1 against our fixture" and
+  # not "behaviour upstream is unchanged". Nothing here auto-merges.
+  - package-ecosystem: npm
+    directory: /factory/integrations/acp-v1
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: [dependencies]
+    groups:
+      acp-sdk:
+        patterns: ["*"]
+    ignore:
+      - dependency-name: "@agentclientprotocol/sdk"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule:

@@ -49,7 +49,19 @@ test('M8 ACP policy remains an unconfined direct-argv optional boundary with no 
   assert.doesNotMatch(adapter, /from ['"]@agentclientprotocol\/sdk/);
   assert.match(bridge, /from '@agentclientprotocol\/sdk'/);
   assert.doesNotMatch(bridge, /@agentclientprotocol\/sdk\/unstable|experimental\/v2/);
-  assert.equal(manifest.dependencies['@agentclientprotocol/sdk'], '2.2.0');
+  // The fence that keeps this on stable ACP v1 is the import above, not the version
+  // number: `experimental/v2` already ships inside major 2, so a future major would
+  // not be what moves this onto v2 — an import subpath would. What the version has to
+  // guarantee is narrower and still worth holding: an EXACT pin (this package ships to
+  // npm users, who never run our CI and must get a reproducible, tested version) and
+  // inside major 2 (the major the ADR validates stable v1 against). A literal '2.2.0'
+  // asserted both at once, which meant every legitimate minor showed up as a red PR;
+  // this asserts the same invariants without freezing the number.
+  assert.match(
+    manifest.dependencies['@agentclientprotocol/sdk'],
+    /^2\.\d+\.\d+$/,
+    'the ACP SDK must stay an exact pin inside major 2 (stable v1)'
+  );
   assert.equal(rootManifest.engines.node, '>=22');
   assert.equal(manifest.engines.node, '>=22');
   assert.match(agents, /Node 22\+/);
