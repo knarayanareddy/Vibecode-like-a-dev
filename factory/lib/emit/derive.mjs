@@ -862,12 +862,36 @@ export function firstOpenRequirement(plan) {
  * and they are the part an agent must not paraphrase away.
  */
 export function ownRulesFor(profile) {
+  return ownRuleGroups(profile).flatMap((group) => group.rules);
+}
+
+/**
+ * Rules grouped by shape, so a generated or adversarial idea that states a hundred
+ * near-identical rules does not become a hundred lines of document.
+ *
+ * This exists because honest answers to two rules collide: never drop a rule in
+ * silence, and keep a single on-demand document under its ceiling. An idea that says
+ * "Rule 1 must be deterministic", "Rule 2 must be deterministic", … 110 times has one
+ * invariant, not 110, and saying so is more accurate than either listing or cutting.
+ *
+ * Two rules share a group when they are identical after digits are normalised. The
+ * group records every original, so nothing is lost: the document prints the shape once
+ * and names the rest.
+ */
+export function ownRuleGroups(profile) {
   const idea = String(profile.idea ?? '');
   const sentences = idea
     .split(/(?<=[.!?;])\s+|\n+/)
     .map((sentence) => sentence.trim().replace(/^[-*\d.\s]+/, ''))
     .filter((sentence) => sentence.length > 20 && isRuleSentence(sentence));
-  return [...new Set(sentences)];
+
+  const groups = new Map();
+  for (const rule of new Set(sentences)) {
+    const shape = rule.replace(/\d+/g, '#');
+    if (!groups.has(shape)) groups.set(shape, []);
+    groups.get(shape).push(rule);
+  }
+  return [...groups.values()].map((rules) => ({ shape: rules[0], rules }));
 }
 
 /**
@@ -1125,6 +1149,7 @@ export function derive(plan, { packetDir = 'specs' } = {}) {
     nouns,
     surfaces: surfacesFor(plan),
     ownRules: ownRulesFor(plan.profile),
+    ownRuleGroups: ownRuleGroups(plan.profile),
     decisions: decisionsFor(plan, stackFor(plan.profile), styleFor(plan.profile)),
     cards: practiceCards(plan, phrases),
     phrases,

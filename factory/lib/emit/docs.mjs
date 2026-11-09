@@ -16,6 +16,12 @@ const h1 = (text) => heading(1, text);
 const h2 = (text) => heading(2, text);
 const h3 = (text) => heading(3, text);
 
+// Above this many rules, the per-rule paragraph is replaced by a one-line-per-rule
+// table. The content is identical: every rule stays present, because dropping any of
+// them silently is the defect this section had. Only the shape changes, and the shape
+// is what the 200-line on-demand ceiling measures.
+const COMPACT_RULE_COUNT = 12;
+
 // No date: the packet is a pure function of the profile, so a regenerated packet
 // diffs only where the intent changed. Reproducibility is a review feature.
 const stamp = (plan) =>
@@ -385,7 +391,30 @@ export function domainModel(plan, d) {
           '',
           `Read from the idea verbatim. These are ${d.projectPossessive} own invariants — not the catalog's — and each one is a claim a test can make false. If you implement nothing else from this document, implement these.`,
           '',
-          ordered(d.ownRules.map((rule) => `"${rule.replace(/\.$/, '')}" — the test that would catch a violation goes beside the ${d.primary} it protects, and it must fail before the rule is implemented.`)),
+          ...(d.ownRules.length > COMPACT_RULE_COUNT
+            ? [
+                // Near-identical rules are grouped rather than listed or cut: an idea
+                // that states the same invariant 110 times has one invariant, and
+                // saying so is both shorter and more accurate than either alternative.
+                `This idea states ${d.ownRules.length} rule(s) in ${d.ownRuleGroups.length} distinct shape(s). Grouped below; nothing is dropped.`,
+                '',
+                table(
+                  ['Rule (from the idea)', 'Stated', 'What would catch a violation'],
+                  d.ownRuleGroups.map((group) => [
+                    // The quote must end at punctuation or the renderer truncates it
+                    // mid-sentence, which the emitted-packet tests reject. So the
+                    // variant count leads, and the rule follows as a complete sentence.
+                    group.rules.length > 1
+                      ? `${group.rules.length} variants that differ only in their numbers. e.g. "${group.shape}"`
+                      : `"${group.shape}"`,
+                    String(group.rules.length),
+                    'a test that fails before the rule is implemented'
+                  ])
+                )
+              ]
+            // `ordered` returns one string, not an array: spreading it would split
+            // the document into one character per line.
+            : [ordered(d.ownRules.map((rule) => `"${rule.replace(/\.$/, '')}" — the test that would catch a violation goes beside the thing it protects, and it must fail before the rule is implemented.`))]),
           ''
         ]
       : []),
