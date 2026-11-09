@@ -254,16 +254,45 @@ code rather than against its own "before" blocks.
 | BUG-9 PASS on nothing | **Real — fixed** | `PASS · 0 error(s) · 4 pending`, exit 0, on a repository with no proven requirement |
 | BUG-10 no did-you-mean | **Real — fixed** | `unknown trait "uploads"` listed thirteen values and never `upload` |
 
-### Two that are still open, deliberately
+### BLK-2's negated concepts — fixed
 
-**BLK-2's negated concepts.** A rule the product must *never* satisfy should not become
-a term to define. Fixing it needs a decision about how `vocabulary` distinguishes
-affirmed from negated nouns, and that touches every packet, so it is not a change to
-make in the same pass as the five above.
+A rule the product must *never* satisfy was becoming a term to define. It is now
+detected and routed:
 
-**BUG-7's surfaces.** `kind` describes one deployable. Adding `surfaces` is a schema and
-planner change, and the honest short-term fix — warn when the idea names a surface the
-profile does not declare — is not written yet.
+- Detection is narrow on purpose: a negation adjacent to a **production** verb (give,
+  produce, return, emit, generate, present, show, display, offer, suggest, recommend)
+  with a direct object in the same clause. The opposite mistake is worse than the bug —
+  a detector broad enough to catch "never lose a settlement" would delete a real domain
+  noun from every packet, and deleting is silent where listing is not.
+- It takes the **head** noun of the object, not its modifier: "never return patient
+  data" must not forbid `patient`.
+- The noun is removed from the candidate pool, not from the rendered table, so it
+  cannot become the primary noun either.
+- Nothing disappears: the exclusion renders in the brief's own non-goals list as
+  "Never produced by this product: a diagnosis", so a wrong classification is visible.
+- Both directions are overridable — `vocabulary.forbidden` and `vocabulary.affirmed` —
+  following the existing `domain.entity` precedent.
+
+Regression tests pin the carepulse case (`diagnosis` moves), the `settlement`
+counter-example (a real noun survives "never lose"), the modifier/head-noun distinction,
+the primary-noun guarantee, and both overrides.
+
+### BUG-7's surfaces — deliberately still open
+
+`kind` describes one deployable and decides document layout; adding `surfaces[]` means
+the planner unions catalog templates across surfaces, which changes tier calculation,
+gate selection and doc arrangement. That is a feature, not a repair.
+
+The cheap half — warn when the idea names a surface the profile does not declare — is
+worth doing, but it is new behaviour rather than a defect fix, and it would fire on the
+adversarial corpus. Shipping it alongside a correctness fix would make the correctness
+fix harder to review, so it stays open with this reasoning rather than as an oversight.
+
+### Correction to an earlier claim
+
+The first version of this section said BLK-2 "touches every packet". It does not: only
+two packets are committed (`specs/` and `examples/retro-board/spec`), so the cost is a
+regeneration, which this repository does routinely. The cost was overstated.
 
 ### A divergence worth recording
 
