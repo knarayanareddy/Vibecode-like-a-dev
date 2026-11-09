@@ -13,6 +13,8 @@ Every row must have a concrete shape before Phase 3. A row marked "to define" bl
 | REQ-004 | Schema / storage | Durable state with forward-only migrations | contract test |
 | REQ-011 | HTTP / module interface | Versioned machine-readable interface contract | contract test |
 | REQ-012 | HTTP / module interface | One error envelope and one identifier scheme | contract test |
+| REQ-015 | Internal interface | Realtime channels are authorized on every subscribe and resume | contract test |
+| REQ-016 | Internal interface | Realtime delivery survives a slow consumer and a reconnect | contract test |
 
 ## 2. The shapes to fix first
 

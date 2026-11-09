@@ -39,6 +39,13 @@ export const TRAITS = [
   'background-jobs'
 ];
 
+/**
+ * A regulation is not a boolean. "Regulated" decides rigor; the regime decides
+ * *which* obligations exist, and HIPAA, GDPR and PCI-DSS impose different ones.
+ * Naming the regime is what lets the compiler add content instead of only weight.
+ */
+export const REGULATIONS = ['hipaa', 'gdpr', 'pci-dss', 'soc2'];
+
 export const RISK_FLAGS = [
   'pii',
   'payments',
@@ -50,10 +57,16 @@ export const RISK_FLAGS = [
 ];
 
 const ID_PATTERN = /^[a-z0-9][a-z0-9-]{1,60}$/;
-const PROFILE_KEYS = new Set(['name', 'idea', 'kind', 'stage', 'users', 'traits', 'risks', 'constraints', 'overlays', 'discoverability', '$comment', '$adopted']);
+const PROFILE_KEYS = new Set(['name', 'idea', 'kind', 'stage', 'users', 'traits', 'risks', 'regulation', 'constraints', 'overlays', 'discoverability', 'traitWaivers', 'domain', 'rules', '$comment', '$adopted']);
 const USER_KEYS = new Set(['scale']);
 const CONSTRAINT_KEYS = new Set(['team', 'weeks', 'stack', 'mustUse']);
 const DISCOVERABILITY_KEYS = new Set(['enabled']);
+// The words the compiler would otherwise have to guess. Inference is a fallback,
+// not an authority: a product owner who says "we call it a visit, our tenants are
+// clinics and our privileged actor is the practice manager" should not have to
+// argue with a noun picker.
+const DOMAIN_KEYS = new Set(['entity', 'entityPlural', 'actors', 'tenant', 'endUser', 'privilegedActor']);
+const NOUN_PATTERN = /^[a-z][a-z0-9-]{1,40}$/;
 
 function plainObject(value) { return Boolean(value) && typeof value === 'object' && !Array.isArray(value); }
 
@@ -67,6 +80,7 @@ function inputShapeErrors(raw) {
   const errors = [];
   if ('traits' in raw && !Array.isArray(raw.traits)) errors.push('traits: must be a list of known trait ids');
   if ('overlays' in raw && !Array.isArray(raw.overlays)) errors.push('overlays: must be a list of overlay ids');
+  if ('regulation' in raw && !Array.isArray(raw.regulation)) errors.push('regulation: must be a list of regimes, e.g. ["hipaa"]');
   if ('risks' in raw && !plainObject(raw.risks)) errors.push('risks: must be an object of boolean risk flags');
   if ('users' in raw && !plainObject(raw.users)) errors.push('users: must be an object');
   if ('constraints' in raw && !plainObject(raw.constraints)) errors.push('constraints: must be an object');
@@ -111,6 +125,8 @@ export function normalizeProfile(raw) {
   };
   profile.traits = Array.isArray(raw.traits) ? raw.traits : [];
   profile.overlays = Array.isArray(raw.overlays) ? raw.overlays : [];
+  profile.regulation = Array.isArray(raw.regulation) ? raw.regulation.map((value) => String(value).toLowerCase()) : [];
+  profile.traitWaivers = Array.isArray(raw.traitWaivers) ? raw.traitWaivers : [];
   profile.risks = { ...(plainObject(raw.risks) ? raw.risks : {}) };
   Object.defineProperty(profile, '__inputShapeErrors', { value: shapeErrors, enumerable: false });
 
@@ -182,6 +198,88 @@ export function validateProfile(profile) {
     }
   }
 
+  if (!Array.isArray(profile.regulation)) {
+    errors.push('regulation: must be a list of regimes, e.g. ["hipaa"]');
+  } else {
+    for (const regime of profile.regulation) {
+      if (!REGULATIONS.includes(regime)) {
+        errors.push(`regulation: unknown regime "${regime}". Known: ${REGULATIONS.join(', ')}. Name the regime so the compiler can add its obligations instead of only raising the tier.`);
+      }
+    }
+    if (new Set(profile.regulation).size !== profile.regulation.length) {
+      errors.push('regulation: a regime is listed twice; its obligations apply once');
+    }
+    // A boolean flag with no regime is the exact shape that produced a tier-3
+    // health packet with no HIPAA requirement in it. Under --strict this is an
+    // error; outside strict it is reported by `plan`.
+    if (profile.risks?.regulated === true && profile.regulation.length === 0) {
+      profile.__regulatedWithoutRegime = true;
+    }
+  }
+
+  if ('domain' in profile) {
+    if (!profile.domain || typeof profile.domain !== 'object' || Array.isArray(profile.domain)) {
+      errors.push('domain: must be an object such as { entity, actors, tenant, privilegedActor }');
+    } else {
+      unknownKeys(profile.domain, DOMAIN_KEYS, 'domain', errors);
+      for (const key of ['entity', 'entityPlural', 'tenant', 'endUser', 'privilegedActor']) {
+        if (key in profile.domain && (typeof profile.domain[key] !== 'string' || !NOUN_PATTERN.test(profile.domain[key]))) {
+          errors.push(`domain.${key}: must be a lowercase noun (kebab-case allowed), e.g. "visit"`);
+        }
+      }
+      if ('actors' in profile.domain) {
+        if (!Array.isArray(profile.domain.actors)) errors.push('domain.actors: must be a list of lowercase nouns');
+        else profile.domain.actors.forEach((actor, position) => {
+          if (typeof actor !== 'string' || !NOUN_PATTERN.test(actor)) errors.push(`domain.actors[${position}]: must be a lowercase noun`);
+        });
+      }
+    }
+  }
+
+  // An author may pin an idea-level rule to the requirement that covers it. The
+  // heuristic in the coverage detector is a classifier, and a classifier that cannot
+  // be corrected is a classifier people route around.
+  if ('rules' in profile) {
+    if (!Array.isArray(profile.rules)) {
+      errors.push('rules: must be a list of { text, covers: "REQ-008" } entries');
+    } else {
+      profile.rules.forEach((rule, position) => {
+        if (!rule || typeof rule !== 'object' || Array.isArray(rule)) {
+          errors.push(`rules[${position}]: must be an object with text and covers`);
+          return;
+        }
+        const unknownRuleKeys = Object.keys(rule).filter((key) => !['text', 'covers', 'why'].includes(key));
+        if (unknownRuleKeys.length > 0) errors.push(`rules[${position}].${unknownRuleKeys[0]}: unknown field`);
+        if (typeof rule.text !== 'string' || rule.text.trim().length < 10) {
+          errors.push(`rules[${position}].text: quote the idea sentence this pins (10+ characters)`);
+        }
+        if (typeof rule.covers !== 'string' || !/^REQ-\d{3,}$/.test(rule.covers)) {
+          errors.push(`rules[${position}].covers: must be a requirement id such as "REQ-008"`);
+        }
+      });
+    }
+  }
+
+  // A waiver is deliberate, dated debt. It must name a trait, a reason and an
+  // expiry: an undated waiver is an undocumented gap that never gets closed.
+  if (!Array.isArray(profile.traitWaivers)) {
+    errors.push('traitWaivers: must be a list of { trait, reason, expires } entries');
+  } else {
+    profile.traitWaivers.forEach((waiver, position) => {
+      if (!waiver || typeof waiver !== 'object' || Array.isArray(waiver)) {
+        errors.push(`traitWaivers[${position}]: must be an object with trait, reason and expires`);
+        return;
+      }
+      if (!TRAITS.includes(waiver.trait)) errors.push(`traitWaivers[${position}].trait: unknown trait "${waiver.trait}"`);
+      if (typeof waiver.reason !== 'string' || waiver.reason.trim().length < 10) {
+        errors.push(`traitWaivers[${position}].reason: say why the trait is uncovered (10+ characters)`);
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(waiver.expires ?? '')) || Number.isNaN(Date.parse(waiver.expires))) {
+        errors.push(`traitWaivers[${position}].expires: must be a YYYY-MM-DD date, so the waiver cannot live forever`);
+      }
+    });
+  }
+
   if (!Array.isArray(profile.overlays)) {
     errors.push('overlays: must be a list of overlay ids, e.g. ["org-baseline", "health-data"]');
   } else {
@@ -222,6 +320,34 @@ export function validateProfile(profile) {
   }
 
   return errors;
+}
+
+/**
+ * Strings that look like an attempt to instruct the reader rather than describe
+ * a product. Detected, not silently stripped: the author should see the finding,
+ * and `--strict` should refuse to compile it.
+ */
+const INJECTION_PATTERNS = [
+  [/\bignore\s+(?:all\s+)?(?:the\s+)?(?:previous|prior|above|preceding)\b/i, 'asks the reader to ignore previous instructions'],
+  [/\b(?:disregard|forget)\s+(?:all\s+)?(?:your|the)\s+(?:previous\s+)?(?:instructions|rules|prompt)\b/i, 'asks the reader to discard its instructions'],
+  [/^\s*#{1,6}\s*REQ-\d+/im, 'forges a requirement heading'],
+  [/\bcurl\s+\S+\s*\|\s*(?:sh|bash|zsh)\b/i, 'pipes a download into a shell'],
+  [/\bwget\s+\S+\s*\|\s*(?:sh|bash|zsh)\b/i, 'pipes a download into a shell'],
+  [/```/, 'contains a fenced code block'],
+  [/\b(?:exfiltrate|send\s+(?:the|all)\s+(?:secrets?|keys?|env(?:ironment)?)\b)/i, 'asks for secret material'],
+  [/\byou\s+are\s+now\b/i, 'reassigns the reader\'s role']
+];
+
+export function injectionFindings(profile) {
+  const findings = [];
+  for (const [field, value] of Object.entries({ idea: profile?.idea, name: profile?.name, '$comment': profile?.$comment })) {
+    if (typeof value !== 'string' || value === '') continue;
+    for (const [pattern, reason] of INJECTION_PATTERNS) {
+      if (pattern.test(value)) findings.push(`${field}: ${reason}. The idea is data the reader interprets, never a command it follows.`);
+    }
+    if (/https?:\/\//.test(value)) findings.push(`${field}: contains a URL. Requirements should name what to build, not where to fetch it.`);
+  }
+  return findings;
 }
 
 export function loadProfile(filePath) {

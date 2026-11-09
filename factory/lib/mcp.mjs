@@ -308,12 +308,12 @@ const TOOLS = [
   {
     name: 'compute_rigor',
     description:
-      'Compute the rigor tier for a project profile without compiling a packet. Use this first: the tier decides which practices are even eligible. Returns the score, the signals that produced it, the practice and line ceilings, and any stage cap.',
+      'Compute the rigor tier for a project profile without compiling a packet. Use this first: the tier decides which practices are even eligible. Returns the score, the signals that produced it, the practice and line ceilings, and any stage cap. The idea is optional here because the tier never reads it.',
     inputSchema: {
       type: 'object',
-      required: ['idea', 'kind', 'stage'],
+      required: ['kind', 'stage'],
       properties: {
-        idea: { type: 'string', description: 'One paragraph: who it is for, what it does, what they do today instead.' },
+        idea: { type: 'string', description: 'Optional for this tool only: the tier is computed from kind, stage, scale, traits and risks. Required by every tool whose output quotes the idea.' },
         kind: { type: 'string', enum: ['web-app', 'api', 'cli', 'library', 'data-pipeline', 'mobile', 'agent', 'automation'] },
         stage: { type: 'string', enum: ['prototype', 'mvp', 'internal-tool', 'production'] },
         name: { type: 'string', description: 'kebab-case project name (optional here)' },
@@ -433,10 +433,34 @@ const TOOLS = [
   }
 ];
 
+/**
+ * Rigor is computed from kind, stage, users.scale, traits and risks. None of those
+ * read the idea, so the MCP schema no longer requires it for `compute_rigor` —
+ * that requirement produced a validation error on the very first call the server
+ * tells an agent to make. Handlers whose output quotes the idea still refuse a
+ * placeholder, because inventing prose for the user would be worse than an error.
+ */
+export const PLACEHOLDER_IDEA = 'A project described only by its kind, stage and risks (idea not supplied).';
+// Measured, not guessed: of every advertised tool, only `plan_project` returns
+// profile-derived content that changes with the idea. The other handlers read
+// kind, stage, scale, traits, risks and tier only, so demanding prose from them
+// rejected valid calls for no informational gain.
+const IDEA_REQUIRED = new Set(['plan_project']);
+function assertIdeaFor(tool, args) {
+  if (!IDEA_REQUIRED.has(tool)) return;
+  if (typeof args.idea === 'string' && args.idea.trim().length >= 20) return;
+  throw new Error('invalid profile: idea: required, at least 20 characters. One paragraph of intent is enough.');
+}
+
 function profileFrom(args) {
   return normalizeProfile({
     name: args.name ?? 'mcp-project',
-    idea: args.idea,
+    // `compute_rigor` is documented as the first call and the tier does not read
+    // the idea (rigor is field/risk/stage driven), so requiring prose there only
+    // produced a validation error on the prescribed first call. A placeholder
+    // satisfies the shape; every handler that *renders* text still demands a real
+    // idea, because their output quotes it.
+    idea: args.idea ?? PLACEHOLDER_IDEA,
     kind: args.kind,
     stage: args.stage,
     users: { scale: args.scale ?? 'small' },
@@ -472,7 +496,15 @@ const HANDLERS = {
       signals: plan.rigor.signals,
       capped: plan.rigor.capped,
       cappedReason: plan.rigor.cappedReason,
-      limits: { practices: plan.rigor.maxPrimitives, markdownLines: ceiling, packet: plan.packet },
+      limits: {
+        practices: plan.rigor.maxPrimitives,
+        // What an agent reads is the constraint; the stored total is a reference
+        // it may exceed with a warning (BUG-7).
+        entryPointLines: policy.budgets.alwaysRead?.maxLinesByTier?.[String(plan.rigor.tier)] ?? null,
+        onDemandDocLines: policy.budgets.alwaysRead?.maxOnDemandDocLines ?? null,
+        storedMarkdownReference: ceiling,
+        packet: plan.packet
+      },
       note: 'Practices with tier_min above this value are not eligible, even if they look relevant.'
     };
   },
@@ -585,7 +617,9 @@ const HANDLERS = {
     return {
       tier,
       gates,
-      markdownLines: policy.budgets.maxLinesByTier[String(tier)],
+      entryPointLines: policy.budgets.alwaysRead?.maxLinesByTier?.[String(tier)] ?? null,
+      onDemandDocLines: policy.budgets.alwaysRead?.maxOnDemandDocLines ?? null,
+      storedMarkdownReference: policy.budgets.maxLinesByTier[String(tier)],
       note: `Tier ${tier} obligations are cumulative: gates introduced at lower tiers still apply.`
     };
   },
@@ -620,10 +654,11 @@ const HANDLERS = {
       countedIn: 'test files only: tests/, test/, __tests__/, spec/, *.test.*, *.spec.*, test_*.py, *_test.{py,go,rb,rs,exs}, *Test.{java,kt,cs,php}',
       ratchet: 'requirements start as "todo" (pending notice); marking one "done" without an anchor in a test is an error',
       checks: [
-        'node specs/spec-check.mjs --repo .                       # pending is a notice',
-        'node specs/spec-check.mjs --repo . --strict              # release CI: pending fails',
-        'node specs/spec-check.mjs --repo . --require-assertions  # reject hollow test files with no assertions'
+        'node <packet>/spec-check.mjs --repo .                       # pending is a notice',
+        'node <packet>/spec-check.mjs --repo . --strict              # release CI: pending fails',
+        'node <packet>/spec-check.mjs --repo . --require-assertions  # reject hollow test files with no assertions'
       ],
+      note: '<packet> is the directory the profile was compiled into (`vld compile profile.json -o <packet>`). The generated documents substitute the real path.',
       examples: [
         `// ${tag} REQ-004`,
         "test('erasing a subject removes every owned row (AC-01)', ...)"
@@ -713,6 +748,7 @@ export function handleMessage(message) {
     const handler = HANDLERS[name];
     if (!handler) return notification ? null : rpcError(id, -32602, `Unknown tool: ${name}`);
     try {
+      assertIdeaFor(name, params?.arguments ?? {});
       const value = handler(params?.arguments ?? {});
       if (notification) return null;
       return rpcResult(id, {

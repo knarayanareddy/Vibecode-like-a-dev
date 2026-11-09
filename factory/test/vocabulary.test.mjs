@@ -182,3 +182,73 @@ test('hyphenated compound modifiers (cross-border, append-only, multi-tenant, ro
   assert.ok(words.includes('customs'), `expected determiner chain "an append-only customs" to anchor "customs"; got ${words.join(', ')}`);
 });
 
+
+/**
+ * BUG-1: the compiler took the adjective in "telehealth platform" as the product's
+ * noun, so requirements read "One telehealth goes from created to finished" and
+ * "Who handles the telehealth today?". The packaging word was filtered as abstract
+ * and the modifier before it was promoted to head noun by the determiner pass.
+ */
+test('the noun before a packaging word is a modifier, not the product noun', () => {
+  const cases = [
+    ['A multi-tenant telehealth platform for small clinics.', 'clinic'],
+    ['A multi-tenant telehealth platform for small clinics. A clinic admin books an appointment for a patient with a clinician.', 'appointment'],
+    ['A telehealth platform that lets patients book visits with clinicians.', 'visit'],
+    ['A platform to manage medical appointments.', 'appointment'],
+    ['A photo sorter that groups shots by the people in them and never uploads originals.', 'photo']
+  ];
+  for (const [idea, expected] of cases) {
+    const vocabulary = vocabularyFor({ idea, kind: 'web-app' });
+    assert.equal(vocabulary.primary, expected, `"${idea}" produced the noun ${vocabulary.primary}`);
+    for (const word of ['telehealth', 'platform', 'app', 'sorter', 'sorter']) {
+      assert.notEqual(vocabulary.primary, word, `"${idea}" promoted the packaging word ${word}`);
+    }
+  }
+});
+
+test('the primary noun is never the word directly before platform, app or service', () => {
+  const ideas = [
+    'A multi-tenant telehealth platform for small clinics.',
+    'A booking app for boutique gyms with class schedules and waitlists.',
+    'A compliance service for fleet operators with inspections and fines.',
+    'A finance app that reconciles invoices against bank feeds for small studios.'
+  ];
+  for (const idea of ideas) {
+    const vocabulary = vocabularyFor({ idea, kind: 'web-app' });
+    for (const match of idea.matchAll(/\b([a-z][a-z0-9-]+)\s+(?:platform|app|service)\b/gi)) {
+      assert.notEqual(
+        vocabulary.primary,
+        match[1].toLowerCase(),
+        `"${idea}" made the modifier "${match[1]}" the product noun`
+      );
+    }
+  }
+});
+
+test('an idea with no nameable noun falls back to its kind and says so', () => {
+  const vocabulary = vocabularyFor({ idea: 'An app for booking.', kind: 'web-app' });
+  assert.equal(vocabulary.source, 'kind');
+  assert.equal(vocabulary.primary, 'record');
+});
+
+test('participles do not become the product noun', () => {
+  const vocabulary = vocabularyFor({
+    idea: 'A booking tool for therapists with upcoming sessions, scheduling and cancelled visits.',
+    kind: 'web-app'
+  });
+  const words = vocabulary.candidates.map((candidate) => candidate.word);
+  assert.ok(!words.includes('upcoming'), `candidates still contain a participle: ${words.join(', ')}`);
+});
+
+test('an explicit domain block overrides inference', () => {
+  const vocabulary = vocabularyFor({
+    idea: 'A multi-tenant telehealth platform for small clinics.',
+    kind: 'web-app',
+    risks: { multiTenant: true },
+    domain: { entity: 'visit', tenant: 'clinic', privilegedActor: 'practice-manager' }
+  });
+  assert.equal(vocabulary.primary, 'visit');
+  assert.equal(vocabulary.source, 'domain');
+  assert.equal(vocabulary.tenantNoun, 'clinic');
+  assert.equal(vocabulary.privilegedActor, 'practice-manager');
+});

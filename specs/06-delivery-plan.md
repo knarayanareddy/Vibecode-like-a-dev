@@ -20,7 +20,7 @@ _A running, tested, documented box that can create and delete an agent and nothi
 - [ ] Add the CI workflow with lint, typecheck and test jobs, and make it required on the default branch.
 - [ ] Add configuration validation that names every missing variable before the first agent is created.
 - [ ] Write the runbook: install, run, test, deploy, and what specifications see when the agent service is down.
-- [ ] Copy the specification packet into specs/ and wire the spec check into CI.
+- [ ] Copy the specification packet into the repository and wire the spec check into CI.
 - [ ] Answer the open questions that block the agent slice; the rest can wait for their phase.
 
 **Exit:** The documented command creates and deletes an agent through PostgreSQL, and CI is green on that alone.

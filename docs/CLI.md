@@ -10,8 +10,12 @@ Usage
   vld adopt <repo-or-url> [-o <file>] [--name <slug>] [--idea <text>] [--force] [--json]
                                      infer a profile from a local path or Git repository URL
   vld plan <profile.json> [--json] [--strict]   show selection and reasoning, write nothing; --strict refuses an adopted TODO idea
-  vld compile <profile.json> -o <dir> [--force] [--strict]
+  vld compile <profile.json> -o <dir> [--force] [--strict] [--packet-dir <label>] [--lean]
+                                     --packet-dir overrides the directory name embedded in generated commands
+                                     --lean emits AGENTS.md and spec.json only, for a token-budgeted reader
                                      render the specification packet
+  vld ci init [--project <dir>] [--packet <dir>] [--node <version>] [--force]
+                                     write the required pull-request check that runs the packet's enforcement
   vld verify <packet-dir> [--repo <path>] [--strict] [--require-assertions] [--json]
                                      check a packet, optionally against code; --require-assertions rejects hollow anchored tests
   vld change <packet-dir> <change.json> -o <dir> [--apply] [--force] [--json]

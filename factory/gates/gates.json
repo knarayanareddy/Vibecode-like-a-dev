@@ -1,5 +1,5 @@
 {
-  "comment": "One mechanism per gate. `check` is a rule the shipped runner evaluates against the repository; `files` are the config fragments the runner cannot replace (a real linter's config, a policy, a mutation config). A gate with no machine check still gets an attestation file, because a gate nobody records is a gate nobody meets.",
+  "comment": "One mechanism per gate. `check` is a rule the shipped runner evaluates against the repository; `files` are the config fragments the runner cannot replace (a real linter's config, a policy, a mutation config). A gate with no machine check still gets an attestation file, because a gate nobody records is a gate nobody meets. Each rule also names the milestone (`phase`, 0-5) at which it becomes blocking: a gate that cannot be met yet is sequenced, not waived, so a fresh repository is not 20 failures on day one.",
   "gates": {
     "G0-RUN": {
       "check": {
@@ -14,7 +14,8 @@
         ]
       },
       "how": "The README contains a fenced command block a new contributor can copy.",
-      "mechanism": "The README itself. This check only proves a command is written down; G0-SMOKE proves it works."
+      "mechanism": "The README itself. This check only proves a command is written down; G0-SMOKE proves it works.",
+      "phase": 0
     },
     "G0-CHECK": {
       "check": {
@@ -25,7 +26,8 @@
         ]
       },
       "how": "A CI workflow runs a lint or typecheck step on pull requests.",
-      "mechanism": "The workflow file. Add the same command to the README so a local run matches CI."
+      "mechanism": "The workflow file. Add the same command to the README so a local run matches CI.",
+      "phase": 0
     },
     "G0-SMOKE": {
       "check": {
@@ -39,7 +41,8 @@
         ]
       },
       "how": "A smoke or end-to-end test file exists for the primary journey.",
-      "mechanism": "One end-to-end test, exercising the documented interface rather than the internals."
+      "mechanism": "One end-to-end test, exercising the documented interface rather than the internals.",
+      "phase": 0
     },
     "G1-CI": {
       "check": {
@@ -49,7 +52,8 @@
         ]
       },
       "how": "A CI workflow runs the test command.",
-      "mechanism": "The workflow file, plus a branch protection rule that makes the job required. The rule is in the forge, not in the repository."
+      "mechanism": "The workflow file, plus a branch protection rule that makes the job required. The rule is in the forge, not in the repository.",
+      "phase": 0
     },
     "G1-DOMAIN-TESTS": {
       "check": {
@@ -57,7 +61,8 @@
         "scope": "core"
       },
       "how": "Every core requirement carries an @req anchor in a test file.",
-      "mechanism": "`spec-check.mjs` counts the anchors; this gate fails while a core requirement has none."
+      "mechanism": "`spec-check.mjs` counts the anchors; this gate fails while a core requirement has none.",
+      "phase": 1
     },
     "G1-AC-TRACE": {
       "check": {
@@ -65,7 +70,8 @@
         "scope": "automated"
       },
       "how": "Every requirement marked automated has a test anchor.",
-      "mechanism": "`spec-check.mjs --strict`, run in CI."
+      "mechanism": "`spec-check.mjs --strict`, run in CI.",
+      "phase": 1
     },
     "G1-RUNBOOK": {
       "check": {
@@ -82,7 +88,8 @@
         ]
       },
       "how": "The README covers running, testing and deploying.",
-      "mechanism": "Three headings. A runbook with none of them is a README for the author."
+      "mechanism": "Three headings. A runbook with none of them is a README for the author.",
+      "phase": 2
     },
     "G1-SECRETS": {
       "check": {
@@ -95,7 +102,8 @@
         }
       ],
       "how": "No credential-shaped string is committed, and a gitleaks config is present for the pre-commit hook.",
-      "mechanism": "The runner scans the working tree; gitleaks scans history. Both are needed: this file cannot see what was already committed and deleted."
+      "mechanism": "The runner scans the working tree; gitleaks scans history. Both are needed: this file cannot see what was already committed and deleted.",
+      "phase": 0
     },
     "G2-AUTHZ": {
       "check": {
@@ -123,7 +131,8 @@
         }
       ],
       "how": "A denial-path test exists, and the authorization policy has a home outside the handlers.",
-      "mechanism": "The rego policy is evaluated with `conftest test --policy enforcement/policy`; the runner only proves a denial test exists."
+      "mechanism": "The rego policy is evaluated with `conftest test --policy enforcement/policy`; the runner only proves a denial test exists.",
+      "phase": 2
     },
     "G2-THREAT": {
       "check": {
@@ -139,7 +148,8 @@
         ]
       },
       "how": "A threat model lists accepted risks, each with an owner.",
-      "mechanism": "The document. A threat model without an owner column is a list of worries."
+      "mechanism": "The document. A threat model without an owner column is a list of worries.",
+      "phase": 2
     },
     "G2-CONTRACTS": {
       "check": {
@@ -158,7 +168,8 @@
         }
       ],
       "how": "A machine-readable contract or contract test exists in the repository.",
-      "mechanism": "The skeleton consumes a recorded fixture; replace the fixture with a real capture, not a mock written from the docs."
+      "mechanism": "The skeleton consumes a recorded fixture; replace the fixture with a real capture, not a mock written from the docs.",
+      "phase": 2
     },
     "G2-OBSERVABILITY": {
       "check": {
@@ -187,7 +198,8 @@
         ]
       },
       "how": "Source code propagates a correlation or request id.",
-      "mechanism": "A grep is the weakest form of this check. It proves the identifier exists, not that every path carries it."
+      "mechanism": "A grep is the weakest form of this check. It proves the identifier exists, not that every path carries it.",
+      "phase": 3
     },
     "G2-MIGRATIONS": {
       "check": {
@@ -200,7 +212,8 @@
         ]
       },
       "how": "Schema changes live as migrations in version control.",
-      "mechanism": "The migration directory. Forward-only is a convention the runner cannot see; the restore drill in G3-RESTORE is what proves it."
+      "mechanism": "The migration directory. Forward-only is a convention the runner cannot see; the restore drill in G3-RESTORE is what proves it.",
+      "phase": 2
     },
     "G2-ADR": {
       "check": {
@@ -216,14 +229,16 @@
         ]
       },
       "how": "At least one ADR records a decision and its consequence.",
-      "mechanism": "The ADR directory. An ADR with no consequence section is a changelog entry."
+      "mechanism": "The ADR directory. An ADR with no consequence section is a changelog entry.",
+      "phase": 2
     },
     "G2-DRIFT": {
       "check": {
         "kind": "drift"
       },
       "how": "`spec-check.mjs --repo .` passes: every anchor resolves and every done requirement is proven.",
-      "mechanism": "`spec-check.mjs`, shipped with the packet. This gate is the one check that needs no project code to be honest."
+      "mechanism": "`spec-check.mjs`, shipped with the packet. This gate is the one check that needs no project code to be honest.",
+      "phase": 3
     },
     "G3-MUTATION": {
       "check": {
@@ -260,7 +275,8 @@
         }
       ],
       "how": "A mutation configuration and a separate semantic-oracle manifest bind every automated requirement to a black-box or property test outside its ordinary unit test file.",
-      "mechanism": "The runner rejects an absent/malformed manifest, a missing requirement oracle, or an oracle with no @req anchor/assertion. CI must run the selected mutation tool; the structural runner cannot measure its score or prove the oracle is complete."
+      "mechanism": "The runner rejects an absent/malformed manifest, a missing requirement oracle, or an oracle with no @req anchor/assertion. CI must run the selected mutation tool; the structural runner cannot measure its score or prove the oracle is complete.",
+      "phase": 4
     },
     "G3-PROPERTY": {
       "check": {
@@ -290,7 +306,8 @@
         ]
       },
       "how": "A property-based testing library is present and used by a test.",
-      "mechanism": "The generated-seed corpus is not checked; a property test without a recorded seed is an example test in disguise."
+      "mechanism": "The generated-seed corpus is not checked; a property test without a recorded seed is an example test in disguise.",
+      "phase": 4
     },
     "G3-SLO": {
       "check": {
@@ -307,7 +324,8 @@
         ]
       },
       "how": "An SLO document states a target percentage and an error budget.",
-      "mechanism": "The document plus the alert rule. The number is a policy decision; this check only proves someone wrote it down."
+      "mechanism": "The document plus the alert rule. The number is a policy decision; this check only proves someone wrote it down.",
+      "phase": 4
     },
     "G3-RESTORE": {
       "check": {
@@ -326,7 +344,8 @@
           "path": "enforcement/templates/enforcement/restore-drill.md",
           "template": "attest/restore-drill.md"
         }
-      ]
+      ],
+      "phase": 4
     },
     "G3-SECURITY": {
       "check": {
@@ -341,7 +360,8 @@
         ]
       },
       "how": "The threat model records a per-release review.",
-      "mechanism": "The document plus the security regression suite. A review nobody signed for is a meeting."
+      "mechanism": "The document plus the security regression suite. A review nobody signed for is a meeting.",
+      "phase": 3
     },
     "G3-ROLLBACK": {
       "check": {
@@ -360,7 +380,8 @@
           "path": "enforcement/templates/enforcement/rollback.md",
           "template": "attest/rollback.md"
         }
-      ]
+      ],
+      "phase": 4
     },
     "G1-INCIDENT": {
       "check": {
@@ -379,7 +400,8 @@
           "path": "enforcement/templates/docs/runbook.md",
           "template": "attest/runbook.md"
         }
-      ]
+      ],
+      "phase": 2
     },
     "G2-CONSENT": {
       "check": {
@@ -398,7 +420,8 @@
           "path": "enforcement/templates/docs/consent-basis.md",
           "template": "attest/consent-basis.md"
         }
-      ]
+      ],
+      "phase": 2
     },
     "G2-REVIEW": {
       "check": {
@@ -417,7 +440,84 @@
           "path": "enforcement/templates/docs/review-record.md",
           "template": "attest/review-record.md"
         }
+      ],
+      "phase": 3
+    },
+    "G3-PHI-ENCRYPT": {
+      "check": {
+        "kind": "attest",
+        "file": "docs/phi-encryption.md",
+        "requires": [
+          "in transit",
+          "at rest",
+          "rotation"
+        ]
+      },
+      "how": "docs/phi-encryption.md names every PHI store with its transit and rest encryption and a rotation interval.",
+      "mechanism": "The attestation. It records an owner's claim per store; it cannot show that a field is unreadable in raw storage, which is what the requirement's test must prove.",
+      "files": [
+        {
+          "path": "enforcement/templates/docs/phi-encryption.md",
+          "template": "attest/phi-encryption.md"
+        }
+      ],
+      "phase": 3
+    },
+    "G3-AUDIT-RETENTION": {
+      "check": {
+        "kind": "attest",
+        "file": "docs/audit-retention.md",
+        "requires": [
+          "append-only",
+          "retention",
+          "restore"
+        ]
+      },
+      "how": "docs/audit-retention.md names the audit destination, its append-only mechanism, the retention period and the restore path.",
+      "mechanism": "The document. A retention period that exists only in a table row is a policy, not a proven control.",
+      "files": [
+        {
+          "path": "enforcement/templates/docs/audit-retention.md",
+          "template": "attest/audit-retention.md"
+        }
       ]
+    },
+    "G3-SUBJECT-RIGHTS": {
+      "check": {
+        "kind": "contains",
+        "glob": [
+          "**/*.test.*",
+          "**/*.spec.*",
+          "**/test_*.*",
+          "**/*_test.*",
+          "**/tests/**/*",
+          "**/test/**/*"
+        ],
+        "patterns": [
+          "(?i)export|portab",
+          "(?i)eras(e|ure)|delete"
+        ]
+      },
+      "how": "A test exercises both the subject-access export and the erasure path.",
+      "mechanism": "The test names. It cannot show the export covers every store the product owns — that is the requirement's checklist."
+    },
+    "G3-CARD-SCOPE": {
+      "check": {
+        "kind": "contains",
+        "glob": [
+          "**/*.test.*",
+          "**/*.spec.*",
+          "**/test_*.*",
+          "**/*_test.*",
+          "**/tests/**/*",
+          "**/test/**/*"
+        ],
+        "patterns": [
+          "(?i)card[_\\s-]?number|pan\\b|primary account number"
+        ]
+      },
+      "how": "A test asserts that a card-shaped value is rejected or absent from storage and logs.",
+      "mechanism": "One test. It cannot prove no future endpoint accepts one; the review of the payment surface is the compensating control."
     }
   }
 }

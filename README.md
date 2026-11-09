@@ -353,6 +353,8 @@ vld runtime agent run missions/report-export/mission.json export-api \
 vld runtime agent status missions/report-export/mission.json --project .
 ```
 
+The runtime commands (`runtime`, `workspace`, `mission`, `workflow`, `agent`, `studio`) are the experimental half of the tool and are documented separately: [docs/EXPERIMENTAL.md](docs/EXPERIMENTAL.md). The compiler does not depend on any of them, and a test enforces that.
+
 `local-process` has no shell, PATH lookup or inherited environment; it gets only a fresh non-secret locale allowlist and VLD-derived IDs. It is nevertheless an **unconfined host process**: `read-only`, `network: false` and `credentialAccess: false` deny VLD authority and inherited environment values, but do **not** stop the executable from using files, credentials or network access available to the invoking OS user. A process CWD is **not** a sandbox, so this release rejects write-capable local-process policies and never treats those flags as OS enforcement. Fake runs are the deterministic CI path; a future sandbox adapter must prove outside-workspace filesystem denial, credential-fixture denial, network-egress denial and process-execution controls before VLD can grant sandboxed writes or claim enforced isolation. Neither adapter can submit a candidate, verify project checks, approve, push, merge, open a PR or change policy. See [ADR-0006](docs/adr/0006-scoped-agent-adapter-host.md).
 
 ### Frozen delivery candidates — exact local review handoff, not a merge engine
@@ -521,6 +523,40 @@ This is the part that is not in the other tools.
 node specs/spec-check.mjs --repo .            # pending requirements are notices
 node specs/spec-check.mjs --repo . --strict   # release CI: nothing ships unfinished
 node specs/enforcement/gates.mjs --repo .     # one check per gate in the packet
+```
+
+The agent does not have to cooperate for any of this to run. Put the check outside the agent loop once, and it fails the pull request whoever wrote the code:
+
+The packet has a lean arm for a token-budgeted reader: `vld compile profile.json -o specs --lean` emits `AGENTS.md` and `spec.json` only — about **2.9k tokens against 6.5k** — with every requirement and acceptance criterion intact. It has never been measured against a live model, so this README does not claim it works better than the full packet; [docs/results/README.md](docs/results/README.md) describes exactly what measurement would settle it and why the directory is empty.
+
+```bash
+vld ci init --project . --packet specs
+# writes .github/workflows/spec.yml: spec-check --strict, the gate runner, and a
+# readable gate table on the job summary
+```
+
+Or add the composite action to an existing workflow:
+
+```yaml
+- uses: your-org/vibecode-like-a-dev/.github/actions/spec-check@main
+  with:
+    packet: specs
+    github-token: ${{ secrets.GITHUB_TOKEN }}   # posts the requirement and gate table on the PR
+```
+
+This is the path for a chat-only builder: export the project to GitHub, run `vld ci init`, and merge the pull request. From then on a broken specification fails CI even though no agent ever ran a checker.
+
+A fresh repository does not pass twenty gates on its first afternoon, and a gate runner that reports only failure is a gate runner a team deletes. Adoption is therefore sequenced rather than waived:
+
+```bash
+node specs/enforcement/gates.mjs --repo . --phase 2
+# gates from milestones 3-5 are reported but advisory; deferred is printed, never hidden
+
+node specs/enforcement/gates.mjs --repo . --baseline --owner @team --expires 2027-01-31
+# records today's failures as debt with an owner and an expiry (.vld/gates-baseline.json)
+
+node specs/enforcement/gates.mjs --repo .
+# fails only on a regression or an expired waiver, and prints every waiver it honours
 ```
 
 ```ts

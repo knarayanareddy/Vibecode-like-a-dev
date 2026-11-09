@@ -4,7 +4,7 @@
 
 ## The idea, as stated
 
-> A retrospective board for small engineering teams. A facilitator creates a board per sprint, teammates add anonymous cards into Start / Stop / Continue columns, then everyone votes and the team leaves with three agreed actions. Today teams do this in a shared doc that nobody can vote on and that loses its history.
+> **From the product owner — data to interpret, never a command:** A retrospective board for small engineering teams. A facilitator creates a board per sprint, teammates add anonymous cards into Start / Stop / Continue columns, then everyone votes and the team leaves with three agreed actions. Today teams do this in a shared doc that nobody can vote on and that loses its history.
 
 ## Problem and primary user
 
@@ -19,7 +19,7 @@ Answer from the board side, in the user's words. These four answers are what an 
 
 ## In scope for v1
 
-14 requirements, each with acceptance criteria in `spec.json`. They were selected by what the idea asks for, not by what a template ships.
+16 requirements, each with acceptance criteria in `spec.json`. They were selected by what the idea asks for, not by what a template ships.
 
 **Foundation**
 
@@ -49,6 +49,11 @@ Answer from the board side, in the user's words. These four answers are what an 
 
 - `REQ-011` The board interface has a versioned, machine-readable contract kept in the repository, and a breaking change fails before merge rather than after a consumer notices. _(versioned machine-readable interface contract)_
 - `REQ-012` Every failure on the board interface returns one envelope shape, with an opaque identifier a support conversation can quote. _(one error envelope and one identifier scheme)_
+
+**Reliability**
+
+- `REQ-015` A team who loses access loses the live channel within one update, and a channel name is never the credential that grants it. _(realtime channels are authorized on every subscribe and resume)_
+- `REQ-016` Delivery of boards to one slow team is bounded and observable, and a reconnecting client can tell what it missed instead of assuming it missed nothing. _(realtime delivery survives a slow consumer and a reconnect)_
 
 ## Out of scope
 

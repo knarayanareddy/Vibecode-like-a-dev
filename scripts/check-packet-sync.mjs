@@ -6,7 +6,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { lstatSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -44,12 +44,18 @@ export function comparePacketTrees(generated, committed) {
 }
 
 export function assertPacketSync({ profile, packet, root = ROOT }) {
-  const destination = mkdtempSync(path.join(os.tmpdir(), 'vld-packet-sync-'));
+  // A packet names the directory it lives in (BUG-5), so the generated text
+  // depends on the output path. Compile into a throwaway root at the *same*
+  // relative destination, otherwise the committed packet can never match: it
+  // embeds `specs/...` while the temp compile embedded `/tmp/...`.
+  const staging = mkdtempSync(path.join(os.tmpdir(), 'vld-packet-sync-'));
+  const destination = path.join(staging, packet);
+  mkdirSync(destination, { recursive: true });
   try {
-    execFileSync(process.execPath, [path.join(root, 'factory', 'cli.mjs'), 'compile', profile, '-o', destination, '--force'], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
+    execFileSync(process.execPath, [path.join(root, 'factory', 'cli.mjs'), 'compile', profile, '-o', destination, '--packet-dir', packet, '--force'], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
     const differences = comparePacketTrees(destination, path.resolve(root, packet));
     return { profile, packet, differences };
-  } finally { rmSync(destination, { recursive: true, force: true }); }
+  } finally { rmSync(staging, { recursive: true, force: true }); }
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

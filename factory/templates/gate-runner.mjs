@@ -9,6 +9,12 @@
  *   node enforcement/gates.mjs --repo ../app   # check another checkout
  *   node enforcement/gates.mjs --strict        # pending gates fail too
  *   node enforcement/gates.mjs --json          # machine-readable
+ *   node enforcement/gates.mjs --phase 2       # gates after milestone 2 are advisory
+ *   node enforcement/gates.mjs --baseline --owner @team --expires 2027-01-31
+ *                                              # accept today's failures as debt with
+ *                                              # an owner and an expiry; later runs
+ *                                              # fail only on regressions or expiry
+ *   node enforcement/gates.mjs --baseline-file .vld/other.json   # non-default record
  *
  * What this is: a structural check per gate, so a gate is a command rather than a
  * sentence. What this is not: proof. Each gate says what it proves and what it does
@@ -20,7 +26,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, lstatSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, lstatSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -37,6 +43,16 @@ const option = (name, fallback) => {
 
 const STRICT = flag('--strict');
 const JSON_OUT = flag('--json');
+// Adoption is incremental. Without a phase the runner is a wall of red on day one,
+// and a team that cannot pass anything deletes the runner. `--phase N` makes gates
+// after milestone N advisory; `--baseline` records today's failures with an owner
+// and an expiry, and afterwards only breaks on a regression or an expired waiver.
+const PHASE = option('--phase', null);
+// `--baseline` takes no value: accepting one made `--baseline --owner x` write to a
+// file literally named `--owner`. The path is a separate option.
+const WRITE_BASELINE = flag('--baseline');
+const BASELINE_PATH = option('--baseline-file', null);
+const BASELINE_FILE = '.vld/gates-baseline.json';
 // The evaluator may run spec-check itself inside a read-only Node Permission
 // Model process. In that bounded harness it passes this internal hand-off flag
 // so the gate runner does not need child-process permission merely to repeat it.
@@ -326,21 +342,116 @@ function check(rule) {
 }
 
 const gates = (spec?.gates ?? []).map((gate) => gate.id);
+
+// Phase selection: a gate whose milestone is later than the requested phase is
+// advisory. It is still evaluated and still printed, so nothing is hidden; it just
+// does not fail the run.
+const phaseLimit = PHASE === null ? null : Number.parseInt(PHASE, 10);
+if (PHASE !== null && (!Number.isInteger(phaseLimit) || phaseLimit < 0)) {
+  console.error(`gate-runner: --phase expects a milestone 0-5, got "${PHASE}"`);
+  process.exit(2);
+}
+
 const results = gates.map((id) => {
   const rule = RULES[id];
-  if (!rule) return { id, status: 'fail', detail: 'no enforcement mechanism declared for this gate', how: '', mechanism: '' };
-  return { id, ...check(rule.check), how: rule.how, mechanism: rule.mechanism };
+  if (!rule) return { id, status: 'fail', detail: 'no enforcement mechanism declared for this gate', how: '', mechanism: '', phase: 0 };
+  const outcome = check(rule.check);
+  const phase = typeof rule.phase === 'number' ? rule.phase : 0;
+  const outOfPhase = phaseLimit !== null && phase > phaseLimit;
+  return {
+    id,
+    ...outcome,
+    // A gate beyond the selected milestone is reported as its true status but
+    // demoted to `deferred`, so the summary separates "not yet" from "broken".
+    status: outOfPhase && outcome.status === 'fail' ? 'deferred' : outcome.status,
+    actual: outcome.status,
+    phase,
+    how: rule.how,
+    mechanism: rule.mechanism
+  };
 });
 
+// Baseline: a recorded failure is debt, not a regression. The record carries an
+// owner and an expiry so it cannot become a permanent waiver by neglect.
+const baselinePath = path.resolve(REPO, BASELINE_PATH ?? BASELINE_FILE);
+let baseline = null;
+if (existsSync(baselinePath)) {
+  try {
+    baseline = JSON.parse(readFileSync(baselinePath, 'utf8'));
+  } catch (error) {
+    console.error(`gate-runner: ${baselinePath} is not valid JSON — ${error.message}`);
+    process.exit(2);
+  }
+}
+const today = new Date().toISOString().slice(0, 10);
+const waivers = new Map();
+if (baseline && Array.isArray(baseline.gates)) {
+  for (const entry of baseline.gates) {
+    if (entry && typeof entry.id === 'string') waivers.set(entry.id, entry);
+  }
+}
+const accepted = [];
+const expired = [];
+for (const entry of results) {
+  if (entry.status !== 'fail') continue;
+  const waiver = waivers.get(entry.id);
+  if (!waiver) continue;
+  if (typeof waiver.expires === 'string' && waiver.expires < today) {
+    expired.push({ ...entry, owner: waiver.owner, expires: waiver.expires });
+    continue;
+  }
+  accepted.push({ ...entry, owner: waiver.owner ?? 'unassigned', expires: waiver.expires ?? 'no expiry' });
+}
+
 const shown = path.relative(process.cwd(), REPO);
+const blocking = results.filter((entry) => entry.status === 'fail' && !accepted.some((waived) => waived.id === entry.id));
 const summary = {
   repo: !shown || shown.startsWith('..') ? REPO : shown,
   gates: results.length,
   pass: results.filter((entry) => entry.status === 'pass').length,
-  fail: results.filter((entry) => entry.status === 'fail').length,
+  fail: blocking.length,
   pending: results.filter((entry) => entry.status === 'pending').length,
+  deferred: results.filter((entry) => entry.status === 'deferred').length,
+  accepted: accepted.length,
+  acceptedIds: accepted.map((entry) => entry.id),
+  expired: expired.length,
+  phase: phaseLimit,
   results
 };
+
+// --baseline writes today's state as the accepted starting point. It never invents
+// a waiver for a gate that passes, and it keeps the owner/expiry of an existing
+// entry so re-running does not silently renew debt.
+if (WRITE_BASELINE) {
+  const target = path.resolve(REPO, BASELINE_PATH ?? BASELINE_FILE);
+  const kept = [];
+  for (const entry of results) {
+    if (entry.status !== 'fail' && entry.status !== 'deferred') continue;
+    const previous = waivers.get(entry.id);
+    kept.push({
+      id: entry.id,
+      owner: previous?.owner ?? option('--owner', 'unassigned'),
+      expires: previous?.expires ?? option('--expires', defaultExpiry()),
+      reason: previous?.reason ?? option('--reason', 'present when the baseline was taken'),
+      recorded: previous?.recorded ?? today
+    });
+  }
+  const payload = {
+    comment: 'Accepted gate debt. A gate listed here is a known gap with an owner and an expiry, not a passing gate: this file never turns a failure into a pass, it only stops an already-failing gate from failing the build twice. Remove an entry when the gate passes.',
+    recorded: today,
+    repo: summary.repo,
+    gates: kept
+  };
+  mkdirSync(path.dirname(target), { recursive: true });
+  writeFileSync(target, `${JSON.stringify(payload, null, 2)}\n`);
+  if (!JSON_OUT) console.log(`\nbaseline written: ${path.relative(process.cwd(), target)} · ${kept.length} gate(s) accepted with an owner and an expiry\n`);
+}
+
+function defaultExpiry() {
+  const date = new Date();
+  date.setDate(date.getDate() + 30);
+  return date.toISOString().slice(0, 10);
+}
 
 if (JSON_OUT) {
   console.log(JSON.stringify(summary, null, 2));
@@ -354,10 +465,25 @@ if (JSON_OUT) {
   if (STRICT && summary.pending > 0) {
     console.log(`\n✗ --strict: ${summary.pending} gate(s) still pending`);
   }
+  // Waivers are printed with their owner and expiry on every run: debt that is
+  // invisible is debt nobody pays down.
+  for (const entry of accepted) {
+    console.log(`  • ${entry.id.padEnd(18)} accepted until ${entry.expires} · owner ${entry.owner}`);
+  }
+  for (const entry of expired) {
+    console.log(`  ✗ ${entry.id.padEnd(18)} waiver expired ${entry.expires} · owner ${entry.owner}`);
+  }
+  if (summary.deferred > 0) {
+    console.log(`\n  ${summary.deferred} gate(s) belong to a later milestone than phase ${phaseLimit}; they are reported, not enforced. Run without --phase to require all of them.`);
+  }
   console.log(
     `\n${summary.fail === 0 && (!STRICT || summary.pending === 0) ? 'PASS' : 'FAIL'} · ` +
-      `${summary.pass} pass · ${summary.fail} fail · ${summary.pending} pending\n`
+      `${summary.pass} pass · ${summary.fail} fail · ${summary.pending} pending` +
+      `${summary.deferred ? ` · ${summary.deferred} deferred` : ''}` +
+      `${summary.accepted ? ` · ${summary.accepted} accepted` : ''}\n`
   );
 }
 
-process.exitCode = summary.fail > 0 || (STRICT && summary.pending > 0) ? 1 : 0;
+// Recording the baseline is the act of accepting the current state, so it exits 0
+// even though the gates it recorded are red. The next run is the one that judges.
+process.exitCode = WRITE_BASELINE ? 0 : summary.fail > 0 || (STRICT && summary.pending > 0) ? 1 : 0;

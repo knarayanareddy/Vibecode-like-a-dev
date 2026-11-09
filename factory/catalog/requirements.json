@@ -85,27 +85,40 @@
         "Given a database at the previous schema version with representative rows, when the migration runs, then all rows remain readable and no column required by the new code is null.",
         "Given the same database, when the migration is re-run, then it is a no-op rather than an error."
       ],
-      "verify": "automated"
+      "verify": "automated",
+      "traits": [
+        "persistence"
+      ]
     },
     {
       "key": "data.lifecycle",
       "when": {
-        "any": [
+        "all": [
           {
-            "field": "risks.regulated",
-            "eq": true
-          },
-          {
-            "all": [
+            "any": [
               {
-                "field": "risks.pii",
+                "field": "risks.regulated",
                 "eq": true
               },
               {
-                "field": "tier",
-                "gte": 2
+                "all": [
+                  {
+                    "field": "risks.pii",
+                    "eq": true
+                  },
+                  {
+                    "field": "tier",
+                    "gte": 2
+                  }
+                ]
               }
             ]
+          },
+          {
+            "not": {
+              "field": "idea",
+              "matches": "recover|restor|undo|grace|soft.?delete|30 days|30-day"
+            }
           }
         ]
       },
@@ -119,6 +132,49 @@
         "Given a deletion request, when the audit log is inspected, then the request is recorded without storing the deleted personal data."
       ],
       "verify": "automated"
+    },
+    {
+      "key": "data.lifecycle-grace",
+      "when": {
+        "all": [
+          {
+            "field": "idea",
+            "matches": "recover|restor|undo|grace|soft.?delete|30 days|30-day"
+          },
+          {
+            "any": [
+              {
+                "field": "risks.regulated",
+                "eq": true
+              },
+              {
+                "all": [
+                  {
+                    "field": "risks.pii",
+                    "eq": true
+                  },
+                  {
+                    "field": "tier",
+                    "gte": 2
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "render": "data",
+      "title": "Deletion with a recoverable grace period",
+      "statement": "When an authorised actor deletes a {tenantNoun} or its data, the application shall mark it deleted, keep it restorable for the stated grace period, and purge it only after that period expires.",
+      "definition": "Deleting {aSecondary} in {project} is reversible for the stated window: the rows are tombstoned, an undo path exists for its length, and a scheduled purge runs exactly once after it.",
+      "failurePath": "If the purge job fails, the data stays recoverable and the failure is reported; a failed purge never silently deletes early or leaves the tenant half-erased.",
+      "acceptance": [
+        "Given a deleted tenant inside its grace period, when an authorised actor restores it, then every record it held is reachable again and the restoration is audited.",
+        "Given a deleted tenant whose grace period has expired, when the purge job runs, then the rows are removed and the purge is recorded once, not per row.",
+        "Given a legal hold on a tenant, when the grace period expires, then the purge is refused and the hold is named."
+      ],
+      "verify": "automated",
+      "traits": []
     },
     {
       "key": "auth.identity",
@@ -176,8 +232,8 @@
       "render": "security",
       "title": "Tenant isolation",
       "statement": "The data-access layer shall apply the caller's tenant key to every unit of work and ignore any tenant identifier supplied by the client.",
-      "definition": "Two {secondaryPlural} in different tenants cannot see or affect each other's {primary} data through any query, handler or export path.",
-      "failurePath": "A query constructed without a tenant filter fails closed (returns no rows or raises), rather than returning all tenants.",
+      "definition": "Two {tenantPlural} cannot see or affect each other's {primary} data through any query, handler or export path, and a {secondary} who belongs to one {tenantNoun} cannot reach another's rows.",
+      "failurePath": "A query constructed without a tenant filter fails closed (returns no rows or raises), rather than returning all tenants. A caller from one {tenantNoun} who presents another {tenantNoun}'s identifier is refused before any row is read.",
       "acceptance": [
         "Given two tenants with records, when tenant A lists records, then no tenant B identifier appears.",
         "Given a forged tenant identifier, when it is processed, then it is rejected before any record is returned or changed."
@@ -531,8 +587,8 @@
       "render": "security",
       "title": "Append-only audit trail for privileged actions",
       "statement": "When a privileged or destructive action succeeds or fails, the application shall append an immutable record of actor, action, target, time and outcome that application code cannot update or delete.",
-      "definition": "Privileged changes to {aPrimary} are append-only and attributable to the {secondary} who made them, including the ones made by a support tool.",
-      "failurePath": "A failed privileged action is still recorded, with its failure reason and without sensitive payloads.",
+      "definition": "Privileged changes to {aPrimary} are append-only and attributable to {aPrivilegedActor} who made them, including the ones made by a support tool, and never to the {endUser} whose data changed.",
+      "failurePath": "If the audit record cannot be written, the privileged change fails: an unattributable change to {aPrimary} is never allowed to succeed quietly.",
       "acceptance": [
         "Given a privileged action, when it completes or fails, then exactly one audit record exists and the application user has no update or delete grant on that table."
       ],
@@ -676,6 +732,107 @@
         "Given the same record edited on two devices while offline, when both reconnect, then the documented conflict rule decides the result and the loser is reported, not silently dropped."
       ],
       "verify": "automated"
+    },
+    {
+      "key": "realtime.channel-authorization",
+      "when": {
+        "field": "traits",
+        "includes": "realtime"
+      },
+      "render": "reliability",
+      "title": "Realtime channels are authorized on every subscribe and resume",
+      "statement": "When a client subscribes to or resumes a realtime channel, the application shall re-evaluate the caller's authorization against current data before delivering any event.",
+      "definition": "A {secondary} who loses access loses the live channel within one update, and a channel name is never the credential that grants it.",
+      "failurePath": "If authorization cannot be evaluated (store unavailable, token expired), the subscription is refused and the client is told to re-authenticate rather than silently staying subscribed.",
+      "acceptance": [
+        "Given a subscribed client whose permission is revoked, when the next event is published, then the client is unsubscribed before it receives the payload.",
+        "Given a reconnect with a token that expired while offline, when the channel is resumed, then the resume is refused with a stable code and no queued events are replayed."
+      ],
+      "verify": "automated",
+      "traits": [
+        "realtime"
+      ]
+    },
+    {
+      "key": "realtime.backpressure",
+      "when": {
+        "field": "traits",
+        "includes": "realtime"
+      },
+      "render": "reliability",
+      "title": "Realtime delivery survives a slow consumer and a reconnect",
+      "statement": "When a connected client falls behind or reconnects, the application shall apply a stated backpressure policy and expose a resume point the client can name.",
+      "definition": "Delivery of {primaryPlural} to one slow {secondary} is bounded and observable, and a reconnecting client can tell what it missed instead of assuming it missed nothing.",
+      "failurePath": "When the bounded queue overflows, the connection is closed with an explicit reason and the client is told to resynchronize, rather than dropping events silently.",
+      "acceptance": [
+        "Given a client that stops reading, when the buffer limit is exceeded, then only that connection is closed and other subscribers keep receiving events.",
+        "Given a client that reconnects with its last known cursor, when it resumes, then the events after that cursor are delivered exactly once or replayed from a stated boundary."
+      ],
+      "verify": "automated",
+      "traits": [
+        "realtime"
+      ]
+    },
+    {
+      "key": "notifications.dedupe-and-preferences",
+      "when": {
+        "field": "traits",
+        "includes": "notifications"
+      },
+      "render": "reliability",
+      "title": "Notifications are deduplicated and honour stated preferences",
+      "statement": "When the application dispatches a notification, the dispatcher shall deduplicate by event and recipient, apply the recipient's channel preferences and quiet hours, and record the attempt.",
+      "definition": "One event produces at most one notification about {aPrimary} per {secondary} per channel, and no notification is sent through a channel the recipient has turned off.",
+      "failurePath": "If the provider is unavailable the attempt is retried under the retry policy and, once exhausted, recorded as failed and surfaced — a dropped notification is never silently equal to a sent one.",
+      "acceptance": [
+        "Given the same event delivered twice by an upstream retry, when notifications are dispatched, then the recipient receives one notification.",
+        "Given a recipient who disabled a channel during quiet hours, when an event fires, then nothing is sent on that channel and the suppression is recorded."
+      ],
+      "verify": "automated",
+      "traits": [
+        "notifications"
+      ]
+    },
+    {
+      "key": "search.index-isolation-and-freshness",
+      "when": {
+        "field": "traits",
+        "includes": "search"
+      },
+      "render": "data",
+      "title": "Search results are tenant-filtered, fresh and free of unnecessary personal data",
+      "statement": "When a search query is executed, the search layer shall apply the caller's tenant and visibility filter inside the query rather than after it.",
+      "definition": "A search in {project} can never return another tenant's {primaryPlural}, and an edit to the source record is reflected in results within a stated bound.",
+      "failurePath": "If the index is unavailable or stale beyond its bound, the query fails closed or is served from the authoritative store — it never returns an unfiltered or partial tenant view.",
+      "acceptance": [
+        "Given two tenants with similar records, when tenant A searches a shared term, then only tenant A's records are returned.",
+        "Given a record that was just updated, when it is searched before the index refreshes, then the result reflects the update or the staleness is reported within the documented bound.",
+        "Given a field the result does not render, when documents are indexed, then that field is absent from the index."
+      ],
+      "verify": "automated",
+      "traits": [
+        "search"
+      ]
+    },
+    {
+      "key": "i18n.locale-fallback-and-formatting",
+      "when": {
+        "field": "traits",
+        "includes": "i18n"
+      },
+      "render": "frontend",
+      "title": "Every user-visible string is translatable and formats with the user's locale",
+      "statement": "When the product renders user-visible text, dates, numbers or currency, the rendering layer shall resolve them through the user's locale with a declared fallback chain.",
+      "definition": "Switching locale changes how {primaryPlural} are rendered, in text and in formats, without a code change, and a missing translation falls back deterministically instead of showing a key.",
+      "failurePath": "When a message key is missing in the active locale, the fallback locale is used and the gap is recorded; a raw key is never shown to a {secondary}.",
+      "acceptance": [
+        "Given a locale in which one message is missing, when that screen renders, then the fallback locale's text is shown and the missing key is logged.",
+        "Given a date and an amount, when they are rendered in two locales, then the formatting differs as each locale requires and neither is hard-coded."
+      ],
+      "verify": "automated",
+      "traits": [
+        "i18n"
+      ]
     }
   ]
 }

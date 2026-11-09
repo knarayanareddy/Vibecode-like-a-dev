@@ -9,6 +9,7 @@
     "name": "vibecode-like-a-dev",
     "title": "Vibecode Like A Dev",
     "profile": "profile.json",
+    "packetDir": "specs",
     "kind": "cli",
     "stage": "production",
     "idea": "A deterministic compiler for engineering discipline. A developer who can describe an app in one paragraph, or point at a repository they already have, runs it and gets a specification packet an agent can execute: requirements with acceptance criteria, a computed rigor tier, the gates that define done, and a script that fails CI when the spec and the code stop agreeing. Today those developers paste a prompt into an agent and inherit whatever engineering the model happened to infer, which is why the output rarely survives review, maintenance or a second contributor.",
@@ -16,6 +17,8 @@
       "scale": "small"
     },
     "traits": [],
+    "traitWaivers": [],
+    "regulation": [],
     "risks": {
       "pii": false,
       "payments": false,
@@ -367,6 +370,7 @@
         }
       ],
       "verify": "gate",
+      "traits": [],
       "anchor": null,
       "status": "todo"
     },
@@ -389,6 +393,7 @@
         }
       ],
       "verify": "automated",
+      "traits": [],
       "anchor": "tests/core/core-primary-journey.test.ts",
       "status": "todo"
     },
@@ -407,6 +412,7 @@
         }
       ],
       "verify": "manual",
+      "traits": [],
       "anchor": null,
       "status": "todo"
     },
@@ -425,6 +431,7 @@
         }
       ],
       "verify": "automated",
+      "traits": [],
       "anchor": "tests/api/cli-ergonomics.test.ts",
       "status": "todo"
     },
@@ -447,6 +454,7 @@
         }
       ],
       "verify": "automated",
+      "traits": [],
       "anchor": "tests/core/core-domain-invariants.test.ts",
       "status": "todo"
     },
@@ -465,6 +473,7 @@
         }
       ],
       "verify": "manual",
+      "traits": [],
       "anchor": null,
       "status": "todo"
     }

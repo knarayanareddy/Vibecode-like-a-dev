@@ -118,6 +118,16 @@ If a payload changes, tell the reader what changed rather than quietly regenerat
 - **New risk signal** — give it a weight and a label; the plan prints it.
 - **Raise a line ceiling** — say why in the `policy` field. The ceiling is the project's main defence against becoming the thing it criticises.
 
+Line budgets are split by what a reader loads, not by what the packet stores:
+
+| Budget | Fails verify? | What it measures |
+| --- | --- | --- |
+| `alwaysRead.maxLinesByTier` | yes | The entry point an agent loads before every task (`AGENTS.md`, or `spec.md` in a single-file packet) |
+| `alwaysRead.maxOnDemandDocLines` | yes | Any one area document opened during a task |
+| `maxLinesByTier` | no — warning | The whole stored packet, a review surface |
+
+Sizing the total instead made coverage and reviewability compete: every requirement a gap analysis added counted against the same number, so a more complete packet failed the check that exists to keep it reviewable. A stored overage now names the largest area to split; only the reading budgets refuse a packet.
+
 ## 6. If you change the guard or the emit path
 
 The drift guard exists twice on purpose — `factory/lib/verify.mjs` for `vld verify` and `factory/templates/spec-check.mjs` for the copy shipped inside a packet, which may not import anything from this repository. Use a same-line `@req REQ-<three-or-more digits>` marker in a test; repeat the marker for each additional requirement ID. A preceding-line ID is deliberately not associated with an `@req` marker. `@req-ignore` suppresses every marker on that line. Use `vld verify <packet> --repo . --require-assertions` or the emitted guard’s matching `--require-assertions` flag to reject hollow anchored tests. Any change to anchor scanning, suppression, EARS, assertion, or exit-code behavior must land in both, with a test that would fail if they diverge.

@@ -393,8 +393,19 @@ test('every attestation gate ships a starter template, rejects unfilled placehol
     emitPacket(plan, specsDir, { force: true });
 
     const registry = loadGateRegistry().gates;
-    const attestGates = Object.entries(registry).filter(([, entry]) => entry.check?.kind === 'attest');
+    const planGateIds = new Set((plan.gates ?? []).map((gate) => (typeof gate === 'string' ? gate : gate.id)));
+    const attestGates = Object.entries(registry).filter(([id, entry]) => entry.check?.kind === 'attest' && planGateIds.has(id));
     assert.ok(attestGates.length >= 5, `expected at least 5 attestation gates, got ${attestGates.length}`);
+
+    // Starter templates ship for every attestation gate the runner can score, not
+    // only the selected ones: a registry check kind the runner knows is a document
+    // the packet must be able to provide. Only the selected gates carry a
+    // requirement, so only they are scored.
+    for (const [gateId, entry] of Object.entries(registry)) {
+      if (entry.check?.kind !== 'attest') continue;
+      const templatePath = path.join(specsDir, 'enforcement', 'templates', entry.check.file);
+      assert.ok(existsSync(templatePath), `${gateId}: no starter template emitted at enforcement/templates/${entry.check.file}`);
+    }
 
     const repo = path.join(root, 'repo');
     mkdirSync(repo, { recursive: true });
@@ -552,4 +563,79 @@ test('G3 mutation gate requires independent semantic-oracle evidence for every a
     result = run(p.outDir, ['--repo', repo, '--json']); summary = JSON.parse(result.stdout);
     assert.equal(summary.results.find((entry) => entry.id === 'G3-MUTATION').status, 'pass');
   } finally { p.cleanup(); }
+});
+
+/**
+ * BUG-8: twenty gates failed on day one with no sanctioned way to adopt them
+ * gradually, so the only paths were "delete the runner" or "ignore CI".
+ *
+ * Three behaviours are pinned here: a phase limits which gates block, a baseline
+ * records today's failures with an owner and an expiry, and a gate that was passing
+ * and then broke still fails even while a baseline exists.
+ */
+test('a baseline accepts known failures but never a new one, and expires', (t) => {
+  const p = packet();
+  t.after(p.cleanup);
+  const repo = path.join(p.root, 'app');
+  mkdirSync(repo, { recursive: true });
+
+  // A fresh repository fails almost every gate. That is the day-one wall.
+  const before = run(p.outDir, ['--repo', repo]);
+  assert.equal(before.code, 1);
+  assert.match(before.stdout, /FAIL/);
+
+  // Recording a baseline turns known debt into an accepted state.
+  const recorded = run(p.outDir, ['--repo', repo, '--baseline', '--owner', '@team', '--expires', '2099-01-01']);
+  assert.equal(recorded.code, 0, 'writing the baseline is not itself a failure');
+  const baseline = JSON.parse(readFileSync(path.join(repo, '.vld', 'gates-baseline.json'), 'utf8'));
+  assert.ok(baseline.gates.length > 0);
+  assert.ok(baseline.gates.every((gate) => gate.owner === '@team' && gate.expires === '2099-01-01'));
+
+  const after = run(p.outDir, ['--repo', repo]);
+  assert.equal(after.code, 0, `baselined repo should pass, got: ${after.stdout}`);
+  assert.match(after.stdout, /accepted until 2099-01-01 · owner @team/);
+
+  // Debt that is visible is debt someone pays: an expired waiver fails again.
+  const expired = JSON.parse(readFileSync(path.join(repo, '.vld', 'gates-baseline.json'), 'utf8'));
+  for (const gate of expired.gates) gate.expires = '2020-01-01';
+  writeFileSync(path.join(repo, '.vld', 'gates-baseline.json'), JSON.stringify(expired, null, 2));
+  assert.equal(run(p.outDir, ['--repo', repo]).code, 1, 'an expired waiver must fail');
+});
+
+test('a gate that passed and then broke fails even with a baseline in place', (t) => {
+  const p = packet();
+  t.after(p.cleanup);
+  const repo = path.join(p.root, 'app');
+  mkdirSync(repo, { recursive: true });
+  run(p.outDir, ['--repo', repo, '--baseline', '--owner', '@team', '--expires', '2099-01-01']);
+  assert.equal(run(p.outDir, ['--repo', repo]).code, 0);
+
+  // The secret scan passes on an empty repository, so it is not in the baseline.
+  write(repo, 'src/leak.js', 'const key = "AKIAIOSFODNN7EXAMPLE";\n');
+  const regressed = run(p.outDir, ['--repo', repo]);
+  assert.equal(regressed.code, 1, 'a regression is not covered by the baseline');
+  assert.match(regressed.stdout, /1 fail/);
+});
+
+test('a phase defers later milestones instead of hiding them', (t) => {
+  const p = packet();
+  t.after(p.cleanup);
+  const repo = path.join(p.root, 'app');
+  mkdirSync(repo, { recursive: true });
+
+  const early = run(p.outDir, ['--repo', repo, '--phase', '0']);
+  const late = run(p.outDir, ['--repo', repo]);
+  assert.match(early.stdout, /deferred/);
+  assert.match(early.stdout, /later milestone than phase 0/);
+
+  const count = (stdout, label) => Number(stdout.match(new RegExp(`(\\d+) ${label}`))?.[1] ?? 0);
+  assert.ok(
+    count(early.stdout, 'fail') < count(late.stdout, 'fail'),
+    'a phase must reduce the number of blocking failures'
+  );
+  // Deferred is not vanished: every deferred gate is still reported.
+  assert.equal(
+    count(early.stdout, 'fail') + count(early.stdout, 'deferred'),
+    count(late.stdout, 'fail') + count(late.stdout, 'deferred')
+  );
 });

@@ -47,6 +47,11 @@
         "title": {
           "type": "string"
         },
+        "packetDir": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Directory this packet was generated into; generated commands and handoff instructions name it instead of a hard-coded default."
+        },
         "kind": {
           "enum": [
             "web-app",

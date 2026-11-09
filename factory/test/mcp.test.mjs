@@ -61,7 +61,8 @@ test('compute_rigor returns the tier, the signals and the ceilings', () => {
   assert.equal(result.tier, 3);
   assert.ok(result.signals.length >= 3);
   assert.equal(result.limits.practices, 34);
-  assert.ok(result.limits.markdownLines >= 900);
+  assert.ok(result.limits.storedMarkdownReference >= 900);
+  assert.ok(result.limits.entryPointLines > 0, 'the budget an agent actually reads is reported');
 });
 
 test('select_primitives returns reasons and records what was skipped', () => {
@@ -368,4 +369,43 @@ test('MCP executes advertised required fields exactly and never responds to an i
   const badPrimitive = handleMessage({ jsonrpc: '2.0', id: 24, method: 'tools/call', params: { name: 'get_primitive', arguments: { id: 42 } } });
   assert.equal(badPrimitive.error.code, -32602);
   assert.equal(handleMessage({ jsonrpc: '2.0', method: 'tools/call', params: { name: 'get_gates', arguments: { tier: 0 } } }), null);
+});
+
+/**
+ * BUG-12: `compute_rigor` is documented as the first call an agent should make,
+ * and the tier never reads the idea. Requiring it produced a validation error on
+ * the prescribed first call, so the tool now accepts the fields it actually uses.
+ * Any tool whose output quotes the idea must still refuse a placeholder.
+ */
+test('compute_rigor does not demand the idea it does not use', () => {
+  const withoutIdea = handleMessage({
+    jsonrpc: '2.0',
+    id: 30,
+    method: 'tools/call',
+    params: { name: 'compute_rigor', arguments: { kind: 'web-app', stage: 'production', traits: ['auth'], risks: { pii: true } } }
+  });
+  assert.equal(withoutIdea.result.isError, false, 'compute_rigor must not reject a call without an idea');
+  assert.equal(JSON.parse(withoutIdea.result.content[0].text).tier, 1);
+
+  const schema = TOOLS.find((tool) => tool.name === 'compute_rigor').inputSchema;
+  assert.deepEqual(schema.required, ['kind', 'stage']);
+
+  // The placeholder must not leak into the one tool that echoes the profile back.
+  const planWithoutIdea = handleMessage({
+    jsonrpc: '2.0',
+    id: 31,
+    method: 'tools/call',
+    params: { name: 'plan_project', arguments: { kind: 'web-app', stage: 'production' } }
+  });
+  assert.equal(planWithoutIdea.result.isError, true);
+  assert.match(planWithoutIdea.result.content[0].text, /idea: required/);
+
+  // Tools whose output is a pure function of the non-idea fields stay callable.
+  const selectWithoutIdea = handleMessage({
+    jsonrpc: '2.0',
+    id: 32,
+    method: 'tools/call',
+    params: { name: 'select_primitives', arguments: { kind: 'web-app', stage: 'production' } }
+  });
+  assert.equal(selectWithoutIdea.result.isError, false);
 });

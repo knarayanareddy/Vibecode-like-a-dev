@@ -267,6 +267,31 @@ function assignRequirementIds(chosen, previousIds = {}) {
   return ids;
 }
 
+/**
+ * The declared traits a catalog entry discharges.
+ *
+ * An explicit `traits` list wins. Entries that predate the field are read from
+ * their own selection predicate: a `traits includes "auth"` predicate *is* a trait
+ * obligation, whether or not someone wrote it down twice. Without this fallback
+ * the catalog's older entries look uncovered and `verify` fails honest profiles.
+ */
+export function requirementTraitsFor(requirement) {
+  if (Array.isArray(requirement?.traits) && requirement.traits.length > 0) {
+    return [...new Set(requirement.traits)].sort();
+  }
+  const found = new Set();
+  const walk = (node) => {
+    if (!node || typeof node !== 'object') return;
+    if (node.field === 'traits' && typeof node.includes === 'string') found.add(node.includes);
+    for (const value of Object.values(node)) {
+      if (Array.isArray(value)) value.forEach(walk);
+      else if (value && typeof value === 'object') walk(value);
+    }
+  };
+  walk(requirement?.when);
+  return [...found].sort();
+}
+
 export function selectRequirements(profile, catalog, rigor, previousIds = {}) {
   const context = { ...profile, tier: rigor.tier };
   const chosen = catalog.requirements.filter((requirement) => evaluate(requirement.when, context));
@@ -291,6 +316,10 @@ export function selectRequirements(profile, catalog, rigor, previousIds = {}) {
       text
     })),
     verify: requirement.verify,
+    // Which declared traits this obligation discharges. Carried through the planner
+    // so the manifest can prove coverage; `verify` fails a profile whose trait has
+    // no requirement behind it.
+    traits: requirementTraitsFor(requirement),
     why: explain(requirement.when)
   }));
 

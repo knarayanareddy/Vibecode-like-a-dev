@@ -1,0 +1,54 @@
+{
+  "id": "pci-dss",
+  "layer": "domain",
+  "title": "PCI-DSS cardholder data scope",
+  "why": "Card data changes the architecture, not just the rigor: the cheapest compliant design is one where the card number never reaches the application at all. That decision belongs in the packet, before a form is built.",
+  "addRequirements": [
+    {
+      "key": "payments.card-data-out-of-scope",
+      "title": "Card data never reaches application storage",
+      "area": "data",
+      "statement": "The application shall keep every full card number and security code outside its own storage, logs and request bodies by using provider-hosted fields or tokens.",
+      "definition": "Scope stays small because the card number is never available to the {secondary}'s own servers.",
+      "failurePath": "If a request carries a card-shaped value, it is rejected and logged as a redaction event, not stored.",
+      "acceptance": [
+        "Given a request body containing a 16-digit card number, when it is processed, then it is refused and the value is absent from logs.",
+        "Given the storage schema, when it is inspected, then it contains no field that holds a full card number or a security code."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "payments.tokenization",
+      "title": "Tokens are the only reference to a payment instrument",
+      "area": "api",
+      "statement": "When the application refers to a payment method, the application shall use a provider-issued token bound to one customer and one tenant.",
+      "definition": "A leaked token cannot be moved to another customer or tenant without the provider rejecting it.",
+      "failurePath": "If a token belongs to another tenant, the operation is refused and reported rather than attempted.",
+      "acceptance": [
+        "Given a token issued for tenant A, when tenant B presents it, then the operation is refused.",
+        "Given a stored reference, when it is read, then it is a token, never a card fragment."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "security.change-review-separation",
+      "title": "Production changes require separation of duties",
+      "area": "security",
+      "statement": "The build pipeline shall refuse a production-affecting change whose approver is also its author.",
+      "definition": "No single identity can move unreviewed code into the environment that touches money.",
+      "failurePath": "If the approval record is missing, the change is refused rather than treated as implicitly approved.",
+      "acceptance": [
+        "Given a change approved by its author, when CI evaluates it, then it is refused.",
+        "Given an approved change, when the record is read, then it names the reviewer and the revision."
+      ],
+      "verify": "automated"
+    }
+  ],
+  "addGates": [
+    {
+      "id": "G3-CARD-SCOPE",
+      "tier": 3,
+      "statement": "No request body, schema field or log line can hold a full card number, proven by a test."
+    }
+  ]
+}

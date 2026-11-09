@@ -158,15 +158,96 @@ export function verifyPacket(packetDir, { repo = null, strict = false, requireAs
   for (const file of new Set(markdown)) {
     lines += readFileSync(path.join(packetDir, file), 'utf8').split('\n').length;
   }
+  // 2b. trait coverage — every declared trait must change the packet.
+  //
+  // A trait is a promise that the compiler knows something about the product.
+  // Four of thirteen traits had no catalog template at all, so declaring
+  // `realtime` raised the tier and added nothing to build. Coverage is checked
+  // against the manifest, which now records the traits each requirement
+  // satisfies, so the check cannot be satisfied by prose.
+  const requirementTraits = new Set();
+  for (const requirement of spec.requirements ?? []) {
+    for (const trait of requirement.traits ?? []) requirementTraits.add(trait);
+  }
+  const declaredTraits = Array.isArray(spec.project?.traits) ? spec.project.traits : [];
+  const waivers = Array.isArray(spec.project?.traitWaivers) ? spec.project.traitWaivers : [];
+  const waived = new Set(waivers.map((entry) => (typeof entry === 'string' ? entry : entry?.trait)).filter(Boolean));
+  const uncovered = declaredTraits.filter((trait) => !requirementTraits.has(trait) && !waived.has(trait));
+  for (const trait of uncovered) {
+    errors.push(`trait ${trait} has no requirement. Declare an overlay, add a catalog template, or record a dated waiver in the profile (traitWaivers).`);
+  }
+  if (declaredTraits.length > 0 && uncovered.length === 0) {
+    passes.push(`all ${declaredTraits.length} declared trait(s) are covered by a requirement${waived.size ? ` (${waived.size} waived)` : ''}`);
+  }
+
+  // 2c. budgets split by what a reader loads (BUG-7).
+  //
+  // The old ceiling was a single total over every stored document, so every extra
+  // requirement competed with the same number and closing a coverage gap pushed the
+  // packet over budget. But an agent never reads the whole packet: it loads
+  // AGENTS.md before a task and one area document during it. So the entry point is
+  // a hard ceiling, each on-demand document has a ceiling of its own, and the
+  // stored total is reported as a warning that names where to split.
   const tierForBudget = spec.rigor?.tier ?? 0;
   const budget = policy.budgets.maxLinesByTier[String(tierForBudget)] ?? policy.budgets.maxLinesByTier['3'];
-  info.push(`packet size: ${lines} lines (tier ${tierForBudget} ceiling ${budget})`);
-  if (lines > budget) {
+  const always = policy.budgets.alwaysRead ?? {};
+  const entryFile = packetType === 'single-file' ? 'spec.md' : 'AGENTS.md';
+  const entryLines = existsSync(path.join(packetDir, entryFile))
+    ? readFileSync(path.join(packetDir, entryFile), 'utf8').split('\n').length
+    : 0;
+  // In a single-file packet there is no area document to move detail into: spec.md
+  // is what the agent reads and what the packet stores, so the two budgets are the
+  // same file and the stored reference is the binding one.
+  const entryBudget = packetType === 'single-file'
+    ? budget
+    : (always.maxLinesByTier?.[String(tierForBudget)] ?? budget);
+  info.push(`entry point: ${entryLines} lines of ${entryBudget} (${entryFile}, tier ${tierForBudget})`);
+  if (entryLines > entryBudget) {
     errors.push(
-      `packet is ${lines} lines, over the ${budget}-line budget. Demote primitives by priority instead of trimming their content, or raise the budget in factory/policy.json with a reason.`
+      `${entryFile} is ${entryLines} lines, over the ${entryBudget}-line always-read budget for tier ${tierForBudget}. An agent loads this before every task: move detail into an area document instead of growing the entry point.`
     );
   } else {
-    passes.push(`packet fits its ${budget}-line budget (${lines} lines)`);
+    passes.push(`${entryFile} fits its ${entryBudget}-line always-read budget (${entryLines} lines)`);
+  }
+
+  const onDemandCap = always.maxOnDemandDocLines;
+  const areaDocs = new Map();
+  for (const file of new Set(markdown)) {
+    if (file === entryFile) continue;
+    const size = readFileSync(path.join(packetDir, file), 'utf8').split('\n').length;
+    areaDocs.set(file, size);
+  }
+  if (typeof onDemandCap === 'number') {
+    const oversized = [...areaDocs].filter(([, size]) => size > onDemandCap);
+    for (const [file, size] of oversized) {
+      errors.push(`${file} is ${size} lines, over the ${onDemandCap}-line ceiling for a single on-demand document. Split it by area rather than storing one document nobody finishes.`);
+    }
+    if (areaDocs.size > 0 && oversized.length === 0) {
+      const largest = [...areaDocs].reduce((a, b) => (b[1] > a[1] ? b : a));
+      passes.push(`every on-demand document is under ${onDemandCap} lines (largest: ${largest[0]} at ${largest[1]})`);
+    }
+  }
+
+  // Token cost, not just lines: an agent pays for tokens, and the same paragraph is
+  // 200 tokens or 400 depending on how much structure surrounds it. Roughly four
+  // characters per token is the usual English estimate; it is reported as an
+  // estimate so nobody quotes it as a measurement.
+  const readFiles = [entryFile, ...areaDocs.keys()];
+  const readChars = readFiles.reduce((total, file) => {
+    const target = path.join(packetDir, file);
+    return existsSync(target) ? total + readFileSync(target, 'utf8').length : total;
+  }, 0);
+  info.push(`reading cost: ~${Math.round(readChars / 4).toLocaleString('en-US')} tokens for the entry point plus every area document`);
+
+  info.push(`packet size: ${lines} lines stored (tier ${tierForBudget} reference ${budget})`);
+  if (lines > budget) {
+    // Stored size is a review surface, not a reading surface: an author can split
+    // it, but no requirement may be dropped to satisfy a number.
+    warnings.push(
+      `packet stores ${lines} lines, over the tier ${tierForBudget} reference of ${budget}. Nothing an agent reads is over budget; split the largest area (${[...areaDocs].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'none'}) into one document per area, or raise factory/policy.json budgets.maxLinesByTier with a reason.`
+    );
+  } else {
+    passes.push(`packet fits its tier ${tierForBudget} stored reference (${lines} of ${budget} lines)`);
   }
 
   // 3. rigor and gates
@@ -245,6 +326,43 @@ export function verifyPacket(packetDir, { repo = null, strict = false, requireAs
     if (requirement.verify === 'automated' && !requirement.anchor) {
       errors.push(`${requirement.id}: automated requirement needs an anchor path`);
     }
+  }
+
+  // 3b. the idea against the requirements it selected.
+  //
+  // The packet shipped two contradictory rules and verify reported zero warnings:
+  // the idea said a deleted clinic "must be recoverable for 30 days", while the
+  // selected data-lifecycle requirement said deletion removes every copy "in one
+  // operation". Nothing compared the two, so the agent would implement one and
+  // fail the other.
+  const idea = String(spec.project?.idea ?? '');
+  const requirementText = (spec.requirements ?? [])
+    .map((requirement) => `${requirement.id} ${requirement.statement ?? ''} ${requirement.title ?? ''}`)
+    .join(' ');
+  const CONFLICTS = [
+    {
+      idea: /(recover|restor|undo|grace|soft.?delete|30[ -]day)/i,
+      requirement: /remove every field|in one operation|immediately and permanently/i,
+      explain: 'the idea asks for a recoverable deletion but the selected deletion requirement erases in one operation',
+      remedy: 'select the deletion-with-grace variant (the idea wording does this automatically), or record the erasure decision as a non-goal'
+    },
+    {
+      idea: /(never (?:upload|store|send)[^.]{0,40}outside|stays? on[- ]device|local[- ]only)/i,
+      requirement: /(upload|send|transmit)[^.]{0,40}(server|cloud|third[- ]party)/i,
+      explain: 'the idea says data never leaves the device but a selected requirement transmits it',
+      remedy: 'state which data crosses the boundary, or drop the requirement'
+    }
+  ];
+  for (const conflict of CONFLICTS) {
+    const ideaMatches = idea.match(conflict.idea);
+    if (!ideaMatches) continue;
+    const offending = (spec.requirements ?? []).filter((requirement) =>
+      conflict.requirement.test(`${requirement.statement ?? ''} ${requirement.title ?? ''}`)
+    );
+    if (offending.length === 0) continue;
+    const detail = `${offending.map((requirement) => requirement.id).join(', ')}: ${conflict.explain}`;
+    if (strict) errors.push(`--strict: idea and requirement contradict (${detail}). ${conflict.remedy}.`);
+    else warnings.push(`idea and requirement may contradict (${detail}). ${conflict.remedy}.`);
   }
 
   const byPattern = new Map();
@@ -329,11 +447,20 @@ export function verifyPacket(packetDir, { repo = null, strict = false, requireAs
     const { anchors, hollow, scanned, suppressed } = scanAnchors(repo, { exclude: spec.anchors?.exclude ?? [] });
     anchorStats = { scanned, anchored: anchors.size, suppressed };
     if (suppressed > 0) info.push(`${suppressed} anchor(s) ignored by @req-ignore or anchors.exclude`);
+    // BLK-2: a hollow test that backs a requirement marked *done* is an error, not a
+    // notice. The packet says the requirement is proven; the file proves nothing.
+    // This must match the shipped checker, or the two disagree about the same file.
+    const doneIds = new Set(
+      requirements
+        .filter((requirement) => String(requirement.status ?? '').toLowerCase() === 'done')
+        .map((requirement) => requirement.id)
+    );
     for (const entry of hollow) {
       const ids = entry.ids.filter((id) => known.has(id));
       if (ids.length === 0) continue;
       const message = `${entry.file} carries @req anchor(s) (${ids.join(', ')}) with no visible assertion`;
-      if (requireAssertions) errors.push(message);
+      const claimed = ids.some((id) => doneIds.has(id));
+      if (requireAssertions || claimed) errors.push(message);
       else warnings.push(`${message} (pass --require-assertions to fail on hollow tests)`);
     }
 

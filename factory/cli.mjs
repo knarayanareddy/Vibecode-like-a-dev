@@ -10,8 +10,29 @@
  *   vld module|bundle|agent|workflow manage opt-in delivery extensions
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+
+/**
+ * `engines` is advisory: npm warns and nothing enforces it, which made the
+ * documented "Node 22 or newer" a claim rather than a check. This has to run
+ * before the rest of the CLI loads: ESM hoists every import, so a guard placed
+ * after them would only execute once Node had already parsed (and possibly
+ * rejected) modules that assume the newer runtime.
+ *
+ * Deliberately written in the oldest common syntax: if Node is too old to parse
+ * this file at all, the failure belongs to Node, not to a product message.
+ */
+export const MINIMUM_NODE_MAJOR = 22;
+const NODE_MAJOR = Number(process.versions.node.split('.')[0]);
+if (Number.isFinite(NODE_MAJOR) && NODE_MAJOR < MINIMUM_NODE_MAJOR) {
+  process.stderr.write(
+    `\n✗ vld requires Node ${MINIMUM_NODE_MAJOR} or newer; this is ${process.versions.node}.\n` +
+      '  Install a supported release (https://nodejs.org) or run through npx with one.\n\n'
+  );
+  process.exit(2);
+}
+
 import { adoptRepo, isRemoteRepo, writeAdoptedProfile } from './lib/adopt.mjs';
 import { artifactStatus, initArtifact, listArtifacts, validateArtifact, verifyArtifacts } from './lib/artifacts.mjs';
 import { agentStatus, installAgent, listAdapters } from './lib/agents.mjs';
@@ -32,7 +53,7 @@ import { approveRuntimeDeliveryCandidate, queueRuntimeDeliveryCandidate, runtime
 import { createRuntimeServer, listenRuntimeServer } from './lib/runtime-server.mjs';
 import { createRuntimeClient } from './lib/runtime-client.mjs';
 import { buildPlan, loadPolicy } from './lib/planner.mjs';
-import { loadProfile, KINDS, STAGES, SCALES, TRAITS, RISK_FLAGS } from './lib/profile.mjs';
+import { injectionFindings, loadProfile, KINDS, STAGES, SCALES, TRAITS, RISK_FLAGS } from './lib/profile.mjs';
 import { completeWorkflowStep, getWorkflow, listWorkflows, runWorkflow, workflowStatus } from './lib/workflows.mjs';
 import { verifyPacket } from './lib/verify.mjs';
 import { writeAbsoluteManagedFileAtomic } from './lib/extension-utils.mjs';
@@ -43,8 +64,9 @@ import { PACKAGE_VERSION } from './lib/version.mjs';
 const VERSION = PACKAGE_VERSION;
 
 const argv = process.argv.slice(2);
-const command = argv[0];
-const rest = argv.slice(1);
+// `vld experimental <command>` rewrites these before dispatch (BUG-9).
+let command = argv[0];
+let rest = argv.slice(1);
 
 const hasFlag = (name) => rest.includes(name);
 const option = (name, fallback) => {
@@ -53,8 +75,8 @@ const option = (name, fallback) => {
 };
 const VALUE_FLAGS = new Set([
   '-o', '--out', '--repo', '--name', '--idea', '--profile', '--packet',
-  '--project', '--modules', '--evidence', '--file', '--ref', '--title', '--from-store', '--types', '--acknowledge', '--target',
-  '--assignee', '--lease-ms', '--run', '--lease-token', '--to', '--actor', '--expected-version', '--port', '--token', '--policy', '--sha', '--adapter-run', '--candidate', '--reason', '--repository', '--head-ref', '--base-ref', '--checks', '--id', '--runtime-url', '--runtime-token', '--request-id', '--after', '--limit', '--max-bytes'
+  '--project', '--modules', '--evidence', '--file', '--ref', '--title', '--from-store', '--types', '--acknowledge', '--target', '--packet-dir',
+  '--assignee', '--lease-ms', '--run', '--lease-token', '--to', '--actor', '--expected-version', '--port', '--token', '--policy', '--sha', '--adapter-run', '--candidate', '--reason', '--repository', '--head-ref', '--base-ref', '--checks', '--id', '--runtime-url', '--runtime-token', '--request-id', '--after', '--limit', '--max-bytes', '--node', '--owner', '--expires'
 ]);
 const positional = rest.filter((item, index) => !item.startsWith('-') && !(index > 0 && VALUE_FLAGS.has(rest[index - 1])));
 
@@ -65,8 +87,12 @@ Usage
   vld adopt <repo-or-url> [-o <file>] [--name <slug>] [--idea <text>] [--force] [--json]
                                      infer a profile from a local path or Git repository URL
   vld plan <profile.json> [--json] [--strict]   show selection and reasoning, write nothing; --strict refuses an adopted TODO idea
-  vld compile <profile.json> -o <dir> [--force] [--strict]
+  vld compile <profile.json> -o <dir> [--force] [--strict] [--packet-dir <label>] [--lean]
+                                     --packet-dir overrides the directory name embedded in generated commands
+                                     --lean emits AGENTS.md and spec.json only, for a token-budgeted reader
                                      render the specification packet
+  vld ci init [--project <dir>] [--packet <dir>] [--node <version>] [--force]
+                                     write the required pull-request check that runs the packet's enforcement
   vld verify <packet-dir> [--repo <path>] [--strict] [--require-assertions] [--json]
                                      check a packet, optionally against code; --require-assertions rejects hollow anchored tests
   vld change <packet-dir> <change.json> -o <dir> [--apply] [--force] [--json]
@@ -185,7 +211,7 @@ function fail(message, error = null) {
 // A misspelled option used to be silently ignored because every command read the
 // shared argv array opportunistically. Reject it before a command can perform a
 // side effect; command-specific arity is checked by the command handlers below.
-const BOOLEAN_FLAGS = new Set(['--apply', '--check', '--debug', '--discard', '--dry-run', '--execute', '--force', '--json', '--require-assertions', '--reset', '--strict', '--help', '-h']);
+const BOOLEAN_FLAGS = new Set(['--apply', '--check', '--debug', '--discard', '--dry-run', '--execute', '--force', '--json', '--require-assertions', '--reset', '--strict', '--lean', '--help', '-h']);
 function validateCliTokens() {
   const seen = new Set();
   const canonical = (flag) => flag === '-o' ? '--out' : flag;
@@ -221,8 +247,9 @@ const TOP_LEVEL_FLAGS = {
   init: new Set(),
   adopt: new Set(['-o', '--out', '--name', '--idea', '--force', '--json']),
   plan: new Set(['--json', '--strict']),
-  compile: new Set(['-o', '--out', '--force', '--strict']),
+  compile: new Set(['-o', '--out', '--force', '--strict', '--packet-dir', '--lean']),
   verify: new Set(['--repo', '--strict', '--require-assertions', '--json']),
+  ci: new Set(['--project', '--packet', '--node', '--force']),
   index: new Set(['--check']),
   mcp: new Set()
 };
@@ -462,10 +489,37 @@ function enforceAdoptedIdea(plan) {
   return warning;
 }
 
+/**
+ * The warning that would have prevented BLK-1.
+ *
+ * `risks.regulated: true` raises the tier and, on its own, adds no obligation.
+ * Naming the regime is what adds HIPAA/GDPR/PCI content, so an unnamed regime is
+ * reported at plan time rather than discovered as a gap in the packet.
+ */
+function regulatedWithoutRegime(plan) {
+  const { risks, regulation } = plan.profile;
+  if (risks?.regulated !== true || (regulation ?? []).length > 0) return null;
+  return 'risks.regulated is true but profile.regulation is empty: the tier rises, but no regime-specific obligation is added. Name the regime (hipaa, gdpr, pci-dss, soc2) so its overlay applies.';
+}
+
+/**
+ * The idea is quoted to an agent that will act on what it reads. Say so, and in
+ * strict mode refuse to compile text that tries to give that agent orders.
+ */
+function injectionWarning(plan) {
+  const findings = injectionFindings(plan.profile);
+  if (findings.length === 0) return [];
+  if (hasFlag('--strict')) {
+    fail(`the profile's text looks like instructions, not a product description:\n  - ${findings.join('\n  - ')}`);
+  }
+  return findings.map((finding) => `untrusted idea text: ${finding} It is quoted as data in the packet; remove it if it was not meant literally.`);
+}
+
 function runPlan(profilePath) {
   requirePositionals('vld plan <profile.json>', { min: 1 });
   const plan = loadPlanOrFail(profilePath);
-  const warning = enforceAdoptedIdea(plan);
+  const warnings = [enforceAdoptedIdea(plan), regulatedWithoutRegime(plan), ...injectionWarning(plan)].filter(Boolean);
+  const warning = warnings.length > 0 ? warnings.join('\n⚠ ') : null;
   if (hasFlag('--json')) {
     console.log(JSON.stringify(warning ? { ...plan, warnings: [...(plan.warnings ?? []), warning] } : plan, null, 2));
     return;
@@ -479,12 +533,12 @@ function runCompile(profilePath) {
   const out = option('-o', option('--out', null));
   if (!out) fail('Missing output directory. Usage: vld compile <profile.json> -o <dir>');
   const plan = loadPlanOrFail(profilePath, { previousIds: previousRequirementIds(out) });
-  const adoptedWarning = enforceAdoptedIdea(plan);
-  if (adoptedWarning) console.error(`\n! ${adoptedWarning}\n`);
+  const compileWarnings = [enforceAdoptedIdea(plan), regulatedWithoutRegime(plan), ...injectionWarning(plan)].filter(Boolean);
+  if (compileWarnings.length > 0) console.error(`\n! ${compileWarnings.join('\n! ')}\n`);
 
   let result;
   try {
-    result = emitPacket(plan, out, { force: hasFlag('--force') });
+    result = emitPacket(plan, out, { force: hasFlag('--force'), packetDir: option('--packet-dir', undefined), lean: hasFlag('--lean') });
   } catch (error) {
     if (error.code === 'OUTPUT_NOT_EMPTY' || error.code === 'OUTPUT_NOT_DIRECTORY') fail(error.message);
     throw error;
@@ -524,6 +578,85 @@ Next
   2. Hand ${entry}/ to your agent, starting at AGENTS.md.
   3. Wire the drift guard: node ${entry}/spec-check.mjs --repo .
   4. Check the gates: node ${entry}/enforcement/gates.mjs --repo .
+`);
+}
+
+/**
+ * BLK-4: enforcement lived in a script the agent had to choose to run, so nothing
+ * outside the agent loop could fail a build. `vld ci init` writes the one thing that
+ * fails regardless of agent behaviour: a required pull-request check.
+ *
+ * It writes real files into the product repository, so it never overwrites: a
+ * workflow the team has already edited is theirs.
+ */
+function runCi() {
+  // `command` is `ci`, so positional holds only the subcommand (`init`).
+  const action = positional[0];
+  if (action !== 'init') fail('Usage: vld ci init [--project <dir>] [--packet <dir>] [--node <version>] [--force]');
+
+  const project = path.resolve(option('--project', process.cwd()));
+  const rawPacket = option('--packet', 'specs');
+  const packet = path.posix.normalize(rawPacket.split(path.sep).join('/')).replace(/\/+$/, '');
+  const nodeVersion = option('--node', '22');
+  if (packet.startsWith('..') || path.isAbsolute(packet)) {
+    fail('--packet must be a directory inside the repository, because the workflow runs relative to it');
+  }
+  if (!existsSync(path.join(project, packet, 'spec-check.mjs'))) {
+    fail(`no packet at ${path.join(packet, 'spec-check.mjs')}. Compile one first: vld compile profile.json -o ${packet}`);
+  }
+
+  const workflow = `# Required check: the specification and the code cannot drift apart silently.
+# Written by \`vld ci init\`. Edit it; it is yours now.
+name: spec
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  spec:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '${nodeVersion}'
+      # --strict: a requirement marked done must keep its test; nothing ships unfinished.
+      # --require-assertions: an anchored test must contain an assertion that can fail.
+      - name: Anchors and drift
+        run: node ${packet}/spec-check.mjs --repo . --strict --require-assertions
+      # If your tests emit a TAP, vitest or JUnit report, pass it here so "done"
+      # means a named test passed in this run, not that someone typed done:
+      #   node ${packet}/spec-check.mjs --repo . --strict --report test-report.json
+      # --json + the summary step below turn the gate table into something a
+      # non-developer can read on the pull request.
+      - name: Gates
+        id: gates
+        run: node ${packet}/enforcement/gates.mjs --repo . --json > gates-report.json || (cat gates-report.json; exit 1)
+      - name: Gate summary
+        if: always()
+        run: node ${packet}/enforcement/summary.mjs gates-report.json >> $GITHUB_STEP_SUMMARY || true
+`;
+
+  const target = path.join(project, '.github', 'workflows', 'spec.yml');
+  const force = hasFlag('--force');
+  if (existsSync(target) && !force) {
+    fail(`${path.relative(process.cwd(), target)} already exists; pass --force to replace it`);
+  }
+  mkdirSync(path.dirname(target), { recursive: true });
+  writeFileSync(target, workflow);
+
+  console.log(`
+✓ wrote ${path.relative(process.cwd(), target)}
+
+On the next pull request the \`spec\` check fails when a done requirement loses its
+test, an anchor names a requirement that does not exist, or a gate regresses. That
+happens whether or not an agent chose to run anything.
+
+  vld ci init --packet <dir>     point at a packet that is not ${packet}
 `);
 }
 
@@ -1631,6 +1764,46 @@ function runIndex() {
   );
 }
 
+// BUG-9: the deterministic compiler and the agent runtime became one package with
+// one `vld` prefix, so the unconfined host-process runner reads as a supported part
+// of the promise. They are separated here: `vld experimental <command>` is the only
+// way to reach the runtime family, the word appears in every error and in --help,
+// and `vld --core` never loads those modules at all.
+const EXPERIMENTAL = new Set(['runtime', 'workspace', 'mission', 'workflow', 'agent', 'studio']);
+function experimentalGate() {
+  if (command === 'experimental') {
+    const requested = rest.find((item) => !item.startsWith('-'));
+    if (!requested) fail('Usage: vld experimental <runtime|workspace|mission|workflow|agent|studio> … — see docs/EXPERIMENTAL.md');
+    if (!EXPERIMENTAL.has(requested)) {
+      fail(`"${requested}" is not an experimental runtime command. One of: ${[...EXPERIMENTAL].join(', ')}.`);
+    }
+    // Re-dispatch: drop the word so the existing handlers see their own argv.
+    argv.splice(argv.indexOf('experimental'), 1);
+    command = argv[0];
+    rest = argv.slice(1);
+    // `positional` was derived from the original argv; recompute it the same way.
+    positional.length = 0;
+    rest.forEach((item, index) => {
+      if (!item.startsWith('-') && !(index > 0 && VALUE_FLAGS.has(rest[index - 1]))) positional.push(item);
+    });
+    return;
+  }
+  if (!EXPERIMENTAL.has(command)) return;
+  // The bare spelling still works: it is in the published CLI contract and a hard
+  // rename would break every script and test that calls it. What changes is that the
+  // boundary is now visible — the command says which part of the tool it belongs to
+  // and that part is not the compiler's promise. Silence is what let a 3.7k-line
+  // host-process runner read as supported.
+  if (!hasFlag('--json')) {
+    console.error(
+      `note: \`vld ${command}\` is the experimental runtime, not the compiler. ` +
+        'It starts unconfined same-user processes; see docs/EXPERIMENTAL.md. ' +
+        `Prefer \`vld experimental ${argv.join(' ')} …\`.`
+    );
+  }
+}
+
+experimentalGate();
 validateCliTokens();
 validateTopLevelFlags();
 
@@ -1694,6 +1867,9 @@ switch (command) {
     break;
   case 'verify':
     runVerify(positional[0]);
+    break;
+  case 'ci':
+    runCi();
     break;
   case 'index':
     runIndex();

@@ -1,0 +1,102 @@
+{
+  "id": "hipaa",
+  "layer": "domain",
+  "title": "HIPAA security and privacy rule",
+  "why": "Health data in the United States carries obligations that are not derivable from the product's own rules: the medium, the minimum-necessary test, break-glass access, a six-year audit retention and a named business associate. The catalog's retention rule covers deletion of a record, not the legal basis for holding it or the evidence that access was legitimate.",
+  "addRequirements": [
+    {
+      "key": "data.phi-encryption",
+      "title": "PHI is encrypted at rest and in transit",
+      "area": "data",
+      "statement": "When protected health information is stored, transmitted or backed up, the application shall encrypt it in transit and at rest with a configured key that is rotatable without a rewrite.",
+      "definition": "A {primary} record that contains PHI is unreadable without the key, on every path it travels, including backups and the export path.",
+      "failurePath": "If the key is missing or rotation fails, the application refuses the operation rather than writing plaintext as a fallback.",
+      "acceptance": [
+        "Given a stored PHI record, when the underlying storage is read directly, then no field of it is readable plaintext.",
+        "Given any request that logs or raises an error while handling PHI, when the log and the message are inspected, then neither contains a PHI value.",
+        "Given a backup and a restore, when the backup medium is examined, then it is encrypted with the same key policy as primary storage."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "data.minimum-necessary",
+      "title": "Access to PHI is limited to the minimum necessary",
+      "area": "security",
+      "statement": "When a {secondary} reads protected health information, the application shall return only the fields the caller's declared role and workflow require.",
+      "definition": "A role that needs a name and an appointment time cannot read a diagnosis through the same endpoint, even though the database holds both.",
+      "failurePath": "If the required-field set for a role is not declared, the request is refused rather than defaulting to every field.",
+      "acceptance": [
+        "Given two roles with different declared field sets, when each reads the same record, then each response contains only its own fields.",
+        "Given a request that names extra fields, when it is processed, then the extra fields are dropped server-side rather than trusted.",
+        "Given a disclosure, when the access log is read, then it names the fields returned."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "security.break-glass-access",
+      "title": "Emergency access is possible, exceptional and reviewed",
+      "area": "security",
+      "statement": "When a {secondary} needs access outside their normal permissions in an emergency, the application shall require an explicit break-glass action with a stated reason, grant it for a bounded time, and surface it to a reviewer within one day.",
+      "definition": "The product can be used in an emergency without weakening the default path: the exception is logged, time-boxed and visible.",
+      "failurePath": "If the review queue is unavailable, the break-glass grant still expires on time; an unreviewed exception is never equivalent to an approved one.",
+      "acceptance": [
+        "Given a normal user, when they attempt a break-glass read, then they must supply a reason and the grant is time-boxed.",
+        "Given an expired break-glass grant, when the same user retries, then access is refused without a new reason.",
+        "Given a break-glass event, when the review report runs, then the event appears with actor, reason, target and duration."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "delivery.audit-retention",
+      "title": "Audit records are retained for six years and cannot be edited",
+      "area": "reliability",
+      "statement": "The application shall retain every access and change record for protected health information for at least six years in storage that rejects update and delete.",
+      "definition": "An audit entry written today is still readable, and still attributable, six years from now.",
+      "failurePath": "If audit storage rejects a write, the operation it describes fails: an unaudited change to PHI is never allowed to succeed quietly.",
+      "acceptance": [
+        "Given a PHI change, when the audit sink is unavailable, then the change is refused and the failure is reported.",
+        "Given an audit record, when the application is offered an update or delete, then the storage rejects it.",
+        "Given any PHI access older than the retention policy allows to expire, when retention is evaluated, then the record is kept."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "integration.business-associate",
+      "title": "Every business associate is inventoried and contracted",
+      "area": "core",
+      "statement": "The application shall name every third party that can receive protected health information, record the agreement that permits it, and refuse to send PHI to a party with no recorded agreement.",
+      "definition": "The list of parties who can see PHI is written down, current, and enforced by configuration rather than by memory.",
+      "failurePath": "If a vendor is added to the configuration without a recorded agreement, the send is refused at runtime rather than discovered in an audit.",
+      "acceptance": [
+        "Given a configured destination with no recorded agreement, when PHI would be sent to it, then the send is refused and logged.",
+        "Given the inventory, when a new integration is added, then the build fails until the agreement record is present."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "delivery.breach-notification-runbook",
+      "title": "A breach has a runbook with an owner and a clock",
+      "area": "reliability",
+      "statement": "The repository shall contain a breach-notification runbook that names an owner, the detection signals, the decision log and the notification deadlines that apply.",
+      "definition": "A person discovering a suspected breach has a document that tells them who to call next and by when, and someone has already walked through it.",
+      "failurePath": "A runbook naming no owner, no deadline or no decision record is treated as missing, not as present.",
+      "acceptance": [
+        "Given the runbook, when a reviewer reads it, then it names an owner, the notification deadlines and where the decision log lives.",
+        "Given a drill, when it is executed, then it produces a timestamped record of each step and who performed it."
+      ],
+      "verify": "automated"
+    }
+  ],
+  "addGates": [
+    {
+      "id": "G3-PHI-ENCRYPT",
+      "tier": 3,
+      "statement": "A PHI field is unreadable in raw storage and in logs, proven by a test."
+    },
+    {
+      "id": "G3-AUDIT-RETENTION",
+      "tier": 3,
+      "statement": "Audit records for PHI are append-only and the retention period is configured, proven by a test."
+    }
+  ]
+}
