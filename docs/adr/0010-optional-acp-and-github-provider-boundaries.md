@@ -22,9 +22,16 @@ metadata—before a human can carry a reviewed plan to a provider.
 
 M8 introduces two **optional, nested integration packages**:
 
-- `factory/integrations/acp-v1` pins `@agentclientprotocol/sdk` 2.2.0 and imports
-  only its stable root entry point. Core dynamically loads it only when an
-  explicit `acp-v1` policy is selected; normal VLD use has no ACP dependency.
+- `factory/integrations/acp-v1` pins `@agentclientprotocol/sdk` to an exact
+  version inside major 2 and imports only its stable root entry point; the
+  validated version is the one in `package.json`, not a copy in this record. The
+  pin is exact because this package ships to npm users, who do not run our CI and
+  must get a reproducible, tested version; it stays inside major 2 because that is
+  the major this record validates stable ACP v1 against. The boundary itself is
+  enforced by the import, not the number: `experimental/v2` ships *within* major 2,
+  so a test rejects that subpath and `unstable` outright rather than relying on a
+  semver gate that could not catch it. Core dynamically loads the adapter only when
+  an explicit `acp-v1` policy is selected; normal VLD use has no ACP dependency.
   The bridge uses stable ACP v1 stdio JSON-RPC, advertises no client filesystem,
   terminal, MCP, authentication, elicitation or credential capability, and
   maps bounded session-update metadata into ordinary host events. Peer messages
