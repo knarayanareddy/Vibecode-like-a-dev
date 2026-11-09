@@ -611,7 +611,10 @@ test('a gate that passed and then broke fails even with a baseline in place', (t
   assert.equal(run(p.outDir, ['--repo', repo]).code, 0);
 
   // The secret scan passes on an empty repository, so it is not in the baseline.
-  write(repo, 'src/leak.js', 'const key = "AKIAIOSFODNN7EXAMPLE";\n');
+  // Split so this fixture does not itself look like a credential to the repository's
+  // own secret scan, which is one of the gates it exercises.
+  const credential = ['AKIA', 'IOSFODNN7EXAMPLE'].join('');
+  write(repo, 'src/leak.js', `const key = "${credential}";\n`);
   const regressed = run(p.outDir, ['--repo', repo]);
   assert.equal(regressed.code, 1, 'a regression is not covered by the baseline');
   assert.match(regressed.stdout, /1 fail/);

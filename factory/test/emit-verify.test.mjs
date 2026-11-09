@@ -993,7 +993,7 @@ test('a profile that tries to instruct its reader is refused under --strict', ()
     );
     const run = (args) => {
       try {
-        execFileSync(process.execPath, [path.join(path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'cli.mjs')), ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+        execFileSync(process.execPath, [path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'cli.mjs'), ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
         return { code: 0 };
       } catch (error) {
         return { code: error.status ?? 1, stderr: String(error.stderr ?? '') };

@@ -78,9 +78,13 @@ test('the generated workflow fails on a fixture with a stray anchor', (t) => {
 
   // Then a stray anchor: exactly what the workflow's first step runs.
   mkdirSync(path.join(repo, 'tests'), { recursive: true });
+  // The fixture must contain a bad anchor without itself looking like one to the
+  // scan the repository runs on its own sources. Building the marker at runtime keeps
+  // both properties true; this is the convention the other anchor fixtures use.
+  const marker = ['@', 'req '].join('');
   writeFileSync(
     path.join(repo, 'tests', 'stray.test.ts'),
-    '// @req REQ-999 this requirement is not in the packet\ntest("nothing", () => { expect(1).toBe(1); });\n'
+    `// ${marker}REQ-999 this requirement is not in the packet\ntest("nothing", () => { expect(1).toBe(1); });\n`
   );
 
   let failed = false;

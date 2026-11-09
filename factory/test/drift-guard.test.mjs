@@ -19,6 +19,9 @@ import { emitPacket } from '../lib/emit/index.mjs';
 import { buildIndex } from '../lib/indexer.mjs';
 import { buildPlan } from '../lib/planner.mjs';
 import { normalizeProfile } from '../lib/profile.mjs';
+import { fileURLToPath } from 'node:url';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 /** A repository with a compiled packet and one controllable test file. */
 function fixture(t) {
@@ -170,7 +173,9 @@ test('the generated CI workflow runs the strict flags by default', (t) => {
   const f = fixture(t);
   // The safe path must be the default one: a team that never reads the flags still
   // gets strict drift checking.
-  const cliPath = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'cli.mjs');
+  // fileURLToPath, not URL.pathname: on Windows pathname yields "/D:/a/...", which
+  // path.resolve then mangles into a path that does not exist.
+  const cliPath = path.resolve(HERE, '..', 'cli.mjs');
   execFileSync(process.execPath, [cliPath, 'ci', 'init', '--project', f.root, '--packet', 'packet'], { cwd: f.root });
   const workflow = readFileSync(path.join(f.root, '.github', 'workflows', 'spec.yml'), 'utf8');
   assert.match(workflow, /spec-check\.mjs --repo \. --strict --require-assertions/);
