@@ -18,7 +18,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { readJsonFile, scanRepo } from './scan.mjs';
+import { isProductionEvidence, readJsonFile, scanRepo } from './scan.mjs';
 import { extensionError, safeExternalDiagnostic, writeAbsoluteManagedFileAtomic } from './extension-utils.mjs';
 import { normalizeProfile, validateProfile } from './profile.mjs';
 
@@ -379,9 +379,12 @@ function detectEnvSignals(scan) {
 
 function detectSchemaSignals(scan) {
   const signals = { multiTenant: [], pii: [], destructive: [] };
+  // Only production paths. A schema under `tests/fixtures/` describes the fixture,
+  // not the product, and crediting it invents both stored personal data and
+  // cascading deletes that the repository never promised.
   const sources = [
-    ...scan.filesMatching(/schema\.prisma$|\.sql$|migrations?\//).slice(0, 60),
-    ...scan.contentSample.filter((file) => /model|entity|schema/i.test(file)).slice(0, 40)
+    ...scan.filesMatching(/schema\.prisma$|\.sql$|migrations?\//).filter(isProductionEvidence).slice(0, 60),
+    ...scan.contentSample.filter((file) => /model|entity|schema/i.test(file)).filter(isProductionEvidence).slice(0, 40)
   ];
 
   for (const file of new Set(sources)) {

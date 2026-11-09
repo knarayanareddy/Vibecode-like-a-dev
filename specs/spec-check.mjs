@@ -183,6 +183,71 @@ const LITERAL_PAIR =
 const IMPORT_SIGNAL =
   /^\s*(?:import\s|const\s+\w+\s*=\s*require\(|from\s+\S+\s+import\s|use\s+\w+|#\[|package\s+\w+)/m;
 
+/**
+ * Which anchored requirements in one test file are *not* proven by their own test.
+ *
+ * `ASSERTION_SIGNAL.test(source)` answers "does this file contain an assertion",
+ * which is satisfied by a single real test anywhere in it. An agent can then add
+ * empty-bodied tests, one per requirement, and every one of them reads as proven
+ * because a neighbour asserted something. The signal has to be per requirement.
+ *
+ * A requirement is proven when an assertion appears in the test that carries its
+ * anchor, measured as the span from the anchor to the end of that test:
+ *
+ *   - JS/TS arrow or function tests: from the anchor to the closing of the block
+ *     whose brace depth first returns to zero.
+ *   - Python: from the anchor to the next line at the same or lower indent.
+ *   - Anything else (Go, Java, Rust, Ruby): a fixed window of following lines.
+ *
+ * Files whose anchors are not individually provable are not "hollow" by default:
+ * a single test may legitimately carry several anchors, and the assertions after
+ * the first one cover all of them. So the fallback is the file-level signal —
+ * this narrows a false pass, it does not invent a failure.
+ */
+const ASSERTION_FREE_WINDOW = 40;
+
+function scopedAssertionFor(source, anchorIndex) {
+  const lines = source.split('\n');
+  const anchor = lines[anchorIndex];
+  const first = (anchor ?? '').trim();
+  // A comment holding the anchor for a test that follows on later lines: start the
+  // search there. An anchor inside code (an array of ids) starts at its own line.
+  let start = anchorIndex;
+  const window = [];
+  let depth = 0;
+  let opened = false;
+  for (let i = start; i < Math.min(lines.length, start + ASSERTION_FREE_WINDOW); i += 1) {
+    const line = lines[i];
+    window.push(line);
+    for (const character of line) {
+      if (character === '{') {
+        depth += 1;
+        opened = true;
+      } else if (character === '}') {
+        depth -= 1;
+      }
+    }
+    if (opened && depth <= 0) break;
+  }
+  const text = window.join('\n');
+  if (ASSERTION_SIGNAL.test(text)) return true;
+
+  // Python: a def body ends at the next line indented no deeper than the `def`.
+  const pyAnchor = lines.slice(anchorIndex, Math.min(lines.length, anchorIndex + 3)).findIndex((line) => /^\s*def\s+\w+\s*\(/.test(line));
+  if (pyAnchor !== -1) {
+    const defIndex = anchorIndex + pyAnchor;
+    const indent = lines[defIndex].match(/^\s*/)[0].length;
+    const body = [lines[defIndex]];
+    for (let i = defIndex + 1; i < lines.length; i += 1) {
+      const line = lines[i];
+      if (line.trim() !== '' && line.match(/^\s*/)[0].length <= indent) break;
+      body.push(line);
+    }
+    return ASSERTION_SIGNAL.test(body.join('\n'));
+  }
+  return false;
+}
+
 const errors = [];
 const notices = [];
 const passes = [];
@@ -327,7 +392,10 @@ for (const file of walk(REPO)) {
 
   const isTest = TEST_FILE.test(rel(file)) || TEST_NAME.test(rel(file));
   const fileReqIds = [];
-  for (const line of source.split('\n')) {
+  // Requirements whose own anchored test carries no assertion (BLKR-04).
+  const unprovenIds = new Set();
+  const sourceLines = source.split('\n');
+  for (const [lineIndex, line] of sourceLines.entries()) {
     if (!line.includes('@req')) continue;
     const matches = [...line.matchAll(/@req\s+(REQ-\d{3,})/g)];
     if (matches.length === 0) continue;
@@ -342,6 +410,9 @@ for (const file of walk(REPO)) {
         continue;
       }
       fileReqIds.push(id);
+      // Remember the line so the assertion can be scoped to *this* anchor's test
+      // rather than to the file as a whole.
+      if (isTest && !scopedAssertionFor(source, lineIndex)) unprovenIds.add(id);
       if (!anchored.has(id)) anchored.set(id, []);
       anchored.get(id).push({ file: rel(file), isTest });
     }
@@ -350,8 +421,15 @@ for (const file of walk(REPO)) {
     const anchoredIds = [...new Set(fileReqIds)].join(', ');
     const problems = [];
 
+    // File-level first (unchanged for files whose anchors cannot be scoped), then
+    // per requirement. A single asserted test must not vouch for a neighbour that
+    // asserts nothing, which is the false pass this used to allow.
     if (!ASSERTION_SIGNAL.test(source)) {
       problems.push('no visible assertion');
+    } else if (unprovenIds.size === fileReqIds.length) {
+      problems.push('no visible assertion');
+    } else if (unprovenIds.size > 0) {
+      problems.push(`no visible assertion in the anchored test for ${[...unprovenIds].join(', ')}`);
     }
     // A skipped or disabled test cannot prove anything, so an anchor in one is a
     // claim about a test that will not run.

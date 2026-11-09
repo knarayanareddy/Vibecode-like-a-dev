@@ -11,7 +11,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { applyChange, archiveChange, emitChange, planChange, recompilePacket, renderChange, validateChange, verifyChange } from '../lib/change.mjs';
+import { applyChange, archiveChange, emitChange, planChange, recompilePacket, renderChange, staticImportsOf, validateChange, verifyChange } from '../lib/change.mjs';
 import { emitPacket } from '../lib/emit/index.mjs';
 import { buildIndex } from '../lib/indexer.mjs';
 import { enableModules } from '../lib/modules.mjs';
@@ -641,4 +641,82 @@ test('archiving without a profile path refuses instead of dropping the delta', a
   emitChange(planChange({ packetDir: p.outDir, change: change() }), out);
 
   await assert.rejects(() => archiveChange({ packetDir: p.outDir, changeDir: out }), /does not record where its profile lives/);
+});
+/**
+ * BUG-08: the blast radius named requirements, never the code they reach.
+ *
+ * `planChange` reported areas, gate collisions and practices. When six anchored
+ * tests import one shared module, the module is where the change actually lands,
+ * and listing the tests without it leaves the real surface invisible. Computing
+ * it needs the repository, so it is opt-in and absent by default rather than
+ * empty: an empty list would read as "nothing else is affected".
+ */
+test('the blast radius names shared modules reached from anchored tests', (t) => {
+  const p = packet();
+  t.after(p.cleanup);
+
+  // A repository where every anchored test imports one shared module.
+  const repo = path.join(p.root, 'repo');
+  mkdirSync(path.join(repo, 'src', 'http'), { recursive: true });
+  mkdirSync(path.join(repo, 'tests'), { recursive: true });
+  writeFileSync(path.join(repo, 'src', 'http', 'envelope.ts'), 'export const envelope = (x) => x;\n');
+  const automated = p.spec.requirements.filter((requirement) => requirement.verify === 'automated');
+  assert.ok(automated.length >= 2, 'fixture needs at least two automated requirements');
+
+  const spec = JSON.parse(JSON.stringify(p.spec));
+  // Re-point anchors on the *clone* that gets written, not on p.spec.
+  const automatedInSpec = spec.requirements.filter((requirement) => requirement.verify === 'automated');
+  for (const [offset, requirement] of automatedInSpec.slice(0, 2).entries()) {
+    const file = `tests/t${offset + 1}.spec.ts`;
+    requirement.anchor = file;
+    writeFileSync(
+      path.join(repo, file),
+      `import { envelope } from '../src/http/envelope.ts';\nit('case ${offset + 1}', () => expect(envelope(1)).toBe(1));\n`
+    );
+  }
+  writeFileSync(path.join(p.outDir, 'spec.json'), `${JSON.stringify(spec, null, 2)}\n`);
+
+  const plan = planChange({
+    packetDir: p.outDir,
+    projectDir: repo,
+    change: {
+      id: 'modify-envelope',
+      title: 'Change the error envelope',
+      why: 'Every client parses this envelope, so its shape is a contract we cannot change quietly.',
+      risk: 'medium',
+      modify: [
+        {
+          key: automated[0].key,
+          statement: 'The error envelope shall name the failing field so a client can render it.',
+          failurePath: 'A client cannot tell which field was rejected.'
+        }
+      ]
+    }
+  });
+
+  assert.deepEqual(plan.blastRadius.source.testFiles.map((entry) => entry.file), ['tests/t1.spec.ts']);
+  assert.deepEqual(plan.blastRadius.source.modules, [
+    { file: 'src/http/envelope.ts', importedBy: ['tests/t1.spec.ts'] }
+  ]);
+});
+
+test('without a project the blast radius omits the source section rather than lying', (t) => {
+  const p = packet();
+  t.after(p.cleanup);
+
+  const plan = planChange({ packetDir: p.outDir, change: change() });
+  assert.equal(plan.blastRadius.source, undefined, 'no repository means no graph, not an empty one');
+});
+
+test('static import extraction ignores packages and keeps relative specifiers', () => {
+  const source = [
+    "import a from './a.ts';",
+    "import { b } from '../lib/b';",
+    "import fs from 'node:fs';",
+    "import x from 'lodash';",
+    "const c = require('./c');",
+    "const d = await import('./d');",
+    "export { e } from './e';"
+  ].join('\n');
+  assert.deepEqual(staticImportsOf(source).sort(), ['../lib/b', './a.ts', './c', './d', './e'].sort());
 });

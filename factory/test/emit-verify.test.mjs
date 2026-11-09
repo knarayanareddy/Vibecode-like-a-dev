@@ -1013,3 +1013,98 @@ test('a profile that tries to instruct its reader is refused under --strict', ()
     rmSync(root, { recursive: true, force: true });
   }
 });
+/**
+ * BLKR-04: a file-wide assertion signal vouched for hollow neighbours.
+ *
+ * `ASSERTION_SIGNAL.test(source)` asks "does this file contain an assertion",
+ * which one real test satisfies for every anchor in the file. An agent could add
+ * a non-empty but assertion-free test per requirement and each one read as
+ * proven, because some other test in the file asserted something.
+ *
+ * The signal is now scoped to the test that carries each anchor, in the factory
+ * verifier and in the shipped checker. Both are asserted here because a rule that
+ * exists in only one of them is a rule an agent can route around.
+ */
+test('an assertion in a neighbour does not prove a hollow anchored test', (t) => {
+  const project = compileTemp(makeProject('scoped-assertions'));
+  t.after(project.cleanup);
+
+  const repo = path.join(project.root, 'repo');
+  mkdirSync(path.join(repo, 'src'), { recursive: true });
+  mkdirSync(path.join(repo, 'tests'), { recursive: true });
+  writeFileSync(path.join(repo, 'src', 'ledger.ts'), 'export const settle = () => ({ balanced: true });\n');
+
+  const automated = JSON.parse(readFileSync(path.join(project.outDir, 'spec.json'), 'utf8')).requirements.filter(
+    (requirement) => requirement.verify === 'automated'
+  );
+  assert.ok(automated.length >= 2, 'fixture needs two automated requirements');
+  const [first, second] = automated;
+
+  // One genuinely asserted test, then a hollow one. The hollow body is *not*
+  // empty: it calls the product and ignores the result, which is what a weakened
+  // test looks like after an agent co-mutates source and assertion together.
+  const marker = ['@', 'req '].join('');
+  writeFileSync(
+    path.join(repo, 'tests', 'mixed.spec.ts'),
+    [
+      "import { settle } from '../src/ledger.ts';",
+      `${marker}${first.id}`,
+      "it('proves the first', () => { expect(settle().balanced).toBe(true); });",
+      `${marker}${second.id}`,
+      "it('hollow', () => { settle(); });"
+    ].join('\n')
+  );
+
+  const factory = verifyPacket(project.outDir, { repo, strict: true, requireAssertions: true });
+  const shipped = runShippedChecker(project.outDir, repo, { strict: true, requireAssertions: true });
+
+  assert.equal(factory.ok, false, 'the hollow anchored test must fail verification');
+  const message = factory.errors.join('\n');
+  assert.match(message, new RegExp(`no visible assertion`));
+  // It must name the unproven requirement, and must not blame the proven one.
+  assert.match(message, new RegExp(second.id), 'the unproven requirement must be named');
+  assert.ok(!new RegExp(`${first.id}[,)]\\s*but no visible`).test(message), 'the proven requirement must not be named');
+
+  assert.equal(shipped.code, 1, 'the shipped checker must agree with the factory verifier');
+  assert.match(shipped.stdout, new RegExp(second.id));
+});
+
+test('one asserted test may carry several anchors without being reported hollow', (t) => {
+  const project = compileTemp(makeProject('shared-anchor'));
+  t.after(project.cleanup);
+
+  const repo = path.join(project.root, 'repo');
+  mkdirSync(path.join(repo, 'src'), { recursive: true });
+  mkdirSync(path.join(repo, 'tests'), { recursive: true });
+  writeFileSync(path.join(repo, 'src', 'ledger.ts'), 'export const settle = () => ({ balanced: true });\n');
+
+  const automated = JSON.parse(readFileSync(path.join(project.outDir, 'spec.json'), 'utf8')).requirements.filter(
+    (requirement) => requirement.verify === 'automated'
+  );
+  assert.ok(automated.length >= 2, 'fixture needs two automated requirements');
+  const [first, second] = automated;
+
+  // The honest shape this must not break: two anchors on one test, with the
+  // assertion after the second anchor.
+  const marker = ['@', 'req '].join('');
+  writeFileSync(
+    path.join(repo, 'tests', 'shared.spec.ts'),
+    [
+      // The import is required: a file that reaches nothing outside its own
+      // directory cannot be exercising the product, and that rule would fire
+      // before the assertion scoping this test is about.
+      "import { settle } from '../src/ledger.ts';",
+      `${marker}${first.id}`,
+      `${marker}${second.id}`,
+      "it('proves both', () => { expect(settle().balanced).toBe(true); });"
+    ].join('\n')
+  );
+
+  const factory = verifyPacket(project.outDir, { repo, strict: true, requireAssertions: true });
+  assert.doesNotMatch(factory.errors.concat(factory.warnings).join('\n'), /no visible assertion/);
+  // No --strict here: the fixture leaves the packet's other requirements pending,
+  // and strict would fail on those for reasons unrelated to the rule under test.
+  const shipped = runShippedChecker(project.outDir, repo, { requireAssertions: true });
+  assert.equal(shipped.code, 0);
+  assert.doesNotMatch(shipped.stdout, /no visible assertion/);
+});

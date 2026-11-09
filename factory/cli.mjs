@@ -95,7 +95,7 @@ Usage
                                      write the required pull-request check that runs the packet's enforcement
   vld verify <packet-dir> [--repo <path>] [--strict] [--require-assertions] [--json]
                                      check a packet, optionally against code; --require-assertions rejects hollow anchored tests
-  vld change <packet-dir> <change.json> -o <dir> [--apply] [--force] [--json]
+  vld change <packet-dir> <change.json> -o <dir> [--apply] [--force] [--json] [--repo <dir>]
                                      render a delta spec for a brownfield change
   vld change verify <change-dir> [--project <dir>]
                                      validate a change proposal, reviewed evidence links and resulting manifest
@@ -768,7 +768,9 @@ function runChange() {
     fail(`could not read change at ${changePath}: ${error.message}`);
   }
 
-  const plan = planChange({ packetDir, change });
+  // Optional, because the graph lives in the repository rather than the packet.
+  const projectDir = option('--repo', option('--project', null));
+  const plan = planChange({ packetDir, change, projectDir });
 
   if (hasFlag('--json')) {
     console.log(JSON.stringify({ ...plan, afterSpec: undefined }, null, 2));

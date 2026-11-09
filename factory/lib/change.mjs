@@ -15,7 +15,7 @@
  * over a backup.
  */
 
-import { cpSync, existsSync, mkdtempSync, readFileSync, renameSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { ARTIFACTS, validateArtifact } from './artifacts.mjs';
@@ -142,7 +142,86 @@ export function validateChange(change) {
   return errors;
 }
 
-export function planChange({ packetDir, change }) {
+/**
+ * Statically imported modules reached from the tests that carry an anchor.
+ *
+ * A blast radius that names only the anchored test file is a *declarative* answer:
+ * it says which requirement moved, not which code has to be reviewed. When six
+ * anchored tests import `src/http/envelope.ts`, that module is where the change
+ * actually lands, and listing the tests without it leaves the real surface
+ * invisible.
+ *
+ * One hop, literal relative specifiers only. This is a review aid, not a module
+ * graph: no package resolution, no tsconfig paths, no transitive closure. Each of
+ * those would turn a deterministic file read into a resolver with its own bugs,
+ * and the point is to stop missing the obvious module, not to be exhaustive.
+ */
+export function staticImportsOf(source) {
+  const specifiers = new Set();
+  const patterns = [
+    /(?:^|[^\w$.])import\s+(?:[^'"]*?\sfrom\s+)?['"]([^'"]+)['"]/g,
+    /(?:^|[^\w$.])export\s+(?:[^'"]*?\sfrom\s+)?['"]([^'"]+)['"]/g,
+    /require\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
+    /import\s*\(\s*['"]([^'"]+)['"]\s*\)/g
+  ];
+  for (const pattern of patterns) {
+    for (const match of source.matchAll(pattern)) {
+      if (match[1].startsWith('.')) specifiers.add(match[1]);
+    }
+  }
+  return [...specifiers];
+}
+
+const RESOLVE_SUFFIXES = ['', '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.py', '.go', '/index.ts', '/index.js', '/index.mjs'];
+
+/**
+ * Resolve one relative specifier against the importing file, preferring a real
+ * file on disk so the report names something a reviewer can open.
+ */
+function resolveImport(projectDir, importer, specifier) {
+  const base = path.resolve(projectDir, path.dirname(importer), specifier);
+  for (const suffix of RESOLVE_SUFFIXES) {
+    const candidate = `${base}${suffix}`;
+    if (existsSync(candidate) && !statSync(candidate).isDirectory()) {
+      return path.relative(projectDir, candidate).split(path.sep).join('/');
+    }
+  }
+  // Not on disk: still report it. A change proposal that silently drops an import
+  // it could not resolve is worse than one that says where it looked.
+  return path.relative(projectDir, base).split(path.sep).join('/');
+}
+
+/**
+ * Anchored test files, and the modules they import.
+ */
+export function transitiveBlastRadius({ projectDir, anchors }) {
+  const tests = [];
+  const modules = new Map();
+  for (const anchor of anchors) {
+    if (!anchor || typeof anchor !== 'string') continue;
+    const absolute = path.resolve(projectDir, anchor);
+    if (!existsSync(absolute)) {
+      tests.push({ file: anchor, missing: true, imports: [] });
+      continue;
+    }
+    const imports = [];
+    for (const specifier of staticImportsOf(readFileSync(absolute, 'utf8'))) {
+      const resolved = resolveImport(projectDir, anchor, specifier);
+      imports.push(resolved);
+      if (!modules.has(resolved)) modules.set(resolved, new Set());
+      modules.get(resolved).add(anchor);
+    }
+    tests.push({ file: anchor, missing: false, imports: imports.sort() });
+  }
+  return {
+    testFiles: tests.sort((a, b) => a.file.localeCompare(b.file)),
+    modules: [...modules.entries()]
+      .map(([file, importers]) => ({ file, importedBy: [...importers].sort() }))
+      .sort((a, b) => a.file.localeCompare(b.file))
+  };
+}
+
+export function planChange({ packetDir, change, projectDir = null }) {
   const specPath = path.join(packetDir, 'spec.json');
   if (!existsSync(specPath)) throw new Error(`no spec.json in ${packetDir}`);
   const spec = readJson(specPath);
@@ -239,6 +318,18 @@ export function planChange({ packetDir, change }) {
     ...removed.map(({ target }) => target.area ?? 'core')
   ]);
 
+  // Every requirement this change touches, with the test file that anchors it.
+  // Added requirements have no anchor yet, so they contribute nothing here; their
+  // proposal already says the test has to be written.
+  const anchoredTestFiles = [
+    ...new Set(
+      modified
+        .map(({ target }) => target.anchor)
+        .concat(removed.map(({ target }) => target.anchor))
+        .filter((anchor) => typeof anchor === 'string' && anchor.trim() !== '')
+    )
+  ].sort();
+
   const practices = index
     ? index.primitives.filter((primitive) => (primitive.enforces ?? []).some((key) => touchedKeys.has(key)))
     : [];
@@ -287,6 +378,9 @@ export function planChange({ packetDir, change }) {
     blastRadius: {
       areas: [...areas],
       obligations,
+      // Only computed when a project is given: without one there is no import
+      // graph to read, and an empty list would read as "nothing else is affected".
+      ...(projectDir ? { source: transitiveBlastRadius({ projectDir, anchors: anchoredTestFiles }) } : {}),
       gateCollisions,
       practices: practices.map((primitive) => ({ id: primitive.id, title: primitive.title, tier_min: primitive.tier_min })),
       orphanedAnchors
@@ -390,6 +484,25 @@ function proposalMarkdown(plan) {
     lines.push('Gates in the way:');
     lines.push('');
     for (const collision of blastRadius.gateCollisions) lines.push(`- ${collision}`);
+  }
+  if (blastRadius.source) {
+    // Named modules, not just named tests. The anchored test is where the claim
+    // lives; the module it imports is usually where the change lands.
+    lines.push('');
+    lines.push('Source reached from the anchored tests (one hop, literal imports):');
+    lines.push('');
+    if (blastRadius.source.modules.length === 0) {
+      lines.push('_No relative imports found in the anchored tests._');
+    } else {
+      for (const entry of blastRadius.source.modules) {
+        lines.push(`- \`${entry.file}\` — imported by ${entry.importedBy.map((file) => `\`${file}\``).join(', ')}`);
+      }
+    }
+    const missing = blastRadius.source.testFiles.filter((entry) => entry.missing);
+    if (missing.length > 0) {
+      lines.push('');
+      lines.push(`Not on disk: ${missing.map((entry) => `\`${entry.file}\``).join(', ')}. The anchor names a test that does not exist, so the graph stops here.`);
+    }
   }
   lines.push('');
 

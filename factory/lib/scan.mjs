@@ -17,6 +17,24 @@ export const IGNORED_DIRS = new Set([
 
 const SOURCE_FILE = /\.(ts|tsx|js|jsx|mjs|cjs|py|go|rb|java|kt|cs|php|rs|ex|exs|swift|dart|sql|vue|svelte)$/;
 
+/**
+ * Paths that exist to *exercise* a product rather than to be it.
+ *
+ * A fixture schema is evidence that someone wrote a test, not that the product
+ * stores personal data. Inferring `risks.pii` and `risks.destructiveWrites` from
+ * `tests/fixtures/tenant_users.sql` inflates the tier and adds questions about
+ * guarantees the product never made.
+ *
+ * This is deliberately a prefix-segment test on the relative path, not a
+ * content test: a migration under `src/` is production evidence wherever the
+ * word "test" appears inside it.
+ */
+const NON_PRODUCTION_PATH = /(?:^|\/)(?:tests?|__tests__|__mocks__|testdata|fixtures?|examples?|benchmarks?|mocks?|snapshots?|e2e|specs?)(?:\/|$)/i;
+
+export function isProductionEvidence(relativePath) {
+  return !NON_PRODUCTION_PATH.test(String(relativePath).split(path.sep).join('/'));
+}
+
 export function readText(file, limit = 200_000) {
   try {
     const stats = statSync(file);

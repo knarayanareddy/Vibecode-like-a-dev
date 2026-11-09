@@ -18,7 +18,7 @@ Usage
                                      write the required pull-request check that runs the packet's enforcement
   vld verify <packet-dir> [--repo <path>] [--strict] [--require-assertions] [--json]
                                      check a packet, optionally against code; --require-assertions rejects hollow anchored tests
-  vld change <packet-dir> <change.json> -o <dir> [--apply] [--force] [--json]
+  vld change <packet-dir> <change.json> -o <dir> [--apply] [--force] [--json] [--repo <dir>]
                                      render a delta spec for a brownfield change
   vld change verify <change-dir> [--project <dir>]
                                      validate a change proposal, reviewed evidence links and resulting manifest
