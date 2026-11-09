@@ -190,3 +190,48 @@ name, and is verified against a relative path, a `/tmp` path and the exact `RUNN
 shape that failed.
 
 All fifteen checks pass at `1a4c956`, including both portable runners.
+
+## Second audit: what was real and what was not
+
+A second, independent audit arrived using different ids (`BLKR-01…05`, `BUG-06…08`).
+It overlaps this work by renaming three items and misdiagnoses two others. Each claim
+was checked against the shipped code rather than against its own "before" block.
+
+| Second-audit id | Verdict | Evidence |
+| --- | --- | --- |
+| BLKR-01 mutation catch rate | Same item as BLK-2 | `G3-MUTATION` exists as a tier-3 gate; promotion to tier 2 is the sub-step declined above |
+| BLKR-02 unconfined agent | Does not reproduce | The audit shows `env: process.env`; the code builds a closed allowlist (`environmentFor`). The unconfined-process limitation is disclosed in `README.md` and ADR-0006 |
+| BLKR-03 vocabulary ceiling | Real, same as BUG-2 | `docs/STRESS-TEST.md` concedes 50% coverage. The audit's cited `findUnmappedObligations` does not exist |
+| BLKR-04 file-wide assertion | **Real — fixed here** | One asserted test vouched for every other anchor in the file |
+| BLKR-05 line budget cliff | Diagnosis wrong | `factory/lib/emitter.mjs` does not exist. habit-sync stores 906 lines against the 900 stored-packet reference: an existing warning, not a 28-line cliff |
+| BUG-06 fixture risk inference | **Real — fixed here** | One `tests/fixtures/*.sql` inferred `pii`, `destructiveWrites` and `multiTenant` |
+| BUG-07 context tokens | Same item as BUG-7 | Declined above with its reason |
+| BUG-08 transitive blast radius | **Real — fixed here** | The radius named requirements and areas, never an imported module |
+
+### What each fix does, and what it deliberately does not
+
+**BUG-06 — fixture schemas.** `isProductionEvidence()` excludes paths whose *segment*
+is a test, fixture, example, benchmark, mock or snapshot tree. Per segment, not by
+substring: `src/testing.ts` and `src/latest.sql` remain production evidence, and a
+mirror test asserts that identical DDL under `src/db/` still infers all three risks.
+The exclusion is not configurable. A flag to keep fixture evidence would exist only to
+recreate the false positive.
+
+**BUG-08 — blast radius.** `planChange` takes an optional `projectDir` (`--repo` on the
+CLI, matching `vld change verify --project`). It reports the one-hop import graph of
+the anchored tests, rendered into `proposal.md`. Relative specifiers only, no package
+resolution, no transitive closure: each of those turns a deterministic file read into
+a resolver with its own bugs, and the point is to stop missing the obvious module.
+Without a project the section is **absent**, not empty — an empty list would read as
+"nothing else is affected".
+
+**BLKR-04 — scoped assertions.** The assertion window is the test carrying the anchor:
+brace-depth for JS/TS, indent for Python, a fixed window otherwise. When an anchor
+cannot be scoped individually the check falls back to the file-level signal, so this
+narrows a false pass rather than inventing one. Both checkers changed together,
+because the repository ships two — `factory/lib/verify.mjs` for `vld verify` and the
+generated `spec-check.mjs` in every packet — and a rule in only one is a rule an agent
+can route around by running the other. The regression tests assert both.
+
+All three were verified against the repository's own 49 anchored test files under
+`--require-assertions`: zero false positives.

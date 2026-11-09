@@ -484,3 +484,41 @@ test('polyglot test tooling (Go *_test.go, PHP phpunit, Flutter flutter_test, Ru
 
 
 
+/**
+ * BUG-06: fixture schemas were credited as production evidence.
+ *
+ * A repository whose only SQL lives under `tests/fixtures/` was inferred to store
+ * personal data and to cascade deletes, because the scanner walks test trees and
+ * `detectSchemaSignals` read every `.sql` file it found. That inflates the tier
+ * and asks the author to answer for guarantees the product never made.
+ */
+test('a schema under a test fixture does not imply product risk', (t) => {
+  const repo = fixture({
+    'package.json': { name: 'fixture-only', version: '1.0.0' },
+    'src/cli.js': 'export const main = () => 0;\n',
+    'tests/fixtures/tenant_users.sql':
+      'CREATE TABLE tenant_users (id INT, email TEXT, ssn TEXT, org_id INT);\nALTER TABLE tenant_users ADD CONSTRAINT fk FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE CASCADE;\n'
+  });
+  t.after(repo.cleanup);
+
+  const report = adoptRepo(repo.root);
+  assert.equal(report.profile.risks.pii, false, 'a fixture schema is not evidence the product stores personal data');
+  assert.equal(report.profile.risks.destructiveWrites, false, 'a fixture cascade is not evidence of a product cascade');
+  assert.equal(report.profile.risks.multiTenant, false, 'a fixture tenant column is not evidence of multi-tenancy');
+});
+
+test('a schema in production source still implies product risk', (t) => {
+  const repo = fixture({
+    'package.json': { name: 'real-schema', version: '1.0.0' },
+    'src/db/schema.sql':
+      'CREATE TABLE users (id INT, email TEXT, ssn TEXT, org_id INT);\nALTER TABLE users ADD CONSTRAINT fk FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE CASCADE;\n'
+  });
+  t.after(repo.cleanup);
+
+  const report = adoptRepo(repo.root);
+  // The mirror of the test above: excluding fixture paths must not blind adoption
+  // to the same DDL when it is the product's own schema.
+  assert.equal(report.profile.risks.pii, true);
+  assert.equal(report.profile.risks.destructiveWrites, true);
+  assert.equal(report.profile.risks.multiTenant, true);
+});

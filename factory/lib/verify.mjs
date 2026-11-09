@@ -34,6 +34,57 @@ const CLARIFY_MARKER = /\[(?:CLARIFY|NEEDS CLARIFICATION)(?::[^\]]*)?\]/i;
 // mutation score or semantic proof.
 const ASSERTION_SIGNAL = /\b(?:assert[A-Za-z0-9_.]*|expect\s*\(|should\b|require\.[A-Z]\w*|t\.(?:Fatal|Fatalf|Error|Errorf|Fail|FailNow)|pytest\.raises|raises\s*\(|rejects\b|throws\b)\b|!==|===|!=|==|<=|>=/;
 
+/**
+ * Which anchored requirements in one test file are not proven by their own test.
+ *
+ * Mirrors `scopedAssertionFor` in factory/templates/spec-check.mjs. The two
+ * checkers must agree about the same file: `vld verify` and the dependency-free
+ * checker a packet ships are both run in CI, and a rule that exists in only one
+ * of them is a rule an agent can route around by running the other.
+ *
+ * A file-level "contains an assertion" test is satisfied by one real test
+ * anywhere in the file, so ten hollow `@req` tests read as proven because a
+ * neighbour asserted something. This scopes the signal to each anchor's test.
+ * Where an anchor cannot be scoped individually the caller falls back to the
+ * file-level signal, so this narrows a false pass rather than inventing one.
+ */
+const ASSERTION_FREE_WINDOW = 40;
+
+function scopedAssertionFor(source, anchorIndex) {
+  const lines = source.split('\n');
+  const window = [];
+  let depth = 0;
+  let opened = false;
+  for (let i = anchorIndex; i < Math.min(lines.length, anchorIndex + ASSERTION_FREE_WINDOW); i += 1) {
+    const line = lines[i];
+    window.push(line);
+    for (const character of line) {
+      if (character === '{') {
+        depth += 1;
+        opened = true;
+      } else if (character === '}') {
+        depth -= 1;
+      }
+    }
+    if (opened && depth <= 0) break;
+  }
+  if (ASSERTION_SIGNAL.test(window.join('\n'))) return true;
+
+  const pyOffset = lines.slice(anchorIndex, Math.min(lines.length, anchorIndex + 3)).findIndex((line) => /^\s*def\s+\w+\s*\(/.test(line));
+  if (pyOffset !== -1) {
+    const defIndex = anchorIndex + pyOffset;
+    const indent = lines[defIndex].match(/^\s*/)[0].length;
+    const body = [lines[defIndex]];
+    for (let i = defIndex + 1; i < lines.length; i += 1) {
+      const line = lines[i];
+      if (line.trim() !== '' && line.match(/^\s*/)[0].length <= indent) break;
+      body.push(line);
+    }
+    return ASSERTION_SIGNAL.test(body.join('\n'));
+  }
+  return false;
+}
+
 function globToRegExp(glob) {
   const escaped = glob.replace(/[.+^${}()|[\]\\]/g, '\\$&');
   // `**/` means zero or more path components, while a remaining `**` may span
@@ -96,7 +147,10 @@ export function scanAnchors(repoDir, { exclude = [] } = {}) {
 
     const isTest = TEST_FILE.test(relative) || TEST_NAME.test(relative);
     const fileIds = [];
-    for (const line of source.split('\n')) {
+    // Requirements whose own anchored test carries no assertion (BLKR-04).
+    const unproven = new Set();
+    const sourceLines = source.split('\n');
+    for (const [lineIndex, line] of sourceLines.entries()) {
       const matches = [...line.matchAll(ANCHOR_LINE)];
       if (matches.length === 0) continue;
       // A line that suppresses the marker is not an anchor: fixtures and examples
@@ -108,12 +162,18 @@ export function scanAnchors(repoDir, { exclude = [] } = {}) {
       for (const match of matches) {
         const id = match[1];
         fileIds.push(id);
+        if (isTest && !scopedAssertionFor(source, lineIndex)) unproven.add(id);
         if (!anchors.has(id)) anchors.set(id, []);
         anchors.get(id).push({ id, file: relative, isTest });
       }
     }
-    if (isTest && fileIds.length > 0 && !ASSERTION_SIGNAL.test(source)) {
-      hollow.push({ file: relative, ids: [...new Set(fileIds)] });
+    if (isTest && fileIds.length > 0) {
+      const ids = [...new Set(fileIds)];
+      // File-level first, then per requirement. Naming the specific ids is what
+      // makes the failure actionable; the file-level message stays for files whose
+      // anchors share one asserted test.
+      if (!ASSERTION_SIGNAL.test(source)) hollow.push({ file: relative, ids });
+      else if (unproven.size > 0) hollow.push({ file: relative, ids: [...unproven].filter((id) => fileIds.includes(id)) });
     }
   }
 
