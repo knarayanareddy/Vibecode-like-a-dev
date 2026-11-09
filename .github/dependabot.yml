@@ -12,3 +12,20 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
     labels: [dependencies, ci]
+    # One PR per week for every action, not one per action.
+    #
+    # Each bump is a single SHA on a `uses:` line, and every one of them touches the
+    # same two workflow files. Un-grouped, Dependabot opens a separate PR for each
+    # action and those PRs conflict with each other on adjacent lines — a conflict
+    # Dependabot cannot resolve, because neither side is wrong and the correct
+    # resolution is "take both". Four open action PRs meant three hand-resolved
+    # conflict merges in one sitting.
+    #
+    # Grouping makes the batch reviewable as a unit: the diff is a set of `uses:`
+    # lines, and a failing check points at the group rather than at an unknown
+    # member of it. The cost is that a breaking major in one action arrives together
+    # with the rest — which is the review that was happening anyway, just in one
+    # place instead of four.
+    groups:
+      github-actions:
+        patterns: ["*"]
