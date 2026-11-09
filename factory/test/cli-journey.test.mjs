@@ -69,7 +69,11 @@ test('primary journey: plan, compile, verify, then the shipped drift guard agree
   const drifted = await run(process.execPath, [path.join(specs, 'spec-check.mjs'), '--repo', workspace], {
     cwd: workspace
   });
-  assert.match(drifted.stdout, /PASS/);
+  // A freshly compiled packet has no implemented requirements yet, so the shipped
+  // checker reports NOT VERIFIED rather than PASS (BUG-9): the exit code is still
+  // 0, but the verdict no longer reads as evidence it does not have.
+  assert.match(drifted.stdout, /NOT VERIFIED/);
+  assert.ok(!/PASS ·/.test(drifted.stdout), 'an unproven packet must not report PASS');
 
   // The same profile compiled to the same logical destination is byte-identical,
   // so the journey is repeatable. The destination is named explicitly: since

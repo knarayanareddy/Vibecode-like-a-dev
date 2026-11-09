@@ -175,6 +175,75 @@ const ABSTRACT_SOFTWARE_NOUNS = new Set([
   'framework', 'library', 'plugin', 'extension', 'marketplace', 'startup', 'business'
 ]);
 
+/**
+ * Nouns the idea says the product must NOT produce.
+ *
+ * "The product must never give a diagnosis" both states a rule and names a noun.
+ * The term table used to list `diagnosis` as a term to agree on, which invites an
+ * agent to build it — the opposite of what the sentence asked for.
+ *
+ * This is deliberately narrow, because a wrong classification removes a real domain
+ * noun from the packet, which is worse than listing one extra term. It fires only
+ * on:
+ *
+ *   - a negation in production verbs, where the verb is what would create the
+ *     thing: give, produce, return, emit, generate, present, show, display, offer,
+ *     suggest, recommend;
+ *   - "must not" / "shall not" / "never" introducing one of those verbs;
+ *   - a direct object within the same clause, so "never lose a settlement" does not
+ *     make `settlement` forbidden (lose is not a production verb, and losing one is
+ *     not the product producing it).
+ *
+ * The negation has to be adjacent to the verb: "must never give a diagnosis", not
+ * "must keep records and never give a diagnosis" scored loosely.
+ */
+const PRODUCTION_VERB =
+  /(?:give|gives|produce|produces|return|returns|emit|emits|generate|generates|present|presents|show|shows|display|displays|offer|offers|suggest|suggests|recommend|recommends)/i;
+const NEGATED_PRODUCTION =
+  /\b(?:must|shall|will|should)\s+not\s+(?:ever\s+)?(?:give|produce|return|emit|generate|present|show|display|offer|suggest|recommend)\b|\b(?:must|shall|will|should)\s+(?:never|not)\s+(?:give|produce|return|emit|generate|present|show|display|offer|suggest|recommend)\b|\bnever\s+(?:give|produce|return|emit|generate|present|show|display|offer|suggest|recommend)\b/i;
+
+/** Words that are never the noun being forbidden. */
+const NOT_A_DOMAIN_NOUN = new Set([
+  'a', 'an', 'the', 'any', 'this', 'that', 'these', 'those', 'it', 'them', 'one',
+  'advice', 'guidance', 'information', 'answers', 'answer', 'results', 'result',
+  'output', 'outputs', 'content', 'data', 'text', 'response', 'responses'
+]);
+
+/**
+ * The nouns an idea negates, as written. Returns [] when the sentence does not
+ * match the narrow shape above, which is the common case.
+ */
+export function forbiddenNounsFor(idea) {
+  const found = [];
+  const sentences = String(idea ?? '')
+    .split(/(?<=[.!?;])\s+|\n+/)
+    .map((sentence) => sentence.trim());
+  for (const sentence of sentences) {
+    if (!NEGATED_PRODUCTION.test(sentence)) continue;
+    // The object follows the negated verb: "... never give a diagnosis" -> diagnosis.
+    const match = NEGATED_PRODUCTION.exec(sentence);
+    const rest = sentence.slice(match.index + match[0].length);
+    // Stop at a clause boundary so the object is the verb's own object.
+    // Stop at a clause boundary or a preposition: in "return patient data to third
+    // parties", the object of `return` is "patient data", and "parties" belongs to
+    // the prepositional phrase.
+    const objectClause = rest.split(/[,;]|\b(?:and|but|while|because|which|that|so|to|for|from|into|with|without|on|at)\b/i)[0] ?? '';
+    const words = objectClause.trim().replace(/[.!?]+$/, '').split(/\s+/).filter(Boolean);
+    if (words.length === 0) continue;
+    // The head noun is the LAST content word of the object clause: "patient data"
+    // is a kind of data, not a kind of patient, and taking the first word would
+    // forbid `patient` — a noun the product certainly does have.
+    const content = words.filter((word) => !['a', 'an', 'the', 'any', 'this', 'that', 'to', 'of', 'in', 'on'].includes(word.toLowerCase()));
+    const candidate = content[content.length - 1];
+    if (!candidate) continue;
+    const cleaned = candidate.replace(/[^A-Za-z-]/g, '').toLowerCase();
+    if (cleaned.length < 3 || NOT_A_DOMAIN_NOUN.has(cleaned)) continue;
+    if (PRODUCTION_VERB.test(cleaned)) continue;
+    found.push(cleaned);
+  }
+  return [...new Set(found)];
+}
+
 /** The sentences that state a rule. These name domain objects; marketing does not. */
 const NORMATIVE_SENTENCE =
   /\b(must|never|only|cannot|can ?not|always|at most|at least|no more than|shall|requires?|refuses?|rejects?)\b/i;
@@ -502,13 +571,33 @@ export function vocabularyFor(profile) {
   const candidatePool = scoreCandidates(scorableIdea(profile.idea));
   const domain = profile?.domain && typeof profile.domain === 'object' ? profile.domain : null;
 
+  // Nouns the idea rules out. An explicit list wins; the detector is the fallback.
+  // This is applied to the candidate pool rather than to the rendered table, so a
+  // forbidden noun can never become the primary noun either.
+  const declaredForbidden = Array.isArray(profile?.vocabulary?.forbidden)
+    ? profile.vocabulary.forbidden.map((word) => String(word).toLowerCase())
+    : [];
+  const inferredForbidden = forbiddenNounsFor(profile.idea);
+  // `affirmed` is the override in the other direction: the author says the detector
+  // was too eager, and a noun it ruled out is a real term after all.
+  const declaredAffirmed = new Set(
+    Array.isArray(profile?.vocabulary?.affirmed) ? profile.vocabulary.affirmed.map((word) => String(word).toLowerCase()) : []
+  );
+  const forbidden = [...new Set([...declaredForbidden, ...inferredForbidden])].filter((word) => !declaredAffirmed.has(word));
+  const forbiddenSet = new Set(forbidden);
+
+  // A forbidden noun is not a candidate, whatever its score. This is why the filter
+  // is on the pool and not on the output: "the product must never give a diagnosis"
+  // can be the most frequent noun in the idea and must still never name the product.
+  const allowedPool = candidatePool.filter((candidate) => !forbiddenSet.has(singularOf(candidate.word).toLowerCase()));
+
   // An explicit `domain` block beats inference. The noun picker exists to remove
   // the author's choice, not to overrule it: when someone writes `entity: "visit"`
   // the packet says "visit" even if the idea repeats "telehealth" twelve times.
   if (domain?.entity) {
     const entity = domain.entity;
     const entityPlural = domain.entityPlural ?? pluralOf(entity);
-    const endUser = domain.endUser ?? domain.actors?.[0] ?? candidatePool.find((candidate) => isActorWord(candidate.word))?.word ?? 'user';
+    const endUser = domain.endUser ?? domain.actors?.[0] ?? allowedPool.find((candidate) => isActorWord(candidate.word))?.word ?? 'user';
     const actor = domain.actors?.find((name) => singularOf(name) !== singularOf(entity)) ?? endUser;
     return {
       primary: entity,
@@ -521,11 +610,12 @@ export function vocabularyFor(profile) {
       tenantNoun: domain.tenant ?? null,
       endUser,
       privilegedActor: domain.privilegedActor ?? null,
-      candidates: candidatePool.slice(0, 6).map((candidate) => ({ word: singularOf(candidate.word), count: candidate.count }))
+      forbidden,
+      candidates: allowedPool.slice(0, 6).map((candidate) => ({ word: singularOf(candidate.word), count: candidate.count }))
     };
   }
 
-  const candidates = candidatePool;
+  const candidates = allowedPool;
   const confident = candidates.filter((candidate) => candidate.score >= 3);
   const fallback = KIND_FALLBACK[profile.kind] ?? ['record', 'user'];
 
@@ -601,6 +691,9 @@ export function vocabularyFor(profile) {
     source,
     // Candidates are singular: the ubiquitous-language table lists *things*, and
     // "bookings" next to "booking" is the synonym problem the table exists to stop.
+    // Stated explicitly: a reader must be able to see what was ruled out, so a
+    // wrong classification is visible rather than silent.
+    forbidden,
     candidates: candidates.slice(0, 6).map((candidate) => ({ word: singularOf(candidate.word), count: candidate.count }))
   };
 }

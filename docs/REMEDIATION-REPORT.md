@@ -235,3 +235,88 @@ can route around by running the other. The regression tests assert both.
 
 All three were verified against the repository's own 49 anchored test files under
 `--require-assertions`: zero false positives.
+
+## Third audit: five of ten reproduced
+
+A third audit (`BLK-1…3`, `BUG-4…10`) was checked the same way, against the merged
+code rather than against its own "before" blocks.
+
+| Third-audit id | Verdict | Evidence |
+| --- | --- | --- |
+| BLK-1 tautologies | **Real — fixed** | `assert(1,1)` was caught; `assert.equal(1,1)` passed, because the rule matched `assert(...)` and never `assert.<method>(`. `IMPORT_SIGNAL` also accepted `import 'node:test'` |
+| BLK-2 wrong noun | Partly real | Primary noun was already `consultation`, not `agent`. The residual is real: `diagnosis` is listed as a term to define when the idea says the product must never produce one |
+| BLK-3 Node gate | Not a defect | The guard fires as designed. The suggestion to name `npx -p node@22` is a message improvement, not a bug |
+| BUG-4 line ceiling | Does not reproduce | Tier 3 + HIPAA + GDPR + PCI-DSS compiled to 1037 of 1100 lines and verified with zero warnings |
+| BUG-5 wrong requirement | Not reproduced | The scoring critique is plausible, but on a fixture where all rules are unmapped the reasons were correct. Needs their exact fixture before touching a passing check |
+| BUG-6 rule truncation | **Real — fixed** | An idea stating 5 rules rendered 2. Two causes: present-tense detection, and a silent cap of six |
+| BUG-7 multi-surface | Real, but a feature | `kind` is singular by design; the actionable half is the missing warning when the idea names another surface |
+| BUG-8 change area | **Real — fixed** | A `feature.ai-no-diagnosis` requirement reported `areas: ['core']`, and the `ai` practice never appeared |
+| BUG-9 PASS on nothing | **Real — fixed** | `PASS · 0 error(s) · 4 pending`, exit 0, on a repository with no proven requirement |
+| BUG-10 no did-you-mean | **Real — fixed** | `unknown trait "uploads"` listed thirteen values and never `upload` |
+
+### BLK-2's negated concepts — fixed
+
+A rule the product must *never* satisfy was becoming a term to define. It is now
+detected and routed:
+
+- Detection is narrow on purpose: a negation adjacent to a **production** verb (give,
+  produce, return, emit, generate, present, show, display, offer, suggest, recommend)
+  with a direct object in the same clause. The opposite mistake is worse than the bug —
+  a detector broad enough to catch "never lose a settlement" would delete a real domain
+  noun from every packet, and deleting is silent where listing is not.
+- It takes the **head** noun of the object, not its modifier: "never return patient
+  data" must not forbid `patient`.
+- The noun is removed from the candidate pool, not from the rendered table, so it
+  cannot become the primary noun either.
+- Nothing disappears: the exclusion renders in the brief's own non-goals list as
+  "Never produced by this product: a diagnosis", so a wrong classification is visible.
+- Both directions are overridable — `vocabulary.forbidden` and `vocabulary.affirmed` —
+  following the existing `domain.entity` precedent.
+
+Regression tests pin the carepulse case (`diagnosis` moves), the `settlement`
+counter-example (a real noun survives "never lose"), the modifier/head-noun distinction,
+the primary-noun guarantee, and both overrides.
+
+### BUG-7's surfaces — deliberately still open
+
+`kind` describes one deployable and decides document layout; adding `surfaces[]` means
+the planner unions catalog templates across surfaces, which changes tier calculation,
+gate selection and doc arrangement. That is a feature, not a repair.
+
+The cheap half — warn when the idea names a surface the profile does not declare — is
+worth doing, but it is new behaviour rather than a defect fix, and it would fire on the
+adversarial corpus. Shipping it alongside a correctness fix would make the correctness
+fix harder to review, so it stays open with this reasoning rather than as an oversight.
+
+### Correction to an earlier claim
+
+The first version of this section said BLK-2 "touches every packet". It does not: only
+two packets are committed (`specs/` and `examples/retro-board/spec`), so the cost is a
+regeneration, which this repository does routinely. The cost was overstated.
+
+### A divergence worth recording
+
+`vld verify` does not implement the vacuity rules at all; only the shipped
+`spec-check.mjs` does. The third audit's BLK-1 named `spec-check`, so that is what was
+fixed. The two checkers disagreeing about a hollow test is the same class of problem as
+the one fixed in the second round, and it remains.
+
+### What CI caught in the third round
+
+The BUG-6 fix removed a silent cap of six on "rules your idea already states". That
+cap was hiding a real disagreement between two promises: no rule is dropped in
+silence, and a single on-demand document stays under 200 lines. The adversarial corpus
+contains an idea stating 110 near-identical rules, so removing the cap made
+`02-domain-model.md` 204 lines and the adversarial stress job failed.
+
+Two attempts made it worse before it got better. A one-line-per-rule table still
+overflowed; and spreading the return value of `ordered` — which returns a string, not
+an array — emitted one character per line, turning a 200-line document into 2834.
+
+The resolution is to group rules that are identical once digits are normalised. An
+idea that states the same invariant 110 times has one invariant; the document says
+"110 variants that differ only in their numbers" and quotes one complete sentence.
+Nothing is dropped, nothing is truncated mid-sentence, and the ceiling holds.
+
+The same section also carried a mixed-noun defect the third review noticed: the
+sentence read "beside the rule it protects" because the primary noun was `rule`.

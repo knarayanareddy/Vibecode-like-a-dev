@@ -38,8 +38,48 @@ const AREA_OBLIGATIONS = {
   security: 'Update the threat model and add a denial-path test. Security requirements cannot be removed without a replacement control.',
   frontend: 'Cover the four UI states for any new screen, and run the keyboard pass on the changed journey.',
   reliability: 'Name the retry, timeout and idempotency behaviour of anything that crosses a process boundary.',
+  ai: 'Update the evaluation set and the guardrail test. A model behaviour change needs a case that fails before it and passes after it, plus a cost ceiling if the call pattern changed.',
   core: 'No area-specific obligation, but the change still needs a test anchor and a gate check.'
 };
+
+/**
+ * The practice area a requirement belongs to when the author did not say.
+ *
+ * `area` used to default to `core` from the key namespace alone, so an AI-safety
+ * requirement filed under `feature.` reported "areas: core" and the proposal never
+ * mentioned the `ai` practice or its gates. The blast radius then understated what
+ * the change touches — the opposite of what it exists for.
+ *
+ * Keywords come before the key namespace because they describe the behaviour;
+ * a key is only a label the author chose.
+ */
+const AREA_KEYWORDS = [
+  ['ai', /\b(?:ai|model|prompt|llm|triage|inference|guardrail|confidence|hallucinat\w*|embedding|token budget)\b/i],
+  ['security', /\b(?:auth\w*|permission|authori[sz]\w*|session|token|credential|password|role|threat|attack|injection|encrypt\w*|tls|tenant)\b/i],
+  ['data', /\b(?:migrat\w*|schema|column|index|backup|restore|retention|delet\w*|erasure|purge|ledger|append-only|partition)\b/i],
+  ['frontend', /\b(?:screen|button|modal|layout|page|responsive|keyboard|aria|contrast|tooltip|banner)\b/i],
+  ['api', /\b(?:endpoint|request|response|webhook|payload|contract|http|status code|envelope|idempotency key)\b/i],
+  ['reliability', /\b(?:retry|retries|timeout|circuit breaker|idempotent|queue|backlog|latency|availability|failover|heartbeat)\b/i]
+];
+
+/**
+ * Returns {area, reason}. An explicit area always wins and is not second-guessed.
+ */
+export function inferArea({ explicit, key, statement = '', title = '', traits = [] }) {
+  if (typeof explicit === 'string' && explicit.trim() !== '') return { area: explicit.trim(), reason: 'stated on the requirement' };
+  const text = `${title} ${statement}`;
+  for (const [area, pattern] of AREA_KEYWORDS) {
+    const match = pattern.exec(text);
+    if (match) return { area, reason: `"${match[0]}" in the statement` };
+  }
+  // Traits describe the whole product; use them only as a weaker last resort.
+  if (traits.includes('ai')) return { area: 'ai', reason: 'the profile has the ai trait' };
+  if (traits.includes('auth')) return { area: 'security', reason: 'the profile has the auth trait' };
+  const namespace = String(key ?? '').split('.')[0];
+  const byNamespace = { api: 'api', data: 'data', security: 'security', frontend: 'frontend', reliability: 'reliability', ai: 'ai' };
+  if (byNamespace[namespace]) return { area: byNamespace[namespace], reason: `the "${namespace}." key prefix` };
+  return { area: 'core', reason: 'nothing in the statement or key names an area' };
+}
 
 function readJson(file) {
   return JSON.parse(readFileSync(file, 'utf8'));
@@ -260,15 +300,26 @@ export function planChange({ packetDir, change, projectDir = null }) {
   // requirement owns it. Include it in allocation so a later delta never binds
   // old anchors or review evidence to a different requirement.
   const ids = nextRequirementIds([...requirements, ...retiredRequirements(packetDir)], (change.add ?? []).length);
+  // Why each area was chosen, so a reviewer can disagree with the inference rather
+  // than discover it only through a missing obligation.
+  const areaReasons = [];
   (change.add ?? []).forEach((entry, position) => {
     if (byKey.has(entry.key)) {
       errors.push(`add: "${entry.key}" already exists in this packet. Use modify instead.`);
       return;
     }
+    const area = inferArea({
+      explicit: entry.area,
+      key: entry.key,
+      title: entry.title,
+      statement: entry.statement,
+      traits: spec.profile?.traits ?? []
+    });
+    areaReasons.push(`${entry.key}: ${area.area} (${area.reason})`);
     added.push({
       id: ids[position],
       key: entry.key,
-      area: entry.area ?? 'core',
+      area: area.area,
       title: entry.title,
       statement: entry.statement,
       failurePath: entry.failurePath,
@@ -377,6 +428,7 @@ export function planChange({ packetDir, change, projectDir = null }) {
     impact,
     blastRadius: {
       areas: [...areas],
+      areaReasons,
       obligations,
       // Only computed when a project is given: without one there is no import
       // graph to read, and an empty list would read as "nothing else is affected".
@@ -471,6 +523,10 @@ function proposalMarkdown(plan) {
   lines.push('## Blast radius');
   lines.push('');
   lines.push(`Areas touched: ${blastRadius.areas.join(', ')}`);
+  if (blastRadius.areaReasons?.length) {
+    // Say how each area was chosen, so a reviewer can correct the inference.
+    for (const reason of blastRadius.areaReasons) lines.push(`- \`${reason.split(':')[0]}\` → ${reason.split(':').slice(1).join(':').trim()}`);
+  }
   lines.push('');
   for (const obligation of blastRadius.obligations) lines.push(`- ${obligation}`);
   if (blastRadius.practices.length > 0) {

@@ -317,10 +317,57 @@ test('profile validation rejects unknown traits and thin ideas', () => {
   const messages = errors.join('\n');
   assert.match(messages, /name:/);
   assert.match(messages, /idea:/);
-  assert.match(messages, /kind: must be one of/);
+  assert.match(messages, /kind: unknown kind "spaceship"/);
   assert.match(messages, /stage:/);
   assert.match(messages, /unknown trait "blockchain"/);
   assert.match(messages, /risks\.pii: must be true or false/);
   assert.match(messages, /unknown risk flag/);
   assert.match(messages, /constraints\.team/);
+});
+
+/**
+ * BUG-10: a rejected value lists every valid one and never the one the reader
+ * meant. Ten of thirteen traits look like "maybe that long one", and "agent" is a
+ * valid *kind*, so the message sent readers hunting for a typo that was not there.
+ */
+test('a rejected value suggests the nearest valid one, or where it does belong', () => {
+  const message = (overrides) =>
+    validateProfile(
+      normalizeProfile({
+        name: 'suggest-probe',
+        idea: 'A small tool that records and reports a weekly metric for a team.',
+        kind: 'web-app',
+        stage: 'mvp',
+        traits: ['auth'],
+        risks: {},
+        ...overrides
+      })
+    ).join('\n');
+
+  assert.match(message({ traits: ['uploads'] }), /did you mean "upload"/);
+  assert.match(message({ traits: ['persistance'] }), /did you mean "persistence"/);
+  assert.match(message({ kind: 'web-appp' }), /did you mean "web-app"/);
+  assert.match(message({ stage: 'prod' }), /did you mean "production"/);
+  // Not a typo: a valid value in another field. Say where it belongs instead.
+  assert.match(message({ traits: ['agent'] }), /"agent" is a valid kind, not a trait/);
+  // A value with no plausible neighbour must not receive a misleading suggestion.
+  assert.match(message({ traits: ['zzzzzz'] }), /unknown trait "zzzzzz"\. Known:/);
+  assert.doesNotMatch(message({ traits: ['zzzzzz'] }), /did you mean/);
+});
+
+test('the vocabulary block accepts both overrides and rejects malformed ones', () => {
+  const base = {
+    name: 'vet-check',
+    idea: 'A small tool that records and reports a weekly metric for a team.',
+    kind: 'web-app',
+    stage: 'mvp',
+    traits: ['auth'],
+    risks: {}
+  };
+  const errorsFor = (vocabulary) => validateProfile(normalizeProfile({ ...base, vocabulary }));
+
+  assert.deepEqual(errorsFor({ forbidden: ['diagnosis'], affirmed: ['settlement'] }), []);
+  assert.ok(errorsFor({ forbidden: 'diagnosis' }).some((error) => /vocabulary\.forbidden: must be a list/.test(error)));
+  assert.ok(errorsFor({ banned: ['x'] }).some((error) => /vocabulary\.banned: unknown field/.test(error)));
+  assert.ok(errorsFor(['diagnosis']).some((error) => /vocabulary: must be an object/.test(error)));
 });

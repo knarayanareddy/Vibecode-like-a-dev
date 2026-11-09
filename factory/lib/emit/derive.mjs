@@ -299,12 +299,16 @@ export function anchorPath(profile, requirement) {
 
 // ---------- non-goals and questions ----------
 
-export function nonGoalsFor(profile, words = []) {
+export function nonGoalsFor(profile, words = [], forbidden = []) {
   const primary = words[0] ?? 'the primary object';
   const secondaryRaw = words[1] ?? 'user';
   const secondarySingular = singularOf(secondaryRaw);
   const secondaryPlural = secondaryRaw === 'the people who use it' ? secondaryRaw : pluralOf(secondarySingular);
   const goals = [
+    // The idea's own exclusions come first: they are stated by the author, not
+    // inferred by the catalog, and an agent reading only the requirement list would
+    // otherwise build exactly what the idea ruled out.
+    ...forbidden.map((word) => `**Never produced by this product: a ${singularOf(word)}.** The idea says so explicitly; if a requirement appears to need one, the requirement is wrong.`),
     `Any ${primary} capability the idea does not name. When in doubt, it is out of scope and gets its own version.`,
     `Importing ${primary} data from an existing system: v1 starts empty and the first ${secondarySingular} enters it by hand.`
   ];
@@ -862,12 +866,59 @@ export function firstOpenRequirement(plan) {
  * and they are the part an agent must not paraphrase away.
  */
 export function ownRulesFor(profile) {
+  return ownRuleGroups(profile).flatMap((group) => group.rules);
+}
+
+/**
+ * Rules grouped by shape, so a generated or adversarial idea that states a hundred
+ * near-identical rules does not become a hundred lines of document.
+ *
+ * This exists because honest answers to two rules collide: never drop a rule in
+ * silence, and keep a single on-demand document under its ceiling. An idea that says
+ * "Rule 1 must be deterministic", "Rule 2 must be deterministic", … 110 times has one
+ * invariant, not 110, and saying so is more accurate than either listing or cutting.
+ *
+ * Two rules share a group when they are identical after digits are normalised. The
+ * group records every original, so nothing is lost: the document prints the shape once
+ * and names the rest.
+ */
+export function ownRuleGroups(profile) {
   const idea = String(profile.idea ?? '');
   const sentences = idea
     .split(/(?<=[.!?;])\s+|\n+/)
     .map((sentence) => sentence.trim().replace(/^[-*\d.\s]+/, ''))
-    .filter((sentence) => sentence.length > 20 && /\b(must|never|only|cannot|can ?not|always|at most|at least|no more than)\b/i.test(sentence));
-  return [...new Set(sentences)].slice(0, 6);
+    .filter((sentence) => sentence.length > 20 && isRuleSentence(sentence));
+
+  const groups = new Map();
+  for (const rule of new Set(sentences)) {
+    const shape = rule.replace(/\d+/g, '#');
+    if (!groups.has(shape)) groups.set(shape, []);
+    groups.get(shape).push(rule);
+  }
+  return [...groups.values()].map((rules) => ({ shape: rules[0], rules }));
+}
+
+/**
+ * A sentence that states behaviour, not background.
+ *
+ * The modal test alone missed rules written in the present tense — "Refunds are
+ * issued as a compensating ledger entry" is an obligation the product must honour,
+ * and dropping it meant the packet silently listed two of an idea's five rules.
+ * A behavioural verb is the second signal; the first sentence of an idea is
+ * usually the framing ("A marketplace where patients book…") and is not a rule,
+ * which is why position is excluded rather than relied on.
+ */
+const BEHAVIOURAL_VERB =
+  /\b(?:issues?|issued|records?|recorded|redacts?|encrypts?|validates?|rejects?|acknowledges?|retries|quarantines?|deduplicates?|persists?|enforces?|stores?|stored|sends?|notifies?|charges?|refunds?|calculates?|derives?|keeps?|requires?|allows?|blocks?|escalates?)\b/i;
+
+// Passive voice is the other way an obligation is written: "Settlement is
+// reconciled nightly", "Access is denied by default". A verb list cannot enumerate
+// every verb, but the `is/are <verb>ed` shape is regular enough to recognise.
+const PASSIVE_OBLIGATION = /\b(?:is|are|was|were)\s+(?:not\s+)?[a-z]+ed\b/i;
+
+export function isRuleSentence(sentence) {
+  if (/\b(must|never|only|cannot|can ?not|always|at most|at least|no more than)\b/i.test(sentence)) return true;
+  return BEHAVIOURAL_VERB.test(sentence) || PASSIVE_OBLIGATION.test(sentence);
 }
 
 export function surfacesFor(plan) {
@@ -1091,7 +1142,7 @@ export function derive(plan, { packetDir = 'specs' } = {}) {
     terms: termsFor(plan.requirements),
     aggregates,
     groups: groupRequirements(plan.requirements),
-    nonGoals: nonGoalsFor(plan.profile, [vocab.primary, vocab.secondary]),
+    nonGoals: nonGoalsFor(plan.profile, [vocab.primary, vocab.secondary], vocab.forbidden ?? []),
     questions: openQuestionsFor(plan.profile, plan.rigor, [vocab.primary, vocab.secondary]),
     stack: stackFor(plan.profile),
     contract: planContract(plan),
@@ -1102,6 +1153,7 @@ export function derive(plan, { packetDir = 'specs' } = {}) {
     nouns,
     surfaces: surfacesFor(plan),
     ownRules: ownRulesFor(plan.profile),
+    ownRuleGroups: ownRuleGroups(plan.profile),
     decisions: decisionsFor(plan, stackFor(plan.profile), styleFor(plan.profile)),
     cards: practiceCards(plan, phrases),
     phrases,
