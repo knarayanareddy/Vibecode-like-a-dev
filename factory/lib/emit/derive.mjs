@@ -299,12 +299,16 @@ export function anchorPath(profile, requirement) {
 
 // ---------- non-goals and questions ----------
 
-export function nonGoalsFor(profile, words = []) {
+export function nonGoalsFor(profile, words = [], forbidden = []) {
   const primary = words[0] ?? 'the primary object';
   const secondaryRaw = words[1] ?? 'user';
   const secondarySingular = singularOf(secondaryRaw);
   const secondaryPlural = secondaryRaw === 'the people who use it' ? secondaryRaw : pluralOf(secondarySingular);
   const goals = [
+    // The idea's own exclusions come first: they are stated by the author, not
+    // inferred by the catalog, and an agent reading only the requirement list would
+    // otherwise build exactly what the idea ruled out.
+    ...forbidden.map((word) => `**Never produced by this product: a ${singularOf(word)}.** The idea says so explicitly; if a requirement appears to need one, the requirement is wrong.`),
     `Any ${primary} capability the idea does not name. When in doubt, it is out of scope and gets its own version.`,
     `Importing ${primary} data from an existing system: v1 starts empty and the first ${secondarySingular} enters it by hand.`
   ];
@@ -1138,7 +1142,7 @@ export function derive(plan, { packetDir = 'specs' } = {}) {
     terms: termsFor(plan.requirements),
     aggregates,
     groups: groupRequirements(plan.requirements),
-    nonGoals: nonGoalsFor(plan.profile, [vocab.primary, vocab.secondary]),
+    nonGoals: nonGoalsFor(plan.profile, [vocab.primary, vocab.secondary], vocab.forbidden ?? []),
     questions: openQuestionsFor(plan.profile, plan.rigor, [vocab.primary, vocab.secondary]),
     stack: stackFor(plan.profile),
     contract: planContract(plan),

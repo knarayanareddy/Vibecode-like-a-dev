@@ -57,7 +57,8 @@ export const RISK_FLAGS = [
 ];
 
 const ID_PATTERN = /^[a-z0-9][a-z0-9-]{1,60}$/;
-const PROFILE_KEYS = new Set(['name', 'idea', 'kind', 'stage', 'users', 'traits', 'risks', 'regulation', 'constraints', 'overlays', 'discoverability', 'traitWaivers', 'domain', 'rules', '$comment', '$adopted']);
+const PROFILE_KEYS = new Set(['name', 'idea', 'kind', 'stage', 'users', 'traits', 'risks', 'regulation', 'constraints', 'overlays', 'discoverability', 'traitWaivers', 'domain', 'rules', 'vocabulary', '$comment', '$adopted']);
+const VOCABULARY_KEYS = new Set(['forbidden', 'affirmed']);
 const USER_KEYS = new Set(['scale']);
 const CONSTRAINT_KEYS = new Set(['team', 'weeks', 'stack', 'mustUse']);
 const DISCOVERABILITY_KEYS = new Set(['enabled']);
@@ -283,6 +284,25 @@ export function validateProfile(profile) {
     // error; outside strict it is reported by `plan`.
     if (profile.risks?.regulated === true && profile.regulation.length === 0) {
       profile.__regulatedWithoutRegime = true;
+    }
+  }
+
+  // An explicit vocabulary block: the author overrules the classifier. `forbidden`
+  // moves a noun out of the term table into "never produced"; `affirmed` keeps one
+  // in the table when the detector was too eager. Both exist because a classifier
+  // that cannot be corrected is a classifier people route around.
+  if ('vocabulary' in profile) {
+    if (!profile.vocabulary || typeof profile.vocabulary !== 'object' || Array.isArray(profile.vocabulary)) {
+      errors.push('vocabulary: must be an object such as { forbidden: ["diagnosis"], affirmed: ["settlement"] }');
+    } else {
+      unknownKeys(profile.vocabulary, VOCABULARY_KEYS, 'vocabulary', errors);
+      for (const field of ['forbidden', 'affirmed']) {
+        const value = profile.vocabulary[field];
+        if (value === undefined) continue;
+        if (!Array.isArray(value) || value.some((word) => typeof word !== 'string' || word.trim() === '')) {
+          errors.push(`vocabulary.${field}: must be a list of non-empty words`);
+        }
+      }
     }
   }
 

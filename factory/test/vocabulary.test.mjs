@@ -10,7 +10,7 @@ import test from 'node:test';
 import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { articleFor, ideaNouns, pluralOf, singularOf, vocabularyFor } from '../lib/emit/vocabulary.mjs';
-import { ownRulesFor } from '../lib/emit/derive.mjs';
+import { nonGoalsFor, ownRulesFor } from '../lib/emit/derive.mjs';
 import { ROOT } from '../lib/indexer.mjs';
 
 /**
@@ -308,4 +308,96 @@ test('no rule is dropped in silence, however many the idea states', () => {
   ];
   const rules = ownRulesFor({ idea: `A clinic platform. ${eight.join(' ')}` });
   assert.equal(rules.length, eight.length, `expected all ${eight.length} rules, got ${rules.length}: ${rules.join(' | ')}`);
+});
+
+/**
+ * BLK-2: a negated concept was listed as a term to agree on.
+ *
+ * "The product must never give a diagnosis" became a ubiquitous-language entry —
+ * "confirm the exact meaning of diagnosis before it appears in code" — which invites
+ * an agent to build the one thing the idea ruled out. The reverse mistake is worse:
+ * a detector broad enough to catch "never lose a settlement" would delete a real
+ * domain noun from every packet. Both directions are pinned here.
+ */
+test('a concept the idea says the product never produces is not a term to define', () => {
+  const vocab = vocabularyFor({
+    idea:
+      'A telehealth marketplace where patients book consultations with practitioners. ' +
+      'The AI triage agent suggests a specialty before the patient books, and the product must never give a diagnosis.',
+    kind: 'web-app'
+  });
+  assert.deepEqual(vocab.forbidden, ['diagnosis']);
+  assert.ok(
+    !vocab.candidates.some((candidate) => candidate.word === 'diagnosis'),
+    'a forbidden noun must not be offered as a term'
+  );
+  // The nouns the product does have are untouched.
+  assert.ok(vocab.candidates.some((candidate) => candidate.word === 'patient'));
+});
+
+test('a negation that does not name a produced thing leaves the noun alone', () => {
+  // The counter-example. "Never lose a settlement" forbids losing it; it does not
+  // say the product never produces one, and `lose` is not a production verb.
+  const vocab = vocabularyFor({
+    idea:
+      'A settlement ledger that records every debit and credit. ' +
+      'The system must never lose a settlement, and every settlement is reconciled nightly.',
+    kind: 'api'
+  });
+  assert.deepEqual(vocab.forbidden, []);
+  assert.ok(
+    vocab.candidates.some((candidate) => candidate.word === 'settlement'),
+    'settlement is a real domain noun and must survive'
+  );
+});
+
+test('the head noun of the object is forbidden, not its modifier', () => {
+  // "never return patient raw records" forbids records, not patients. Taking the
+  // first content word would forbid `patient` — a noun the product certainly has.
+  const vocab = vocabularyFor({
+    idea: 'A clinic tool. The system must never return patient raw records to third parties.',
+    kind: 'api'
+  });
+  assert.deepEqual(vocab.forbidden, ['records']);
+  assert.ok(!vocab.forbidden.includes('patient'), 'the modifier must not be forbidden');
+  // A generic object ("data", "information") is deliberately not forbidden: it is
+  // not a domain noun, and listing it as a non-goal would be noise in every packet.
+  assert.deepEqual(
+    vocabularyFor({ idea: 'A clinic tool. The system must never return patient data to third parties.', kind: 'api' }).forbidden,
+    []
+  );
+});
+
+test('a forbidden noun never becomes the primary noun, however often it appears', () => {
+  const vocab = vocabularyFor({
+    idea:
+      'A diagnosis tool. Every diagnosis is reviewed. Diagnoses are stored. ' +
+      'The product must never give a diagnosis, but clinicians record a consultation.',
+    kind: 'web-app'
+  });
+  assert.deepEqual(vocab.forbidden, ['diagnosis']);
+  assert.notEqual(vocab.primary, 'diagnosis', 'the ruled-out concept must not name the product');
+});
+
+test('an author can overrule the classifier in either direction', () => {
+  const idea = 'A clinic tool. The product must never give a diagnosis.';
+  // The detector was too eager: the author says the term is real.
+  assert.deepEqual(vocabularyFor({ idea, kind: 'web-app', vocabulary: { affirmed: ['diagnosis'] } }).forbidden, []);
+  // The detector missed one: the author names it.
+  assert.deepEqual(
+    vocabularyFor({ idea: 'A clinic tool that records visits.', kind: 'web-app', vocabulary: { forbidden: ['prognosis'] } }).forbidden,
+    ['prognosis']
+  );
+});
+
+test('the idea rules out are rendered as non-goals, not silently dropped', () => {
+  const vocab = vocabularyFor({ idea: 'A clinic tool. The product must never give a diagnosis.', kind: 'web-app' });
+  const goals = nonGoalsFor({ traits: [], kind: 'web-app' }, [vocab.primary, vocab.secondary], vocab.forbidden);
+  assert.ok(
+    goals.some((goal) => /Never produced by this product: a diagnosis/.test(goal)),
+    'the exclusion must be visible in the document, so a wrong classification is not silent'
+  );
+  // An idea with no exclusions gains no such line.
+  const plain = nonGoalsFor({ traits: [], kind: 'web-app' }, ['record', 'user'], []);
+  assert.ok(!plain.some((goal) => /Never produced/.test(goal)));
 });

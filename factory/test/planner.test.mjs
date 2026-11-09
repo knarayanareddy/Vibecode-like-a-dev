@@ -354,3 +354,20 @@ test('a rejected value suggests the nearest valid one, or where it does belong',
   assert.match(message({ traits: ['zzzzzz'] }), /unknown trait "zzzzzz"\. Known:/);
   assert.doesNotMatch(message({ traits: ['zzzzzz'] }), /did you mean/);
 });
+
+test('the vocabulary block accepts both overrides and rejects malformed ones', () => {
+  const base = {
+    name: 'vet-check',
+    idea: 'A small tool that records and reports a weekly metric for a team.',
+    kind: 'web-app',
+    stage: 'mvp',
+    traits: ['auth'],
+    risks: {}
+  };
+  const errorsFor = (vocabulary) => validateProfile(normalizeProfile({ ...base, vocabulary }));
+
+  assert.deepEqual(errorsFor({ forbidden: ['diagnosis'], affirmed: ['settlement'] }), []);
+  assert.ok(errorsFor({ forbidden: 'diagnosis' }).some((error) => /vocabulary\.forbidden: must be a list/.test(error)));
+  assert.ok(errorsFor({ banned: ['x'] }).some((error) => /vocabulary\.banned: unknown field/.test(error)));
+  assert.ok(errorsFor(['diagnosis']).some((error) => /vocabulary: must be an object/.test(error)));
+});
