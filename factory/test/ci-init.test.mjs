@@ -74,7 +74,10 @@ test('the generated workflow fails on a fixture with a stray anchor', (t) => {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe']
   });
-  assert.match(clean, /PASS/);
+  // An anchor-free repository has nothing proven, so the verdict is NOT VERIFIED
+  // rather than PASS (BUG-9). It is still a non-failure: the point of this step is
+  // that a stray anchor is what makes the workflow fail.
+  assert.match(clean, /NOT VERIFIED/);
 
   // Then a stray anchor: exactly what the workflow's first step runs.
   mkdirSync(path.join(repo, 'tests'), { recursive: true });
@@ -153,4 +156,46 @@ test('the repository ships a composite action a non-developer can add', () => {
   }
   assert.match(action, /GITHUB_STEP_SUMMARY/, 'it publishes a readable table');
   assert.match(action, /gh pr comment/, 'and it can post that table on the pull request');
+});
+
+test('a packet where nothing is proven reports NOT VERIFIED, not PASS', (t) => {
+  const repo = emptyRepo(t);
+  cli(['ci', 'init', '--project', repo, '--packet', 'packet']);
+  const result = execFileSync(process.execPath, [path.join(repo, 'packet', 'spec-check.mjs'), '--repo', '.'], {
+    cwd: repo,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  // Exit 0 is right for an unimplemented project; the word PASS was the lie.
+  assert.match(result, /NOT VERIFIED/);
+  assert.match(result, /0 of \d+ automated requirement\(s\) proven/);
+  assert.doesNotMatch(result, /PASS ·/);
+});
+
+test('an anchored but unclaimed packet is PASS, and says so distinctly', (t) => {
+  const repo = emptyRepo(t);
+  cli(['ci', 'init', '--project', repo, '--packet', 'packet']);
+  // Anchor every automated requirement with a real assertion, but leave them `todo`.
+  // This is the repository's own shape: the tests exist, the claim does not.
+  const spec = JSON.parse(readFileSync(path.join(repo, 'packet', 'spec.json'), 'utf8'));
+  const automated = spec.requirements.filter((requirement) => requirement.verify === 'automated');
+  const marker = ['@', 'req '].join('');
+  mkdirSync(path.join(repo, 'src'), { recursive: true });
+  mkdirSync(path.join(repo, 'tests'), { recursive: true });
+  writeFileSync(path.join(repo, 'src', 'index.mjs'), 'export const ok = () => 1;\n');
+  writeFileSync(
+    path.join(repo, 'tests', 'all.test.mjs'),
+    `import { ok } from '../src/index.mjs';\n${automated.map((requirement) => `// ${marker}${requirement.id}`).join('\n')}\ntest('all', () => { expect(ok()).toBe(1); });\n`
+  );
+
+  const result = execFileSync(process.execPath, [path.join(repo, 'packet', 'spec-check.mjs'), '--repo', '.'], {
+    cwd: repo,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  // Not "nothing is proven": the tests are there. The wording must not claim
+  // otherwise, and the verdict must not read as unverified evidence.
+  assert.match(result, /PASS ·/);
+  assert.match(result, /anchored but not marked done/);
+  assert.doesNotMatch(result, /NOT VERIFIED/);
 });

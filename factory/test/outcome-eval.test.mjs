@@ -144,7 +144,12 @@ test('live cmd agent runner executes inside isolated git workspaces with zero le
         "  const spec = JSON.parse(readFileSync('specs/spec.json', 'utf8'));",
         `  const anchors = spec.requirements.filter((r) => r.verify === 'automated').map((r) => '// ${reqTag} ' + r.id).join('\\n');`,
         "  writeFileSync('src/index.mjs', `export function createRateLimiter({ limit, windowMs }) {\n  const hits = new Map();\n  return {\n    check(key, nowMs = Date.now(), correlationId = 'req-0') {\n      const active = (hits.get(key) ?? []).filter((t) => nowMs - t < windowMs);\n      if (active.length >= limit) {\n        hits.set(key, active);\n        return { allowed: false, error: { code: 'RATE_LIMITED', retryAfterMs: Math.max(1, windowMs - (nowMs - active[0])), correlationId } };\n      }\n      active.push(nowMs);\n      hits.set(key, active);\n      return { allowed: true, remaining: limit - active.length, correlationId };\n    }\n  };\n}\n`);",
-        "  writeFileSync('tests/requirements.test.mjs', `import test from 'node:test';\\nimport assert from 'node:assert/strict';\\n${anchors}\\ntest('denied path covered', () => { assert.ok(true); });\\n`);",
+        // The assertion must be able to fail. BLK-1 made a literal-argument
+        // assertion a hard error, correctly: it proves nothing. This mock agent
+        // stands in for a competent one, so it asserts on the product's behaviour.
+        // (The literal form is deliberately not quoted here: the checker is lexical
+        // and would read this comment as the very violation it describes.)
+        "  writeFileSync('tests/requirements.test.mjs', `import test from 'node:test';\\nimport assert from 'node:assert/strict';\\nimport { createRateLimiter } from '../src/index.mjs';\\n${anchors}\\ntest('denied path is covered after the limit', () => { const limiter = createRateLimiter({ limit: 1, windowMs: 1000 }); limiter.check('k', 0); assert.equal(limiter.check('k', 1).allowed, false); });\\n`);",
         "}",
         "process.stdout.write(JSON.stringify({ total_tokens: 420, cost_usd: 0.002 }) + '\\n');"
       ].join('\n'),

@@ -87,6 +87,77 @@ function inputShapeErrors(raw) {
   return errors;
 }
 
+/**
+ * Suggest the closest known value for a rejected one.
+ *
+ * A new user's first profile is a guess at the vocabulary, so "unknown trait
+ * uploads" with a list of thirteen values leaves them to spot the difference
+ * themselves. Damerau-Levenshtein (with adjacent transposition, because typos are
+ * usually a swap) is enough at this scale and needs no dependency.
+ */
+function editDistance(a, b) {
+  const rows = a.length + 1;
+  const columns = b.length + 1;
+  const grid = Array.from({ length: rows }, (_, i) => [i, ...Array(columns - 1).fill(0)]);
+  for (let j = 0; j < columns; j += 1) grid[0][j] = j;
+  for (let i = 1; i < rows; i += 1) {
+    for (let j = 1; j < columns; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      grid[i][j] = Math.min(grid[i - 1][j] + 1, grid[i][j - 1] + 1, grid[i - 1][j - 1] + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+        grid[i][j] = Math.min(grid[i][j], grid[i - 2][j - 2] + 1);
+      }
+    }
+  }
+  return grid[rows - 1][columns - 1];
+}
+
+/**
+ * The closest allowed value, or null when nothing is close enough to be helpful.
+ * A bad suggestion is worse than none: it sends the reader to the wrong word.
+ */
+export function closestMatch(value, allowed, { maxDistance = 2 } = {}) {
+  const needle = String(value).toLowerCase();
+  // A truncation of the right word ("prod" for "production") is the most common
+  // guess, and it is many edits away from the full value at any length.
+  const prefix = allowed.find((candidate) => String(candidate).toLowerCase().startsWith(needle) && needle.length >= 3);
+  let best = null;
+  for (const candidate of allowed) {
+    const distance = editDistance(needle, String(candidate).toLowerCase());
+    // Allow one extra edit on longer words; short ones must be near-exact.
+    const limit = Math.min(maxDistance, Math.max(1, Math.floor(candidate.length / 3)));
+    if (distance <= limit && (best === null || distance < best.distance)) best = { candidate, distance };
+  }
+  // Prefer the shortest candidate that starts with what was typed.
+  if (prefix) return prefix;
+  return best ? best.candidate : null;
+}
+
+/**
+ * One line explaining a rejected value: the closest match, or, when the value is
+ * legal somewhere else in the profile, that fact.
+ *
+ * "agent" is a valid *kind*, so telling a reader it is not a trait without saying
+ * where it does belong sends them looking for a typo that does not exist.
+ */
+const SIBLING_VOCABULARIES = [
+  { field: 'kind', values: () => KINDS },
+  { field: 'stage', values: () => STAGES },
+  { field: 'users.scale', values: () => SCALES },
+  { field: 'risk flag', values: () => RISK_FLAGS }
+];
+
+function describeUnknown(value, field, allowed) {
+  const text = String(value);
+  const suggestion = closestMatch(text, allowed);
+  if (suggestion) return `unknown ${field} "${text}" (did you mean "${suggestion}"? Known: ${allowed.join(', ')})`;
+  const elsewhere = SIBLING_VOCABULARIES.find(
+    (entry) => entry.field !== field && entry.values().some((candidate) => String(candidate).toLowerCase() === text.toLowerCase())
+  );
+  if (elsewhere) return `unknown ${field} "${text}" ("${text}" is a valid ${elsewhere.field}, not a ${field}; known ${field}s: ${allowed.join(', ')})`;
+  return `unknown ${field} "${text}". Known: ${allowed.join(', ')}`;
+}
+
 function unknownKeys(value, allowed, label, errors) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return;
   for (const key of Object.keys(value)) {
@@ -170,22 +241,20 @@ export function validateProfile(profile) {
   }
 
   if (!KINDS.includes(profile.kind)) {
-    errors.push(`kind: must be one of ${KINDS.join(', ')} (got "${profile.kind}")`);
+    errors.push(`kind: ${describeUnknown(profile.kind, 'kind', KINDS)}`);
   }
 
   if (!STAGES.includes(profile.stage)) {
-    errors.push(`stage: must be one of ${STAGES.join(', ')} (got "${profile.stage}")`);
+    errors.push(`stage: ${describeUnknown(profile.stage, 'stage', STAGES)}`);
   }
 
   if (!SCALES.includes(profile.users.scale)) {
-    errors.push(`users.scale: must be one of ${SCALES.join(', ')} (got "${profile.users.scale}")`);
+    errors.push(`users.scale: ${describeUnknown(profile.users.scale, 'scale', SCALES)}`);
   }
 
   for (const trait of profile.traits) {
     if (!TRAITS.includes(trait)) {
-      errors.push(
-        `traits: unknown trait "${trait}". Known: ${TRAITS.join(', ')}. Unknown traits are rejected so the router cannot silently ignore a decision.`
-      );
+      errors.push(`traits: ${describeUnknown(trait, 'trait', TRAITS)}. Unknown traits are rejected so the router cannot silently ignore a decision.`);
     }
   }
 

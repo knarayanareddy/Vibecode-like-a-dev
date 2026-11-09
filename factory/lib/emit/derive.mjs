@@ -866,8 +866,31 @@ export function ownRulesFor(profile) {
   const sentences = idea
     .split(/(?<=[.!?;])\s+|\n+/)
     .map((sentence) => sentence.trim().replace(/^[-*\d.\s]+/, ''))
-    .filter((sentence) => sentence.length > 20 && /\b(must|never|only|cannot|can ?not|always|at most|at least|no more than)\b/i.test(sentence));
-  return [...new Set(sentences)].slice(0, 6);
+    .filter((sentence) => sentence.length > 20 && isRuleSentence(sentence));
+  return [...new Set(sentences)];
+}
+
+/**
+ * A sentence that states behaviour, not background.
+ *
+ * The modal test alone missed rules written in the present tense — "Refunds are
+ * issued as a compensating ledger entry" is an obligation the product must honour,
+ * and dropping it meant the packet silently listed two of an idea's five rules.
+ * A behavioural verb is the second signal; the first sentence of an idea is
+ * usually the framing ("A marketplace where patients book…") and is not a rule,
+ * which is why position is excluded rather than relied on.
+ */
+const BEHAVIOURAL_VERB =
+  /\b(?:issues?|issued|records?|recorded|redacts?|encrypts?|validates?|rejects?|acknowledges?|retries|quarantines?|deduplicates?|persists?|enforces?|stores?|stored|sends?|notifies?|charges?|refunds?|calculates?|derives?|keeps?|requires?|allows?|blocks?|escalates?)\b/i;
+
+// Passive voice is the other way an obligation is written: "Settlement is
+// reconciled nightly", "Access is denied by default". A verb list cannot enumerate
+// every verb, but the `is/are <verb>ed` shape is regular enough to recognise.
+const PASSIVE_OBLIGATION = /\b(?:is|are|was|were)\s+(?:not\s+)?[a-z]+ed\b/i;
+
+export function isRuleSentence(sentence) {
+  if (/\b(must|never|only|cannot|can ?not|always|at most|at least|no more than)\b/i.test(sentence)) return true;
+  return BEHAVIOURAL_VERB.test(sentence) || PASSIVE_OBLIGATION.test(sentence);
 }
 
 export function surfacesFor(plan) {

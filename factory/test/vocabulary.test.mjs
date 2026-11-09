@@ -10,6 +10,7 @@ import test from 'node:test';
 import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { articleFor, ideaNouns, pluralOf, singularOf, vocabularyFor } from '../lib/emit/vocabulary.mjs';
+import { ownRulesFor } from '../lib/emit/derive.mjs';
 import { ROOT } from '../lib/indexer.mjs';
 
 /**
@@ -271,4 +272,40 @@ test('a weak pick that is only praise falls back to the kind, not to the adjecti
   // shape, not about how sure the scorer happens to be.
   const inventory = vocabularyFor({ name: 'inventory', idea: 'Inventory sync.', kind: 'data-pipeline', traits: [], risks: {} });
   assert.equal(inventory.primary, 'inventory');
+});
+
+/**
+ * BUG-6: the "rules your idea already states" list silently dropped present-tense
+ * rules and capped the list at six. A five-rule idea rendered two of them, and the
+ * review's eight-rule idea rendered six — the two missing being the ones with the
+ * most legal exposure.
+ */
+test('a rule stated in the present tense is still a rule', () => {
+  const rules = ownRulesFor({
+    idea:
+      'A marketplace where patients book consultations. ' +
+      'The product must never give a diagnosis. ' +
+      'Refunds are issued as a compensating ledger entry. ' +
+      'Clinics record every consultation in a ledger. ' +
+      'Every settlement is reconciled nightly.'
+  });
+  assert.ok(rules.some((rule) => /Refunds are issued/.test(rule)), 'a present-tense obligation was dropped');
+  assert.ok(rules.some((rule) => /record every consultation/.test(rule)));
+  // The framing sentence is not a rule: it describes the product, not a behaviour.
+  assert.ok(!rules.some((rule) => /^A marketplace where/.test(rule)), 'the framing sentence is not an invariant');
+});
+
+test('no rule is dropped in silence, however many the idea states', () => {
+  const eight = [
+    'The product must never give a diagnosis.',
+    'Refunds are issued as a compensating ledger entry.',
+    'Clinics record every consultation in a ledger.',
+    'The mobile app must work offline.',
+    'Settlement is reconciled nightly.',
+    'Access is denied by default.',
+    'Records are deleted within 30 days of a request.',
+    'Every payment retries at most three times.'
+  ];
+  const rules = ownRulesFor({ idea: `A clinic platform. ${eight.join(' ')}` });
+  assert.equal(rules.length, eight.length, `expected all ${eight.length} rules, got ${rules.length}: ${rules.join(' | ')}`);
 });

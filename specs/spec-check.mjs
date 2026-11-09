@@ -173,15 +173,146 @@ const EMPTY_BODY =
   /\b(?:test|it)\s*\(\s*(?:['"`][^'"`]*['"`]|\w+)\s*,\s*(?:async\s*)?\([^)]*\)\s*=>\s*\{\s*\}\s*\)|\b(?:test|it)\s*\([^)]*\bfunction\s*\([^)]*\)\s*\{\s*\}\s*\)|def\s+test_\w+\s*\([^)]*\):\s*(?:\n\s*(?:pass|\.\.\.)\s*)?$/m;
 // A literal on both sides of an equality assertion: expect(true).toBe(true),
 // assertEqual(1, 1), assert 1 == 1.
-const LITERAL_PAIR =
-  /\bexpect\s*\(\s*(?:true|false|null|undefined|-?\d+(?:\.\d+)?|['"`][^'"`]*['"`])\s*\)\s*\.\s*(?:toBe|toEqual|toStrictEqual|toMatch)\s*\(\s*(?:true|false|null|undefined|-?\d+(?:\.\d+)?|['"`][^'"`]*['"`])\s*\)|\bassert(?:Equal|StrictEqual|Equals)?\s*\(\s*(?:true|false|-?\d+(?:\.\d+)?|['"`][^'"`]{0,40}['"`])\s*,\s*(?:true|false|-?\d+(?:\.\d+)?|['"`][^'"`]{0,40}['"`])\s*\)|\bassert\s+(?:True|1|\d+\s*==\s*\d+)\s*(?:$|\n)/m;
+//
+// This used to be one regex per call style, and every style it did not name was a
+// hole: `assert.equal(1, 1)` — the exact idiom this repository's own tests use —
+// passed, because the pattern matched `assert(...)` and never `assert.<method>(`.
+// The check is now structural: read the argument list, and call it vacuous when
+// every argument is a literal, or when it compares a name against itself. That
+// covers node:assert, chai, assert.* and expect().<matcher> in one rule.
+const LITERAL_ONLY = /^(?:true|false|null|undefined|-?\d+(?:\.\d+)?|['"`][^'"`]*['"`])$/;
+
+/** The text between the parenthesis at openIndex and its match, quote-aware. */
+function balancedArguments(text, openIndex) {
+  let depth = 0;
+  let quote = null;
+  for (let i = openIndex; i < text.length; i += 1) {
+    const character = text[i];
+    if (quote) {
+      if (character === '\\') i += 1;
+      else if (character === quote) quote = null;
+      continue;
+    }
+    if (character === '"' || character === "'" || character === '`') {
+      quote = character;
+      continue;
+    }
+    if (character === '(') depth += 1;
+    else if (character === ')') {
+      depth -= 1;
+      if (depth === 0) return text.slice(openIndex + 1, i);
+    }
+  }
+  return null;
+}
+
+/** Split an argument list on top-level commas, ignoring commas inside literals. */
+function splitArguments(argumentText) {
+  const args = [];
+  let current = '';
+  let depth = 0;
+  let quote = null;
+  for (let i = 0; i < argumentText.length; i += 1) {
+    const character = argumentText[i];
+    if (quote) {
+      current += character;
+      if (character === '\\') {
+        current += argumentText[i + 1] ?? '';
+        i += 1;
+      } else if (character === quote) quote = null;
+      continue;
+    }
+    if (character === '"' || character === "'" || character === '`') {
+      quote = character;
+      current += character;
+      continue;
+    }
+    if ('([{'.includes(character)) depth += 1;
+    if (')]}'.includes(character)) depth -= 1;
+    if (character === ',' && depth === 0) {
+      args.push(current.trim());
+      current = '';
+      continue;
+    }
+    current += character;
+  }
+  if (current.trim() !== '') args.push(current.trim());
+  return args;
+}
+
+const ASSERTION_CALL =
+  /\b(?:assert(?:\.(?:ok|equal|strictEqual|deepEqual|deepStrictEqual|notEqual|notStrictEqual|isTrue|isFalse|isOk))?|assertEqual|assertStrictEqual|assertDeepEqual)\s*\(/g;
+const EXPECT_CALL = /\bexpect\s*\(/g;
+const MATCHER_CALL = /\.\s*(?:toBe|toEqual|toStrictEqual|toMatch|toBeDefined|toBeTruthy)\s*\(/;
+
+/**
+ * Assertions that cannot fail, with a snippet naming the call.
+ *
+ * Heuristic, and labelled as one: a literal argument is a strong signal, not a
+ * proof, and an assertion built from a constant is a defect in the test rather
+ * than in the product.
+ */
+function vacuousAssertions(source) {
+  const found = [];
+  for (const match of source.matchAll(ASSERTION_CALL)) {
+    const openIndex = match.index + match[0].length - 1;
+    const args = splitArguments(balancedArguments(source, openIndex) ?? '');
+    if (args.length === 0) continue;
+    const allLiteral = args.every((argument) => LITERAL_ONLY.test(argument));
+    const selfCompare = args.length === 2 && args[0] === args[1] && /^[\w.$]+$/.test(args[0]);
+    if (allLiteral || selfCompare) found.push(match[0].replace(/\s*\($/, '') + `(${args.join(', ')})`);
+  }
+  for (const match of source.matchAll(EXPECT_CALL)) {
+    const openIndex = match.index + match[0].length - 1;
+    const received = splitArguments(balancedArguments(source, openIndex) ?? '');
+    const afterIndex = openIndex + (balancedArguments(source, openIndex) ?? '').length + 2;
+    const tail = source.slice(afterIndex, afterIndex + 120);
+    const matcher = MATCHER_CALL.exec(tail);
+    if (!matcher) continue;
+    const matcherArgs = splitArguments(balancedArguments(tail, matcher.index + matcher[0].length - 1) ?? '');
+    if (received.length !== 1) continue;
+    const bothLiteral = LITERAL_ONLY.test(received[0]) && matcherArgs.length > 0 && matcherArgs.every((argument) => LITERAL_ONLY.test(argument));
+    const selfCompare = matcherArgs.length === 1 && matcherArgs[0] === received[0] && /^[\w.$]+$/.test(received[0]);
+    // `toBeDefined()` takes no argument and is not vacuous by itself; it is only a
+    // weak assertion, which this rule does not try to grade.
+    if (bothLiteral || selfCompare) found.push(`expect(${received[0]})${matcher[0].trim()}(${matcherArgs.join(', ')})`);
+  }
+  return [...new Set(found)];
+}
 // A test file that reaches nothing outside itself cannot be testing the product.
 // The signal has to cover every ecosystem the checker accepts: JS/TS imports and
 // requires, Python `from x import`, Rust `use`, Go *and* Java/C# `import`, and PHP
 // `use`. A Go test in the same package legitimately has no import line at all, so a
 // package clause counts as reaching the module under test rather than as a miss.
-const IMPORT_SIGNAL =
-  /^\s*(?:import\s|const\s+\w+\s*=\s*require\(|from\s+\S+\s+import\s|use\s+\w+|#\[|package\s+\w+)/m;
+// Test infrastructure is not the product. `import { test } from 'node:test'`
+// satisfied the old signal, so the "imports nothing" rule never fired for any file
+// that looked like a real test.
+// No trailing \\b: `node:assert/strict` continues with `/`, which is not a word
+// character, so a word boundary never matched there.
+const TEST_INFRASTRUCTURE =
+  /^(?:node:(?:test|assert)(?:\/|$)|(?:@jest\/globals|vitest|jest|mocha|chai|ava|tap|uvu|sinon|@testing-library\/[\w-]+|supertest|pytest|unittest|hypothesis)(?:\/|$))/;
+const IMPORT_SPECIFIER = /(?:^\s*import\s[^'"]*?from\s+|require\s*\(\s*|^\s*from\s+|^\s*import\s+)['"]([^'"]+)['"]/gm;
+
+/**
+ * Does this file import anything that is not test tooling?
+ *
+ * A relative or aliased import reaches the product by definition. A bare package
+ * counts unless it is a test framework, so a test that imports only `node:test`
+ * and `node:assert` is still "imports nothing" — which is the truth the rule is
+ * trying to express.
+ */
+function reachesProduct(source) {
+  // A Go test lives in the same package as the code under test and legitimately has
+  // no import line at all. The package clause is the declaration that this file
+  // belongs to the product's own module, so it counts as reaching it.
+  if (/^\s*package\s+\w+/m.test(source)) return true;
+  for (const match of source.matchAll(IMPORT_SPECIFIER)) {
+    const specifier = match[1];
+    if (specifier.startsWith('.') || specifier.startsWith('@/') || specifier.startsWith('/')) return true;
+    if (!TEST_INFRASTRUCTURE.test(specifier)) return true;
+  }
+  return false;
+}
 
 /**
  * Which anchored requirements in one test file are *not* proven by their own test.
@@ -436,14 +567,17 @@ for (const file of walk(REPO)) {
     if (SKIP_SIGNAL.test(source)) {
       problems.push('a skipped, todo or disabled test carries the anchor');
     }
-    if (LITERAL_PAIR.test(source)) {
-      problems.push('the assertion compares two literals, so it cannot fail');
+    // Name the call, not just the category: an agent that reads "compares two
+    // literals" still has to find which line, and the line is the thing to fix.
+    const vacuous = vacuousAssertions(source);
+    if (vacuous.length > 0) {
+      problems.push(`the assertion \`${vacuous[0]}\` cannot fail${vacuous.length > 1 ? ` (and ${vacuous.length - 1} more like it)` : ''}`);
     }
     if (EMPTY_BODY.test(source)) {
       problems.push('a test body is empty');
     }
     // The test must reach outside its own directory to be testing the product.
-    const insideOnly = !IMPORT_SIGNAL.test(source);
+    const insideOnly = !reachesProduct(source);
     if (insideOnly) {
       problems.push('the file imports nothing, so it cannot exercise the product');
     }
@@ -466,7 +600,7 @@ for (const file of walk(REPO)) {
       const hard =
         REQUIRE_ASSERTIONS ||
         SKIP_SIGNAL.test(source) ||
-        LITERAL_PAIR.test(source) ||
+        vacuous.length > 0 ||
         (claimed && !ASSERTION_SIGNAL.test(source));
       if (hard) errors.push(hollowMsg);
       else notices.push(`${hollowMsg} (pass --require-assertions to fail CI on hollow tests)`);
@@ -478,6 +612,11 @@ for (const stray of strayAnchors) errors.push(stray);
 
 // 5. traceability ratchet
 let pending = 0;
+// Counted separately from errors: a run that proves nothing is not a failure in
+// lenient mode, but calling it PASS is what makes a green log lie.
+let proven = 0;
+let automatedTotal = 0;
+let anchoredAutomated = 0;
 for (const requirement of requirements) {
   const hits = anchored.get(requirement.id) ?? [];
   const inTests = hits.filter((hit) => hit.isTest);
@@ -489,6 +628,15 @@ for (const requirement of requirements) {
     }
     continue;
   }
+
+  automatedTotal += 1;
+  // "Proven" means the requirement is *claimed* done and a test carries its anchor.
+  // A requirement that is anchored but still `todo` is work in progress, not
+  // evidence, which is why --strict fails on it.
+  if (status === 'done' && inTests.length > 0) proven += 1;
+  // Anchored requirements count separately: they are the machine-checkable part of
+  // the packet, and a packet can be entirely anchored while still unclaimed.
+  if (inTests.length > 0) anchoredAutomated += 1;
 
   // With a test report, "done" stops being a string somebody typed: the id must be
   // justified by a test that passed in the latest run. Names are matched by the
@@ -554,10 +702,20 @@ if (!STRICT && !REQUIRE_ASSERTIONS) {
     `\n· lenient mode (${LOCAL ? '--local' : 'no flags'}): pending requirements and hollow tests are notices. CI should run --strict --require-assertions.`
   );
 }
+// Three outcomes, not two. "PASS" on a packet where no requirement is proven is
+// the one word a reader skims and a CI log keeps, so it gets its own verdict.
+// A packet with no anchored requirements at all has no evidence. One that is fully
+// anchored but not yet claimed `done` is a different state: the tests exist, the
+// claim does not, and saying "nothing is proven" there would be false.
+const noEvidence = automatedTotal > 0 && anchoredAutomated === 0;
+const unproven = !failed && noEvidence;
+const verdict = failed ? 'FAIL' : unproven ? 'NOT VERIFIED' : 'PASS';
 console.log(
-  `\n${failed ? 'FAIL' : 'PASS'} · ${errors.length} error(s) · ${pending} pending` +
+  `\n${verdict} · ${errors.length} error(s) · ${pending} pending · ${proven} of ${automatedTotal} automated requirement(s) proven` +
+    (proven === 0 && anchoredAutomated > 0 ? `, ${anchoredAutomated} more anchored but not marked done` : '') +
     (suppressed > 0 ? ` · ${suppressed} ignored` : '') +
-    (notices.length && !failed ? ' (pending is expected before implementation; use --strict in release CI)' : '') +
+    (unproven ? ' — no test carries an anchor yet, so this run is not evidence' : '') +
+    (notices.length && !failed && !unproven ? ' (pending is expected before implementation; use --strict in release CI)' : '') +
     '\n'
 );
 

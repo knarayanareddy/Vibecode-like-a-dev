@@ -11,7 +11,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { applyChange, archiveChange, emitChange, planChange, recompilePacket, renderChange, staticImportsOf, validateChange, verifyChange } from '../lib/change.mjs';
+import { applyChange, archiveChange, emitChange, inferArea, planChange, recompilePacket, renderChange, staticImportsOf, validateChange, verifyChange } from '../lib/change.mjs';
 import { emitPacket } from '../lib/emit/index.mjs';
 import { buildIndex } from '../lib/indexer.mjs';
 import { enableModules } from '../lib/modules.mjs';
@@ -719,4 +719,58 @@ test('static import extraction ignores packages and keeps relative specifiers', 
     "export { e } from './e';"
   ].join('\n');
   assert.deepEqual(staticImportsOf(source).sort(), ['../lib/b', './a.ts', './c', './d', './e'].sort());
+});
+
+/**
+ * BUG-8: area came from the key namespace alone, so an AI-safety requirement filed
+ * under `feature.` reported "areas: core" and the proposal never mentioned the `ai`
+ * practice or its gates. The blast radius understated what the change touches —
+ * the opposite of what it exists for.
+ */
+test('an AI requirement filed under feature. lands in the ai area, with its reasons', (t) => {
+  const p = packet();
+  t.after(p.cleanup);
+  const target = p.spec.requirements.find((requirement) => requirement.verify === 'automated');
+
+  const plan = planChange({
+    packetDir: p.outDir,
+    change: {
+      id: 'add-ai-guardrail',
+      title: 'AI must not diagnose',
+      why: 'A wrong suggestion in a clinical setting is a safety incident, not a UX defect.',
+      risk: 'low',
+      add: [
+        {
+          key: 'feature.ai-no-diagnosis',
+          title: 'The triage agent never states a diagnosis',
+          statement: 'When the triage agent proposes a specialty, the system shall present it as a suggestion without naming a condition.',
+          acceptance: ['The response names a specialty and never a condition.'],
+          failurePath: 'A patient reads a suggested condition as clinical advice.',
+          verify: 'automated'
+        }
+      ]
+    }
+  });
+
+  assert.deepEqual(plan.blastRadius.areas, ['ai']);
+  assert.ok(
+    plan.blastRadius.obligations.some((obligation) => /^ai:/.test(obligation)),
+    'the ai practice obligation must be in the blast radius'
+  );
+  // The inference is stated, so a reviewer can disagree with it.
+  assert.match(plan.blastRadius.areaReasons.join('\n'), /feature\.ai-no-diagnosis: ai \(/);
+
+  const proposal = renderChange(plan).get('proposal.md');
+  assert.match(proposal, /Areas touched: ai/);
+  assert.match(proposal, /→ ai \(/, 'the proposal must say why the area was chosen');
+});
+
+test('an explicit area is never second-guessed', () => {
+  assert.deepEqual(inferArea({ explicit: 'data', key: 'feature.ai-thing', statement: 'a triage model shall answer' }), {
+    area: 'data',
+    reason: 'stated on the requirement'
+  });
+  // And a requirement with no signal at all keeps the honest default.
+  assert.equal(inferArea({ key: 'feature.export', statement: 'The system shall export a board.', title: 'Export' }).area, 'core');
+  assert.equal(inferArea({ key: 'core.thing', statement: 'A thing exists.', title: 'Thing' }).area, 'core');
 });

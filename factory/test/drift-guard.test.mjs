@@ -82,7 +82,8 @@ test('expect(true).toBe(true) is an error, not a pass', (t) => {
   f.writeTest(`import { run } from '../src/run.js';\n// @req ${f.target}\ntest('looks like a test', () => { expect(true).toBe(true); });\n`);
   const result = f.run();
   assert.equal(result.code, 1, 'a literal assertion cannot prove a requirement');
-  assert.match(result.out, /compares two literals/);
+  // The message names the call, so the reader does not have to find the line.
+  assert.match(result.out, /cannot fail/);
 });
 
 test('a skipped or todo test carrying an anchor is an error', (t) => {
@@ -180,4 +181,56 @@ test('the generated CI workflow runs the strict flags by default', (t) => {
   const workflow = readFileSync(path.join(f.root, '.github', 'workflows', 'spec.yml'), 'utf8');
   assert.match(workflow, /spec-check\.mjs --repo \. --strict --require-assertions/);
   assert.match(workflow, /--report test-report\.json/, 'the evidence path is documented in the workflow it generates');
+});
+/**
+ * BLK-1: the tautology rule was written per call style, so every style it did not
+ * name was a hole. `assert.equal(1, 1)` — the idiom this repository's own tests
+ * use — passed, because the pattern matched `assert(...)` and never
+ * `assert.<method>(`. The check is now structural: read the arguments, and call it
+ * vacuous when every argument is a literal or when it compares a name to itself.
+ */
+for (const [label, body] of [
+  ['assert.equal', 'assert.equal(1, 1);'],
+  ['assert.ok', 'assert.ok(true);'],
+  ['assert.strictEqual', "assert.strictEqual('a', 'a');"],
+  ['assert.equal on one name', "assert.equal(state, state);"]
+]) {
+  test(`a tautology in ${label} form is an error, not a pass`, (t) => {
+    const f = fixture(t);
+    f.writeTest(`import { run } from '../src/run.js';\n// @req ${f.target}\ntest('looks like a test', () => { ${body} });\n`);
+    const result = f.run();
+    assert.equal(result.code, 1, `${body} cannot prove a requirement`);
+    assert.match(result.out, /cannot fail/);
+  });
+}
+
+test('an assertion on computed values is not vacuous', (t) => {
+  const f = fixture(t);
+  // The mirror of the rule above: `add(1, 1)` contains literals but is not itself a
+  // literal, and rejecting it would make the check hostile to real tests.
+  f.writeTest(
+    `import { run } from '../src/run.js';
+// @req ${f.target}
+const add = (a, b) => a + b;
+test('computes', () => { assert.equal(add(1, 1), 2); assert.ok(run() === 0); });
+`
+  );
+  const result = f.run('--require-assertions');
+  assert.doesNotMatch(result.out, /cannot fail/);
+});
+
+test('a test file that imports only test infrastructure does not reach the product', (t) => {
+  const f = fixture(t);
+  // `import from 'node:test'` satisfied the old import rule, so "imports nothing"
+  // never fired for any file that looked like a test.
+  f.writeTest(
+    `import test from 'node:test';
+import assert from 'node:assert/strict';
+// @req ${f.target}
+test('asserts on nothing in particular', () => { assert.equal(Date.now() > 0, true); });
+`
+  );
+  const result = f.run('--require-assertions');
+  assert.equal(result.code, 1);
+  assert.match(result.out, /imports nothing/);
 });
