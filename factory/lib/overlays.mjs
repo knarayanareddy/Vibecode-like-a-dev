@@ -121,8 +121,29 @@ export function validateOverlay(overlay, id = overlay?.id) {
  * Order is by layer, not by the order the profile happens to list them in, because
  * "team overrides domain overrides org" is the only ordering that means anything.
  */
+/**
+ * Regimes imply the overlay that carries their obligations.
+ *
+ * `risks.regulated: true` used to raise the tier by three points and add no
+ * content, so a health product reached tier 3 with zero HIPAA requirements. A
+ * named regime now brings its own layer; the profile can still list overlays
+ * explicitly, and an explicit list is additive, never a replacement.
+ */
+export function overlaysForRegimes(profile) {
+  const regimes = Array.isArray(profile?.regulation) ? profile.regulation : [];
+  const suggested = [];
+  for (const regime of regimes) {
+    if (overlaySource(regime) && !suggested.includes(regime)) suggested.push(regime);
+  }
+  return suggested;
+}
+
 export function resolveOverlays(profile, { profileDir = ROOT, index = null } = {}) {
-  const ids = Array.isArray(profile.overlays) ? profile.overlays : [];
+  const explicit = Array.isArray(profile.overlays) ? profile.overlays : [];
+  // Regime overlays come first so an organisation's own overlay can modify the
+  // requirement a regime contributed (layers apply in order).
+  const regimeOverlays = overlaysForRegimes(profile).filter((id) => !explicit.includes(id));
+  const ids = [...regimeOverlays, ...explicit];
   const errors = [];
   const loaded = [];
   const seen = new Set();
@@ -149,6 +170,7 @@ export function resolveOverlays(profile, { profileDir = ROOT, index = null } = {
       errors.push(`overlays: ${source} is not valid JSON (${error.message})`);
       continue;
     }
+    if (regimeOverlays.includes(id)) overlay.autoAppliedBy = `regulation:${id}`;
     const problems = validateOverlay(overlay, id);
     if (problems.length > 0) {
       errors.push(...problems.map((problem) => `${id}: ${problem}`));

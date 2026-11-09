@@ -30,6 +30,9 @@ const NEVER_A_NOUN = new Set([
   'whose', 'still', 'even', 'just', 'very', 'much', 'many', 'more', 'most', 'less', 'least',
   'first', 'second', 'third', 'next', 'last', 'same', 'different', 'possible', 'available', 'required',
   'users', 'user', 'application', 'service', 'system', 'product', 'records', 'record', 'data', 'app',
+  // The delivery form, not the thing delivered. "A platform to manage appointments"
+  // used to produce a packet whose noun was `platform`.
+  'platform', 'platforms',
   'tool', 'stuff', 'able', 'allow', 'allows', 'allowed', 'ensure', 'ensures', 'provide', 'provides',
   'support', 'supports', 'including', 'includes', 'based', 'across', 'becomes', 'become', 'happens',
   'happen', 'takes', 'runs', 'gets', 'seems', 'looks', 'means', 'means', 'needs', 'exists', 'exist',
@@ -52,6 +55,12 @@ const NEVER_A_NOUN = new Set([
  * one still needs another signal, but two noun-ish words beat one.
  */
 const NOUN_SUFFIX = /(tion|sion|ment|ness|ity|ance|ence|ship|age|ery|ist|ism|logy|graphy)s?$/;
+/**
+ * Abstract nouns that name an *outcome*, not a thing the product manages. They are
+ * the vocabulary of a bug report, and an idea mentions them in passing ("a summary
+ * of failures") far more often than it builds around them.
+ */
+const ABSTRACT_OUTCOME = /(tion|sion|ment|ness|ity|ure)$/;
 /** Suffixes that make the word a verb, participle or adverb. Veto, unless anchored. */
 const VERBISH = /(ly|ed|ise|ize|ises|izes|ised|ized|ating|ising|izing|ates|ifies)$/;
 /** German and Dutch nouns, since ideas arrive in those languages too. */
@@ -65,6 +74,8 @@ const NON_ENGLISH_NOUN = /(ung|heit|keit|schaft|ismus|iteiten|ingen|ungen)$/;
  * (`"a participant exercises"` -> `"exercises"` -> `"exercis"`).
  */
 const KNOWN_NOUN_STEMS = new Set([
+  // Short domain nouns that fall under the four-character token floor.
+  'gym', 'spa', 'tax', 'vat', 'job', 'car', 'van', 'pet', 'art', 'pod', 'map',
   'participant', 'patient', 'tenant', 'client', 'merchant', 'student', 'recipient', 'claimant',
   'applicant', 'accountant', 'resident', 'attendant', 'consultant', 'defendant', 'agent', 'parent',
   'incident', 'document', 'payment', 'settlement', 'shipment', 'appointment', 'reimbursement',
@@ -91,6 +102,10 @@ const ACTOR_STEMS = new Set([
   'recruiter', 'candidate', 'trainee', 'attendee', 'organizer',
   'organiser', 'volunteer', 'donor', 'custodian', 'guardian', 'caregiver', 'pharmacist',
   'practitioner', 'technician', 'scheduler', 'assessor', 'officer', 'clerk', 'cashier', 'landlord',
+  // Organisations are actors too: "a clinic" books, a "team" votes, a "school" enrols.
+  'clinic', 'hospital', 'practice', 'school', 'team', 'company', 'organisation', 'organization',
+  'agency', 'bank', 'store', 'shop', 'restaurant', 'firm', 'department', 'studio', 'gym',
+  'pharmacy', 'laboratory', 'provider', 'insurer', 'university', 'charity', 'cooperative',
   'lessee', 'lessor', 'renter', 'guest', 'passenger', 'staff', 'receptionist', 'driver', 'rider',
   'courier', 'student', 'teacher', 'instructor', 'applicant', 'claimant', 'accountant', 'analyst',
   'consumer', 'client', 'partner', 'team', 'organisation', 'organization', 'clinic', 'hospital',
@@ -107,7 +122,16 @@ const ADJECTIVE_WORDS = new Set([
   'tiny', 'large', 'small', 'simple', 'basic', 'single', 'multiple', 'several', 'entire', 'whole',
   'full', 'empty', 'long', 'short', 'fast', 'slow', 'high', 'low', 'new', 'old', 'real', 'actual',
   'correct', 'wrong', 'right', 'clean', 'safe', 'private', 'public', 'custom', 'standard',
-  'modern', 'main', 'primary', 'secondary', 'extra', 'open', 'closed', 'free', 'paid', 'live', 'dead'
+  'modern', 'main', 'primary', 'secondary', 'extra', 'open', 'closed', 'free', 'paid', 'live', 'dead',
+  'boutique', 'small-business', 'enterprise', 'premium', 'budget', 'local', 'global', 'internal',
+  'external', 'personal', 'professional', 'independent', 'upcoming', 'current', 'previous',
+  // Quality adjectives: they read as praise, not as a thing a product owns.
+  // "Something nice for people who like things" produced the noun `nice`, and the
+  // packet rendered "One nice goes from created to finished" in every template.
+  'nice', 'good', 'bad', 'great', 'better', 'best', 'easy', 'hard', 'simple', 'complex',
+  'beautiful', 'pretty', 'awesome', 'amazing', 'cool', 'useful', 'helpful', 'powerful',
+  'smart', 'clever', 'efficient', 'reliable', 'robust', 'scalable', 'secure', 'modern',
+  'intuitive', 'seamless', 'flexible', 'lightweight', 'quick', 'instant', 'automatic'
 ]);
 
 /**
@@ -135,6 +159,32 @@ const ABSTRACT = new Set([
   'approve', 'approves', 'enforce', 'enforces', 'replace', 'replaces', 'retain', 'retains',
   'capture', 'captures', 'submit', 'submits', 'handle', 'handles', 'exceed', 'exceeds'
 ]);
+
+/**
+ * Software-shape nouns: the word a product is packaged as, not the thing it manages.
+ *
+ * "A multi-tenant telehealth platform" names the *delivery form*. Promoting
+ * `telehealth` — the modifier that happens to sit in the determiner chain — made a
+ * packet say "One telehealth goes from created to finished" 307 times. These words
+ * are legitimate heads when nothing better exists, so they stay usable, but they
+ * lose to a word that names an actual domain object.
+ */
+const ABSTRACT_SOFTWARE_NOUNS = new Set([
+  'platform', 'app', 'application', 'service', 'system', 'tool', 'solution', 'product',
+  'site', 'website', 'portal', 'dashboard', 'saas', 'software', 'suite', 'engine',
+  'framework', 'library', 'plugin', 'extension', 'marketplace', 'startup', 'business'
+]);
+
+/** The sentences that state a rule. These name domain objects; marketing does not. */
+const NORMATIVE_SENTENCE =
+  /\b(must|never|only|cannot|can ?not|always|at most|at least|no more than|shall|requires?|refuses?|rejects?)\b/i;
+
+/**
+ * Participles and gerunds read as modifiers ("upcoming appointments", "matching
+ * records"). They are already vetoed when unanchored; anchored ones need demoting
+ * too, or "the upcoming" becomes the product's noun.
+ */
+const PARTICIPLE = /(?:ing|ed)$/;
 
 /**
  * Determiners: a word right after one of these is a noun with high probability.
@@ -229,12 +279,47 @@ function scoreCandidates(text) {
   const counts = new Map();
   for (const token of tokens) counts.set(token, (counts.get(token) ?? 0) + 1);
 
+  // Domain objects are named in the sentences that state a rule. Marketing prose
+  // ("a beautiful platform for modern clinics") is where the packaging noun lives.
+  const normativeTokens = new Set();
+  for (const sentence of words.split(/(?<=[.!?;])\s+/)) {
+    if (!NORMATIVE_SENTENCE.test(sentence)) continue;
+    for (const token of sentence.split(/[^a-z0-9-]+/)) if (token.length >= 4) normativeTokens.add(token);
+  }
+
+  // The opening sentences describe what the product *is*; later ones state rules and
+  // constraints. That is where its domain object is named, and it is the only
+  // positional signal available without a parser. Without it, "a message" in a
+  // constraint sentence outscored "an appointment" in the description sentence.
+  const openingTokens = new Set();
+  for (const sentence of words.split(/(?<=[.!?;])\s+/).slice(0, 2)) {
+    for (const token of sentence.split(/[^a-z0-9-]+/)) if (token.length >= 4) openingTokens.add(token);
+  }
+
   const anchored = new Set();
+  // Words that only look like heads: they sit directly before the packaging noun
+  // ("telehealth platform"), so the head of that phrase is the abstraction, not them.
+  const demotedModifiers = new Set();
   for (const match of words.matchAll(DET_CHAIN)) {
     const chain = match[1].trim().split(/\s+/).map((w) => w.toLowerCase());
     let idx = 0;
     while (idx < chain.length - 1 && isModifierToken(chain[idx])) idx += 1;
     const chosen = chain[idx];
+    // A word directly in front of the packaging noun is its modifier. Check the
+    // whole chain, not just the head: in "a booking app for gyms" the modifier is
+    // the head because `app` was filtered, and in "a telehealth platform" it is the
+    // same shape.
+    // The head itself is the modifier when the packaging word that followed it was
+    // filtered out of the chain ("a booking app" -> chain is just [booking]).
+    if (idx === chain.length - 1) {
+      const after = words.slice(match.index + match[0].length).match(/^\s+([a-z][a-z0-9-]+)/);
+      if (after && ABSTRACT_SOFTWARE_NOUNS.has(after[1])) demotedModifiers.add(chosen);
+    }
+    if (ABSTRACT_SOFTWARE_NOUNS.has(chain[idx + 1])) demotedModifiers.add(chosen);
+    for (const word of chain) {
+      const position = chain.indexOf(word);
+      if (position + 1 < chain.length && ABSTRACT_SOFTWARE_NOUNS.has(chain[position + 1])) demotedModifiers.add(word);
+    }
     // Locate exact offset after `chosen` inside `words` to detect possessives ("the customer's order").
     let cursor = match.index + match[0].length - match[1].length;
     for (let i = 0; i <= idx; i += 1) {
@@ -264,6 +349,19 @@ function scoreCandidates(text) {
     const knownNoun = isKnownNoun(token);
     if (VERBISH.test(token) && !isAnchor) continue;
     if (ADJECTIVE.test(token) && !knownNoun) continue;
+    // "telehealth" in "a telehealth platform" is a domain adjective. Without this
+    // the anchor bonus and the score floor kept promoting it over the clinic the
+    // idea actually talks about.
+    if (demotedModifiers.has(token) && !knownNoun && !NOUN_SUFFIX.test(token)) continue;
+    // An outcome noun mentioned in passing is not the product's object. A plain
+    // plural counts as a mention: "orders" is a thing, "failures" is a report on
+    // something that went wrong.
+    if (ABSTRACT_OUTCOME.test(token) && !knownNoun && !isAnchor && count < 2) continue;
+    // "upcoming", "matching", "scheduled": a participle with no noun evidence is
+    // describing a noun, not being one. The ubiquitous-language table used to list
+    // "upcoming" as one of the product's things.
+    if (PARTICIPLE.test(token) && !knownNoun && !NOUN_SUFFIX.test(token) && !isAnchor) continue;
+
 
     const stem = singularOf(token).replace(/en$/, '');
     const canonical = singularOf(token);
@@ -276,7 +374,10 @@ function scoreCandidates(text) {
         anchored: isAnchor,
         knownNoun,
         nounSuffix: NOUN_SUFFIX.test(token) || NOUN_SUFFIX.test(canonical),
-        nonEnglishNoun: NON_ENGLISH_NOUN.test(token)
+        nonEnglishNoun: NON_ENGLISH_NOUN.test(token),
+        demoted: demotedModifiers.has(token) || demotedModifiers.has(canonical),
+        normative: normativeTokens.has(token),
+        opening: openingTokens.has(token)
       });
     } else {
       prev.count += count;
@@ -285,25 +386,46 @@ function scoreCandidates(text) {
       prev.nounSuffix = prev.nounSuffix || NOUN_SUFFIX.test(token) || NOUN_SUFFIX.test(canonical);
       prev.nonEnglishNoun = prev.nonEnglishNoun || NON_ENGLISH_NOUN.test(token);
       prev.rawTokens.push(token);
+      prev.demoted = prev.demoted || demotedModifiers.has(token);
+      prev.normative = prev.normative || normativeTokens.has(token);
+      prev.opening = prev.opening || openingTokens.has(token);
     }
   }
 
   const scored = [];
   for (const entry of groups.values()) {
-    const { word, count, anchored: isAnchor, knownNoun, nounSuffix, nonEnglishNoun } = entry;
+    const { word, count, anchored: isAnchor, knownNoun, nounSuffix, nonEnglishNoun, demoted, normative, opening } = entry;
     const hyphenated = word.includes('-');
     let score = 0;
     if (isAnchor) score += 3;
+    // A modifier in front of the packaging noun is evidence *against* being the
+    // product's noun: "telehealth platform" is a kind of platform, not a kind of
+    // telehealth. Subtracting rather than skipping keeps the word available when
+    // the idea genuinely has nothing else.
+    // Two or more, not one: "telehealth" deserves the demotion, but "appointment"
+    // is a genuine domain object that happens to sit before a human noun
+    // ("an appointment for a patient"). Demoting any modifier preceding a
+    // software word cost the carepath packet its correct noun.
+    // A modifier of the packaging noun is demoted whether or not it looks like a
+    // noun: `booking` in "a booking app" is the product's activity, not its object.
+    if (demoted && !ABSTRACT_SOFTWARE_NOUNS.has(word)) score -= 3;
     if (nounSuffix || knownNoun) score += 2;
     if (nonEnglishNoun) score += 2;
     if (count > 1) score += 1;
     if (count >= 3) score += 1;
+    // Being named in a rule is evidence that a word belongs to the domain rather
+    // than the pitch — but only when the word could be a thing. Awarding it
+    // unconditionally promoted `message` and `human` over the anchored, enumerated
+    // domain object `appointment`, and a packet then said "one message goes from
+    // created to finished".
+    if (normative && (nounSuffix || knownNoun || isAnchor || count > 1)) score += 1;
+    if (opening) score += 2;
     // Hyphenated terms ("double-entry", "dead-letter") are great glossary candidates,
     // so give +1 when anchored or repeated, not on a 1x unanchored negative ("double-disbursement").
     if (hyphenated && (isAnchor || count > 1)) score += 1;
     if (!hyphenated && word.length >= 7) score += 1;
-    if (!isAnchor && count < 2 && !nounSuffix && !nonEnglishNoun && !knownNoun) score = 1;
-    scored.push({ word, count, score, anchored: isAnchor });
+    if (!isAnchor && count < 2 && !nounSuffix && !nonEnglishNoun && !knownNoun && !demoted) score = 1;
+    scored.push({ word, count, score, anchored: isAnchor, demoted: Boolean(demoted) });
   }
 
   // On a tie, the longer word is the more specific one ("order" over "copy",
@@ -314,14 +436,96 @@ function scoreCandidates(text) {
 }
 
 /**
+ * The tenant noun: who the isolated parties are.
+ *
+ * "Multi-tenant" describes the architecture; the idea names the organisation. In a
+ * telehealth product that is a clinic, and "two patients in different tenants" is
+ * the sentence a two-slot template produced instead.
+ */
+const TENANT_HINT = /\b(?:for|to|across|within)\s+(?:small\s+|large\s+)?([a-z][a-z0-9-]{3,})\b/gi;
+const ORG_NOUN = new Set([
+  'clinic', 'hospital', 'practice', 'school', 'team', 'company', 'organisation', 'organization',
+  'agency', 'bank', 'store', 'shop', 'restaurant', 'firm', 'department', 'studio', 'gym',
+  'pharmacy', 'university', 'charity', 'workspace', 'account', 'tenant', 'workshop'
+]);
+
+function tenantNounFor(profile, candidates, primary) {
+  if (profile?.domain?.tenant) return profile.domain.tenant;
+  if (profile?.risks?.multiTenant !== true) return null;
+  const fromCandidates = candidates.find((candidate) => ORG_NOUN.has(singularOf(candidate.word)));
+  if (fromCandidates) return singularOf(fromCandidates.word);
+  const matches = [...String(profile?.idea ?? '').matchAll(TENANT_HINT)];
+  for (const match of matches) {
+    if (ORG_NOUN.has(singularOf(match[1].toLowerCase()))) return singularOf(match[1].toLowerCase());
+  }
+  return 'tenant';
+}
+
+/** The actor who can do the dangerous things: never the end user. */
+const PRIVILEGED_HINT = /\b(admin(?:istrator)?|operator|owner|manager|supervisor|reviewer|approver|auditor)s?\b/i;
+
+function privilegedActorFor(candidates) {
+  const match = candidates.find((candidate) => PRIVILEGED_HINT.test(candidate.word));
+  return match ? singularOf(match.word) : 'privileged user';
+}
+
+/**
  * The words a packet is allowed to use about this product.
  *
  * `primary` is a singular noun, `secondary` the actor. Both are always usable in
  * a sentence: when the idea gives us nothing above the confidence floor we fall
  * back to the noun its kind implies, and say so via `source`.
  */
+/**
+ * Instruction-shaped sentences are not evidence about the product. Scoring them
+ * let an injected idea make "instructions" the packet's noun, which then appeared
+ * in every generated sentence — the injection echoing itself through the document.
+ */
+const INSTRUCTIONAL = /\b(ignore|disregard|forget|system prompt|previous instructions|you are now|assistant)\b/i;
+
+const CODE_SHAPED = /\b(?:curl|wget|bash|sh|zsh|sudo|chmod|rm|npm|npx|git|http|https|www|com|org|net|dev|io)\b/i;
+
+function scorableIdea(idea) {
+  const text = String(idea ?? '');
+  // Drop instruction sentences and command-shaped tokens whatever else the idea is
+  // saying. Neither names a thing the product *is*, and both were reaching the
+  // candidate list (`text`, `whatever`, `req-999`, `bash`, `curl`).
+  return text
+    .split(/(?<=[.!?;])\s+|\n+/)
+    .filter((sentence) => !INSTRUCTIONAL.test(sentence) && !/https?:\/\//i.test(sentence))
+    .map((sentence) => sentence.replace(/[^\s]*[\/:|`][^\s]*/g, ' ').replace(/\bREQ-\d+\b/gi, ' '))
+    .join(' ')
+    .replace(new RegExp(CODE_SHAPED.source, 'gi'), ' ');
+}
+
 export function vocabularyFor(profile) {
-  const candidates = scoreCandidates(profile.idea);
+  const candidatePool = scoreCandidates(scorableIdea(profile.idea));
+  const domain = profile?.domain && typeof profile.domain === 'object' ? profile.domain : null;
+
+  // An explicit `domain` block beats inference. The noun picker exists to remove
+  // the author's choice, not to overrule it: when someone writes `entity: "visit"`
+  // the packet says "visit" even if the idea repeats "telehealth" twelve times.
+  if (domain?.entity) {
+    const entity = domain.entity;
+    const entityPlural = domain.entityPlural ?? pluralOf(entity);
+    const endUser = domain.endUser ?? domain.actors?.[0] ?? candidatePool.find((candidate) => isActorWord(candidate.word))?.word ?? 'user';
+    const actor = domain.actors?.find((name) => singularOf(name) !== singularOf(entity)) ?? endUser;
+    return {
+      primary: entity,
+      primaryPlural: entityPlural,
+      aPrimary: `${articleFor(entity)} ${entity}`,
+      secondary: actor,
+      secondaryPlural: pluralOf(actor),
+      secondarySource: 'domain',
+      source: 'domain',
+      tenantNoun: domain.tenant ?? null,
+      endUser,
+      privilegedActor: domain.privilegedActor ?? null,
+      candidates: candidatePool.slice(0, 6).map((candidate) => ({ word: singularOf(candidate.word), count: candidate.count }))
+    };
+  }
+
+  const candidates = candidatePool;
   const confident = candidates.filter((candidate) => candidate.score >= 3);
   const fallback = KIND_FALLBACK[profile.kind] ?? ['record', 'user'];
 
@@ -333,15 +537,52 @@ export function vocabularyFor(profile) {
   // human/org role ("participant", "coordinator", "therapist") for `secondary` when
   // the confident pool contains both, so sentences like "a participant's claim" read
   // naturally instead of "an exercis's sponsor".
-  const primaryPool = confident.length > 0 ? confident : candidates;
-  const topObject = primaryPool.find((candidate) => !isActorWord(candidate.word)) ?? null;
-  const primaryPick = topObject ?? primaryPool[0] ?? null;
-  const primary = primaryPick ? singularOf(primaryPick.word) : fallback[0];
-  const restPool = [...confident, ...candidates].filter((candidate) => singularOf(candidate.word) !== primary);
-  const topActor = confident.find((candidate) => singularOf(candidate.word) !== primary && isActorWord(candidate.word)) ?? null;
+  // A candidate may name the product only if it cleared the confidence floor. The
+  // old fallback took the highest-scoring leftover whatever its score, so "An app
+  // for booking" gave the noun `booking` — a word the determiner pass had
+  // explicitly rejected as a modifier. An idea with no determiner at all ("Inventory
+  // sync.") still has one plausible noun, and that is what `weak` is for.
+  const primaryPool = confident.length > 0 ? confident : candidates.filter((candidate) => !candidate.demoted);
+  // The product's noun is the thing acted upon, not the actor. Prefer any
+  // non-actor noun, then the best candidate of any kind, and only then an actor:
+  // "A telehealth platform where patients book visits with clinicians" must name
+  // the visit, not the patient who books it.
+  const nonActorPool = [...confident, ...candidates].filter((candidate) => !candidate.demoted && !isActorWord(candidate.word));
+  const topObject = nonActorPool[0] ?? null;
+  // An actor is the fallback only when the idea names nothing else: `patient` is a
+  // person in every sentence it appears in, and a packet whose noun is a person
+  // talks about the user instead of the product.
+  const actorFallback = primaryPool.find((candidate) => isActorWord(candidate.word)) ?? primaryPool[0] ?? null;
+  const primaryPick = topObject ?? actorFallback;
+  // BUG-1 step 5 of the review: a weak pick that is not a *thing* is a guess, not a
+  // decision. "Something nice for people who like things" used to yield the
+  // adjective `nice`, which rendered as "One nice goes from created to finished" in
+  // every template. The kind's neutral noun is more useful than a wrong one — but a
+  // genuine noun the idea happened to write without a determiner ("Inventory sync")
+  // must survive, so the test is the word's shape, not its score.
+  const weak = confident.length === 0;
+  const weakNotAThing =
+    weak &&
+    primaryPick !== null &&
+    !isActorWord(primaryPick.word) &&
+    (isModifierToken(primaryPick.word) || PARTICIPLE.test(primaryPick.word) || ABSTRACT_OUTCOME.test(primaryPick.word));
+  const primary = primaryPick && !weakNotAThing ? singularOf(primaryPick.word) : fallback[0];
+  // Below the confidence floor we do not guess. The old fallback took the next
+  // candidate whatever its score, which is how "A platform to manage medical
+  // appointments" produced the actor `manage` and a CLI idea produced `compress`:
+  // a verb rendered into every sentence that needed a person.
+  //
+  // A recognised actor noun is different: `clinic`, `clinician` and `patient` are
+  // never verbs, so domain evidence about a person or an organisation is a safe
+  // pick even without a determiner. Everything else has to clear the floor.
+  const actorCandidates = [...confident, ...candidates].filter(
+    (candidate) => singularOf(candidate.word) !== primary && isActorWord(candidate.word)
+  );
+  const restPool = confident.filter((candidate) => singularOf(candidate.word) !== primary);
+  const topActor = actorCandidates[0] ?? null;
   const secondaryPick = topActor ?? restPool[0] ?? null;
   const secondary = secondaryPick ? singularOf(secondaryPick.word) : fallback[1];
-  const source = primaryPick ? (confident.length > 0 ? 'idea' : 'weak') : 'kind';
+  const source = primary !== fallback[0] && primaryPick ? (weak ? 'weak' : 'idea') : 'kind';
 
   return {
     primary,
@@ -350,6 +591,12 @@ export function vocabularyFor(profile) {
     secondary,
     secondaryPlural: pluralOf(secondary),
     secondarySource: secondaryPick?.word ?? null,
+    // Role-shaped slots. Templates need a tenant noun and a privileged actor that
+    // are not the end user: "privileged changes are attributable to the patient"
+    // was what a two-slot vocabulary produced.
+    tenantNoun: tenantNounFor(profile, candidates, primary),
+    endUser: secondary,
+    privilegedActor: privilegedActorFor(candidates),
     // Did we name the product, guess, or fall back to what its kind implies?
     source,
     // Candidates are singular: the ubiquitous-language table lists *things*, and

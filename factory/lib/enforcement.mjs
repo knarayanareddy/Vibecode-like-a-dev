@@ -24,6 +24,7 @@ import { ROOT } from './indexer.mjs';
 
 const REGISTRY_PATH = path.join(ROOT, 'factory', 'gates', 'gates.json');
 const TEMPLATE_PATH = path.join(ROOT, 'factory', 'templates', 'gate-runner.mjs');
+const HERE_TEMPLATES = path.join(ROOT, 'factory', 'templates');
 
 export const RUNNER = 'enforcement/gates.mjs';
 export const RUNNER_COMMAND = 'node enforcement/gates.mjs';
@@ -66,7 +67,14 @@ export function enforcementFiles(plan) {
   const rules = Object.fromEntries(
     ids
       .filter((id) => registry[id])
-      .map((id) => [id, { check: registry[id].check, how: registry[id].how, mechanism: registry[id].mechanism }])
+      .map((id) => [id, {
+        check: registry[id].check,
+        how: registry[id].how,
+        mechanism: registry[id].mechanism,
+        // The milestone at which this gate becomes blocking. The runner sequences
+        // gates by phase so adoption is incremental and no gate is quietly deleted.
+        phase: registry[id].phase ?? 0
+      }])
   );
 
   const files = new Map();
@@ -76,9 +84,28 @@ export function enforcementFiles(plan) {
   const template = readFileSync(TEMPLATE_PATH, 'utf8');
   files.set(RUNNER, template.replace('__RULES__', JSON.stringify(rules, null, 2)));
 
+  // The summary renderer ships with the runner (BLK-4): the gate table is the part a
+  // product owner reads, and it must exist wherever the runner does, with no install.
+  const summary = readFileSync(path.join(HERE_TEMPLATES, 'gate-summary.mjs'), 'utf8');
+  files.set('enforcement/summary.mjs', summary);
+
   // Config fragments for the gates whose real check belongs to another tool.
+  //
+  // Attestation gates are special: the *runner* knows every registry check kind, so
+  // a packet must ship the starter template for any attestation the runner could be
+  // asked to evaluate — including one whose requirement arrived from an overlay the
+  // profile did not list. Shipping only the selected gate's template made the
+  // runner able to check a document the packet never provided a starter for.
   for (const id of ids) {
     for (const file of registry[id]?.files ?? []) {
+      const source = path.join(ROOT, 'factory', 'gates', file.template);
+      if (existsSync(source)) files.set(file.path, readFileSync(source, 'utf8'));
+    }
+  }
+  for (const [id, entry] of Object.entries(registry)) {
+    if (entry.check?.kind !== 'attest') continue;
+    for (const file of entry.files ?? []) {
+      if (files.has(file.path)) continue;
       const source = path.join(ROOT, 'factory', 'gates', file.template);
       if (existsSync(source)) files.set(file.path, readFileSync(source, 'utf8'));
     }

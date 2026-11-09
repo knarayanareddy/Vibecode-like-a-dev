@@ -40,14 +40,50 @@ function packetPlan(plan) {
   return { ...plan, skipped, stats: { ...plan.stats, skipped: skipped.length } };
 }
 
-export function renderPacket(plan) {
+/**
+ * Where the packet will live, as a repo-relative POSIX path with no trailing
+ * slash. Every generated command and every "read this file first" instruction
+ * has to name the directory the author actually chose: `compile -o docs/spec`
+ * used to emit `node specs/spec-check.mjs`, so an agent following the packet
+ * verbatim ran a command against a path that does not exist.
+ */
+export function packetDirLabel(outDir, override) {
+  // Callers that compile into a throwaway directory (packet-sync, tests) still
+  // need the *committed* path in the text, so the label is overridable.
+  if (typeof override === 'string' && override.trim() !== '') return override.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+  if (!outDir) return 'specs';
+  const absolute = path.resolve(outDir).split(path.sep).join('/');
+  const relative = path.relative(process.cwd(), path.resolve(outDir)).split(path.sep).join('/');
+  // Outside the repo there is no relative path to embed, so use the absolute one:
+  // it is correct, and visibly unusual. Inside the repo prefer the relative form,
+  // which keeps a committed packet stable across machines and checkouts.
+  const label = relative.startsWith('..') ? absolute : relative === '' ? '.' : relative;
+  return label.replace(/\\/g, '/').replace(/\/+$/, '');
+}
+
+/**
+ * BLK-3: which files an agent must load is a design choice, not a constant.
+ *
+ * The full packet is built for a reader who wants the reasoning: nine documents,
+ * every acceptance criterion, every gate mechanism. The lean packet is built for a
+ * model paying for every token: the entry point, the requirements as data, and the
+ * checkers that can fail. Nothing is deleted from what the requirements *say*; the
+ * prose around them is what the lean arm leaves out.
+ */
+export function renderPacket(plan, outDir, { packetDir, lean = false } = {}) {
   // An explicit `enabled: false` remains visible to `vld plan`, but an opt-out
   // must not alter the emitted packet relative to a profile where the opt-in is absent.
   const emitted = packetPlan(plan);
-  const d = derive(emitted);
+  const d = derive(emitted, { packetDir: packetDirLabel(outDir, packetDir) });
   const files = new Map();
 
-  if (emitted.packet === 'single-file') {
+  if (lean) {
+    // The lean packet is the entry point plus the manifest. AGENTS.md already carries
+    // the requirements, the gates, the commands and the rules; spec.json carries the
+    // criteria an automated check reads.
+    files.set('spec.json', manifest(emitted, d, { lean: true }));
+    files.set('AGENTS.md', agentsMd(emitted, d, { lean: true }));
+  } else if (emitted.packet === 'single-file') {
     files.set('spec.md', singleFileSpec(emitted, d));
   } else {
     for (const [name, build] of FULL_PACKET) {
@@ -55,8 +91,10 @@ export function renderPacket(plan) {
     }
   }
 
-  files.set('spec.json', manifest(emitted, d));
-  files.set('AGENTS.md', agentsMd(emitted, d));
+  if (!lean) {
+    files.set('spec.json', manifest(emitted, d));
+    files.set('AGENTS.md', agentsMd(emitted, d));
+  }
 
   const checker = path.join(TEMPLATES, 'spec-check.mjs');
   if (existsSync(checker)) {
@@ -159,8 +197,8 @@ function ensureSafeOutputRoot(outDir) {
   return target;
 }
 
-export function emitPacket(plan, outDir, { force = false } = {}) {
-  const { files, derived } = renderPacket(plan);
+export function emitPacket(plan, outDir, { force = false, packetDir, lean = false } = {}) {
+  const { files, derived } = renderPacket(plan, outDir, { packetDir, lean });
   const target = ensureSafeOutputRoot(outDir);
 
   if (existsSync(target) && !force) {

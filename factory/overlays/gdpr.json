@@ -1,0 +1,67 @@
+{
+  "id": "gdpr",
+  "layer": "domain",
+  "title": "GDPR data-subject rights",
+  "why": "The GDPR grants rights that a generic retention rule cannot satisfy: lawful basis, access and portability, erasure, restriction, and a record of processing. Each is a separate obligation with its own failure mode.",
+  "addRequirements": [
+    {
+      "key": "data.lawful-basis",
+      "title": "Every purpose has a recorded lawful basis",
+      "area": "data",
+      "statement": "When personal data is processed, the application shall record the lawful basis and the purpose for that processing.",
+      "definition": "Each field a {secondary} supplies is held for a named purpose with a named legal basis, not for \"the product\" in general.",
+      "failurePath": "If a purpose has no basis recorded, the write is refused rather than accepted under an implied consent.",
+      "acceptance": [
+        "Given a field with no recorded basis, when it is written, then the write is refused with a stable code.",
+        "Given the processing record, when it is exported, then each purpose names its basis and the data it covers."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "data.subject-access-export",
+      "title": "A subject can obtain their data in a portable form",
+      "area": "data",
+      "statement": "When a data subject requests their data, the application shall produce a machine-readable export of everything held about them through an auditable request path.",
+      "definition": "One request produces one complete file, and the {secondary} can tell which request produced it.",
+      "failurePath": "If the export would omit a store the product knows about, the request fails loudly instead of returning a plausible partial file.",
+      "acceptance": [
+        "Given a subject with records in every store, when they request an export, then each store's records appear in the file.",
+        "Given an export, when it is requested a second time, then the request is recorded and the file reflects current data."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "data.erasure-request",
+      "title": "Erasure removes the data and records that it did",
+      "area": "data",
+      "statement": "When a subject requests erasure and no legal hold applies, the application shall remove their personal data from primary storage, derived stores and caches.",
+      "definition": "After erasure a search for the subject returns nothing except the non-personal audit of the erasure itself.",
+      "failurePath": "If a legal hold applies, the request is refused with the reason and the hold's end condition, never silently ignored.",
+      "acceptance": [
+        "Given a subject with a legal hold, when erasure is requested, then it is refused with the hold named.",
+        "Given an accepted erasure, when every store is queried, then no personal field remains and the audit entry survives."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "data.processing-record",
+      "title": "A processing register is generated, not hand-written",
+      "area": "data",
+      "statement": "The repository shall contain a processing register that lists each purpose, its basis, the data categories, the recipients and the retention period.",
+      "definition": "The register is a build artifact with a test, not a document someone remembers to update.",
+      "failurePath": "If the register omits a purpose the code processes, the check fails rather than publishing an incomplete record.",
+      "acceptance": [
+        "Given a new purpose in code, when the register is not updated, then the check fails and names the purpose.",
+        "Given the register, when it is exported, then every entry names basis, categories, recipients and retention."
+      ],
+      "verify": "automated"
+    }
+  ],
+  "addGates": [
+    {
+      "id": "G3-SUBJECT-RIGHTS",
+      "tier": 3,
+      "statement": "Access and erasure are both exercised by a test against every store the product owns."
+    }
+  ]
+}

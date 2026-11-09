@@ -880,7 +880,11 @@ export function recompilePacket(profileFile, packetDir, { force = true } = {}) {
   // Keep the packet's own record of its source, so a second archive is not an error.
   const previousSpec = existsSync(path.join(packetDir, 'spec.json')) ? readJson(path.join(packetDir, 'spec.json')) : null;
   plan.profileLabel = previousSpec?.project?.profile ?? profileFile.split(path.sep).join('/');
-  const result = emitPacket(plan, packetDir, { force });
+  // A change re-emits into a directory that already exists, so the label must come
+  // from the packet itself. Deriving it from the caller's cwd would rewrite every
+  // generated command to a different path on a second archive.
+  const packetDirLabel = previousSpec?.project?.packetDir ?? undefined;
+  const result = emitPacket(plan, packetDir, { force, packetDir: packetDirLabel });
   return { outDir: result.outDir, requirements: plan.requirements.length, gates: plan.gates.length };
 }
 

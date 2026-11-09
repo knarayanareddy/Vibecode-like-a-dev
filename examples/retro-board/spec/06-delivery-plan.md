@@ -20,7 +20,7 @@ _A running, tested, documented box that can create and delete a board and nothin
 - [ ] Add the CI workflow with lint, typecheck and test jobs, and make it required on the default branch.
 - [ ] Add configuration validation that names every missing variable before the first board is created.
 - [ ] Write the runbook: install, run, test, deploy, and what teams see when the board service is down.
-- [ ] Copy the specification packet into specs/ and wire the spec check into CI.
+- [ ] Copy the specification packet into the repository and wire the spec check into CI.
 - [ ] Answer the open questions that block the board slice; the rest can wait for their phase.
 
 **Exit:** The documented command creates and deletes a board through PostgreSQL, and CI is green on that alone.
@@ -58,8 +58,10 @@ _Working board behaviour end to end, one requirement at a time._
 - [ ] REQ-013 Public entry points that create or change board data are limited per identity and per address, and say how long to wait when they refuse. Test first, then implement, then trace.
 - [ ] REQ-011 The board interface has a versioned, machine-readable contract kept in the repository, and a breaking change fails before merge rather than after a consumer notices. Test first, then implement, then trace.
 - [ ] REQ-012 Every failure on the board interface returns one envelope shape, with an opaque identifier a support conversation can quote. Test first, then implement, then trace.
+- [ ] REQ-015 A team who loses access loses the live channel within one update, and a channel name is never the credential that grants it. Test first, then implement, then trace.
+- [ ] REQ-016 Delivery of boards to one slow team is bounded and observable, and a reconnecting client can tell what it missed instead of assuming it missed nothing. Test first, then implement, then trace.
 
-**Exit:** Each of the 14 requirements is traceable from criterion to test, with its anchor green in CI.
+**Exit:** Each of the 16 requirements is traceable from criterion to test, with its anchor green in CI.
 
 ### Phase 4 — Interface and hardening · week 5-4
 
@@ -106,7 +108,7 @@ Rules for humans and agents alike. The point is to stop the loop where the model
 
 | Risk | Likelihood | Mitigation |
 | --- | --- | --- |
-| Scope creep past the 14 listed requirements | high | The non-goals table is the answer: anything unlisted is rejected in review rather than debated. |
+| Scope creep past the 16 listed requirements | high | The non-goals table is the answer: anything unlisted is rejected in review rather than debated. |
 | An invented abstraction around the board | medium | One context per owned noun; a new layer needs a reason a reviewer can check. |
 | Environment and configuration drift | medium | Configuration is validated at startup and fails by naming the missing variable. |
 | The 4-week calendar slipping | high | Cut a requirement, never a gate; the phase order is already cheapest-first. |

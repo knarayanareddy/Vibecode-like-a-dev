@@ -15,7 +15,7 @@ The 6 words below come from your idea; the rest from the requirements you select
 | **developer** | from your idea — confirm the exact meaning of developer before it appears in code | the idea | no |
 | **repository** | from your idea — confirm the exact meaning of repository before it appears in code | the idea | no |
 | **compiler** | from your idea — confirm the exact meaning of compiler before it appears in code | the idea | no |
-| **maintenance** | from your idea — confirm the exact meaning of maintenance before it appears in code | the idea | no |
+| **acceptance** | from your idea — confirm the exact meaning of acceptance before it appears in code | the idea | no |
 | **Command grammar** | The documented shape of commands, flags and exit codes. | REQ-004 | no |
 
 ### Naming rules

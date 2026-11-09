@@ -1,0 +1,100 @@
+# Composite action: run a VLD specification packet's enforcement on a pull request.
+#
+# Why a composite action rather than a reusable workflow: the audience is people who
+# built a product without ever opening a terminal. "Add these two lines to a file"
+# is a lower bar than authoring a job, and the action can post its result where a
+# non-developer will actually see it.
+name: 'VLD spec check'
+description: 'Fail a pull request when the specification and the code drift apart, and post the requirement and gate table.'
+author: 'vibecode-like-a-dev'
+
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  packet:
+    description: 'Directory holding the compiled packet, relative to the repository root.'
+    required: false
+    default: 'specs'
+  node-version:
+    description: 'Node version used to run the packet checkers.'
+    required: false
+    default: '22'
+  strict:
+    description: 'Treat pending requirements as failures. Leave on for release branches.'
+    required: false
+    default: 'true'
+  require-assertions:
+    description: 'Reject anchored tests that contain no assertion.'
+    required: false
+    default: 'false'
+  comment:
+    description: 'Post the requirement and gate table as a pull-request comment.'
+    required: false
+    default: 'true'
+  github-token:
+    description: 'Token used to comment. Needs pull-requests: write; omit to skip the comment.'
+    required: false
+    default: ''
+
+outputs:
+  verdict:
+    description: 'PASS, FAIL or INCOMPLETE.'
+    value: ${{ steps.summary.outputs.verdict }}
+  report:
+    description: 'Path to the JSON gate report.'
+    value: gates-report.json
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Anchors and drift
+      shell: bash
+      run: |
+        set -euo pipefail
+        flags="--repo ."
+        if [ "${{ inputs.strict }}" = "true" ]; then flags="$flags --strict"; fi
+        if [ "${{ inputs.require-assertions }}" = "true" ]; then flags="$flags --require-assertions"; fi
+        node "${{ inputs.packet }}/spec-check.mjs" $flags
+
+    - name: Gates
+      id: gates
+      shell: bash
+      run: |
+        set -euo pipefail
+        # The report is written even when gates fail, so the summary can explain why.
+        node "${{ inputs.packet }}/enforcement/gates.mjs" --repo . --json > gates-report.json || STATUS=$?
+        cat gates-report.json || true
+        exit ${STATUS:-0}
+
+    - name: Summary
+      id: summary
+      if: always()
+      shell: bash
+      run: |
+        set -euo pipefail
+        node "${{ inputs.packet }}/enforcement/summary.mjs" gates-report.json > gates.md || true
+        cat gates.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+        if grep -q '^### Specification enforcement — PASS' gates.md; then
+          echo "verdict=PASS" >> "$GITHUB_OUTPUT"
+        elif grep -q '^### Specification enforcement — FAIL' gates.md; then
+          echo "verdict=FAIL" >> "$GITHUB_OUTPUT"
+        else
+          echo "verdict=INCOMPLETE" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Comment the table on the pull request
+      if: always() && inputs.comment == 'true' && inputs.github-token != ''
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        set -euo pipefail
+        [ -f gates.md ] || exit 0
+        gh pr comment "${{ github.event.pull_request.number }}" --body-file gates.md

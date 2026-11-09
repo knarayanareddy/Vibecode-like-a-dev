@@ -71,17 +71,33 @@ test('primary journey: plan, compile, verify, then the shipped drift guard agree
   });
   assert.match(drifted.stdout, /PASS/);
 
-  // The same profile compiled into a fresh directory is byte-identical, so the
-  // journey is repeatable. (Recompiling over an existing packet differs by design:
-  // it records the progress it carried forward.)
+  // The same profile compiled to the same logical destination is byte-identical,
+  // so the journey is repeatable. The destination is named explicitly: since
+  // BUG-5 the packet embeds the directory it lives in, so two *different* paths
+  // are supposed to differ in exactly that string and nowhere else.
   const second = path.join(workspace, 'specs-again');
-  const recompiled = await cli(['compile', profilePath, '-o', second]);
+  const recompiled = await cli(['compile', profilePath, '-o', second, '--packet-dir', specs]);
   assert.equal(recompiled.code, 0, recompiled.stderr);
   assert.equal(
     readFileSync(path.join(second, 'spec.json'), 'utf8'),
     readFileSync(path.join(specs, 'spec.json'), 'utf8'),
     'the same profile produces the same manifest'
   );
+
+  // An override must not hide the real default: without it, the embedded path is
+  // the actual output directory.
+  // A destination outside the repository has no meaningful repo-relative name,
+  // so the emitted label must be the absolute path rather than the default.
+  const third = path.join(workspace, 'elsewhere', 'packet');
+  const honored = await cli(['compile', profilePath, '-o', third]);
+  assert.equal(honored.code, 0, honored.stderr);
+  const thirdText = readFileSync(path.join(third, '07-agent-handoff.md'), 'utf8');
+  const expectedLabel = third.split(path.sep).join('/');
+  assert.ok(
+    thirdText.includes(`Read ${expectedLabel}/AGENTS.md first`),
+    `handoff does not name the real packet directory ${expectedLabel}`
+  );
+  assert.ok(!/(^|[^\w-])specs\//.test(thirdText), 'the default path leaked into a non-default output directory');
 });
 
 test('adopted TODO ideas are prominent in advisory mode and refused in strict plan and compile', async (t) => {
@@ -346,7 +362,9 @@ test('vld adopt accepts a Git repository URL, and spec-check/verify enforce [CLA
 
     writeFileSync(
       path.join(appRepo, 'journey_test.go'),
-      `package app\n${anchors}\nfunc TestReal(t *testing.T) { if 1 != 1 { t.Fatalf("broken") } }\n`
+      // BLK-2 rejects comparisons between two literals, so the "real" fixture must
+      // assert on a value the test produced rather than on a constant.
+      `package app\n${anchors}\nfunc TestReal(t *testing.T) { got := run(); if got != 0 { t.Fatalf("broken") } }\n`
     );
     const realCheck = await runSpecCheck(['--strict', '--require-assertions']);
     assert.equal(realCheck.code, 0, realCheck.stdout);

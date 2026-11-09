@@ -9,6 +9,7 @@
     "name": "retro-board",
     "title": "Retro Board",
     "profile": "examples/retro-board/profile.json",
+    "packetDir": "examples/retro-board/spec",
     "kind": "web-app",
     "stage": "mvp",
     "idea": "A retrospective board for small engineering teams. A facilitator creates a board per sprint, teammates add anonymous cards into Start / Stop / Continue columns, then everyone votes and the team leaves with three agreed actions. Today teams do this in a shared doc that nobody can vote on and that loses its history.",
@@ -20,6 +21,8 @@
       "persistence",
       "realtime"
     ],
+    "traitWaivers": [],
+    "regulation": [],
     "risks": {
       "pii": true,
       "payments": false,
@@ -64,7 +67,7 @@
     "countedIn": [
       "tests/**"
     ],
-    "check": "node specs/spec-check.mjs --repo ."
+    "check": "node examples/retro-board/spec/spec-check.mjs --repo ."
   },
   "overlays": [],
   "primitives": [
@@ -393,6 +396,7 @@
         }
       ],
       "verify": "gate",
+      "traits": [],
       "anchor": null,
       "status": "todo"
     },
@@ -415,6 +419,7 @@
         }
       ],
       "verify": "automated",
+      "traits": [],
       "anchor": "tests/core/core-primary-journey.test.ts",
       "status": "todo"
     },
@@ -433,6 +438,7 @@
         }
       ],
       "verify": "manual",
+      "traits": [],
       "anchor": null,
       "status": "todo"
     },
@@ -455,6 +461,9 @@
         }
       ],
       "verify": "automated",
+      "traits": [
+        "persistence"
+      ],
       "anchor": "tests/data/data-persistence.test.ts",
       "status": "todo"
     },
@@ -481,6 +490,9 @@
         }
       ],
       "verify": "automated",
+      "traits": [
+        "auth"
+      ],
       "anchor": "tests/security/auth-identity.test.ts",
       "status": "todo"
     },
@@ -503,6 +515,10 @@
         }
       ],
       "verify": "automated",
+      "traits": [
+        "admin",
+        "auth"
+      ],
       "anchor": "tests/security/auth-authorization.test.ts",
       "status": "todo"
     },
@@ -525,6 +541,7 @@
         }
       ],
       "verify": "manual",
+      "traits": [],
       "anchor": null,
       "status": "todo"
     },
@@ -551,6 +568,7 @@
         }
       ],
       "verify": "manual",
+      "traits": [],
       "anchor": null,
       "status": "todo"
     },
@@ -569,6 +587,7 @@
         }
       ],
       "verify": "automated",
+      "traits": [],
       "anchor": "tests/frontend/ui-design-tokens.test.ts",
       "status": "todo"
     },
@@ -587,6 +606,7 @@
         }
       ],
       "verify": "automated",
+      "traits": [],
       "anchor": "tests/frontend/ux-error-taxonomy.test.ts",
       "status": "todo"
     },
@@ -609,6 +629,7 @@
         }
       ],
       "verify": "automated",
+      "traits": [],
       "anchor": "tests/api/api-contract.test.ts",
       "status": "todo"
     },
@@ -627,6 +648,7 @@
         }
       ],
       "verify": "automated",
+      "traits": [],
       "anchor": "tests/api/api-error-envelope.test.ts",
       "status": "todo"
     },
@@ -645,6 +667,7 @@
         }
       ],
       "verify": "automated",
+      "traits": [],
       "anchor": "tests/security/ops-rate-limits.test.ts",
       "status": "todo"
     },
@@ -667,7 +690,58 @@
         }
       ],
       "verify": "automated",
+      "traits": [],
       "anchor": "tests/core/core-domain-invariants.test.ts",
+      "status": "todo"
+    },
+    {
+      "id": "REQ-015",
+      "key": "realtime.channel-authorization",
+      "area": "reliability",
+      "origin": "catalog",
+      "title": "Realtime channels are authorized on every subscribe and resume",
+      "statement": "When a client subscribes to or resumes a realtime channel, the application shall re-evaluate the caller's authorization against current data before delivering any event.",
+      "failurePath": "If authorization cannot be evaluated (store unavailable, token expired), the subscription is refused and the client is told to re-authenticate rather than silently staying subscribed.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given a subscribed client whose permission is revoked, when the next event is published, then the client is unsubscribed before it receives the payload."
+        },
+        {
+          "id": "AC-02",
+          "text": "Given a reconnect with a token that expired while offline, when the channel is resumed, then the resume is refused with a stable code and no queued events are replayed."
+        }
+      ],
+      "verify": "automated",
+      "traits": [
+        "realtime"
+      ],
+      "anchor": "tests/reliability/realtime-channel-authorization.test.ts",
+      "status": "todo"
+    },
+    {
+      "id": "REQ-016",
+      "key": "realtime.backpressure",
+      "area": "reliability",
+      "origin": "catalog",
+      "title": "Realtime delivery survives a slow consumer and a reconnect",
+      "statement": "When a connected client falls behind or reconnects, the application shall apply a stated backpressure policy and expose a resume point the client can name.",
+      "failurePath": "When the bounded queue overflows, the connection is closed with an explicit reason and the client is told to resynchronize, rather than dropping events silently.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given a client that stops reading, when the buffer limit is exceeded, then only that connection is closed and other subscribers keep receiving events."
+        },
+        {
+          "id": "AC-02",
+          "text": "Given a client that reconnects with its last known cursor, when it resumes, then the events after that cursor are delivered exactly once or replayed from a stated boundary."
+        }
+      ],
+      "verify": "automated",
+      "traits": [
+        "realtime"
+      ],
+      "anchor": "tests/reliability/realtime-backpressure.test.ts",
       "status": "todo"
     }
   ],
@@ -794,9 +868,9 @@
   ],
   "stats": {
     "primitives": 22,
-    "requirements": 14,
-    "acceptanceCriteria": 24,
-    "automated": 10,
+    "requirements": 16,
+    "acceptanceCriteria": 28,
+    "automated": 12,
     "gates": 8,
     "deferred": 2,
     "skipped": 10

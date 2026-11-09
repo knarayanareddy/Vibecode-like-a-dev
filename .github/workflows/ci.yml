@@ -11,6 +11,37 @@ on:
   pull_request:
 
 jobs:
+  minimum-node:
+    # The README and package.json both claim Node 22. A claim nothing runs on is a
+    # claim that rots (BUG-11): this job pins the documented minimum, so lowering
+    # or raising it without updating the docs, the guard and the engine field fails.
+    name: Minimum supported Node
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.0.0
+
+      - name: Engine field matches the documented minimum
+        run: node -e "const m=require('./package.json'); if (m.engines.node !== '>=22') { console.error('engines.node is ' + m.engines.node); process.exit(1); }"
+
+      - name: The CLI refuses an unsupported runtime
+        run: |
+          set -e
+          node --input-type=module -e "
+            Object.defineProperty(process.versions, 'node', { value: '20.20.2', configurable: true });
+            await import('./factory/cli.mjs');
+            console.error('the guard did not fire on Node 20');
+            process.exit(1);
+          " 2>guard.log && { echo 'guard did not fire'; exit 1; }
+          grep -q 'requires Node 22 or newer' guard.log
+
+      - name: Full portable suite on the minimum
+        run: npm test
+
   core:
     name: Linux core specification checks
     runs-on: ubuntu-latest

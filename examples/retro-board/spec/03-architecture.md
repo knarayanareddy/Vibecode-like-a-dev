@@ -100,7 +100,7 @@ Architecture that is not executable is decoration, so each of these runs in CI f
 | Module boundaries | The 3 contexts import only their own domain and the shared kernel | import-boundary rule | A cross-context import appears |
 | Token usage | No raw colour or spacing literal in a component | token lint | A hex colour appears in a component |
 | Contract agreement | Implementation matches the shapes in 04-contracts.md | contract test | A response field is added or removed silently |
-| Requirement coverage | 10 anchored requirements have a passing test | `node specs/spec-check.mjs` | A test is deleted or renamed |
+| Requirement coverage | 12 anchored requirements have a passing test | `node examples/retro-board/spec/spec-check.mjs` | A test is deleted or renamed |
 | Assertion density | Every test asserts an outcome, not just absence of a throw | review | A test would pass if the behaviour were wrong |
 
 ## 9. When this architecture should change

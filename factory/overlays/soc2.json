@@ -1,0 +1,34 @@
+{
+  "id": "soc2",
+  "layer": "domain",
+  "title": "SOC 2 trust services evidence",
+  "why": "SOC 2 is an evidence obligation: the controls can exist and still fail the audit because nobody can show they operated. The packet should ask for the evidence, on a schedule, before the auditor does.",
+  "addRequirements": [
+    {
+      "key": "delivery.control-evidence",
+      "title": "Each claimed control has continuous evidence",
+      "area": "reliability",
+      "statement": "The repository shall map each claimed control to a machine-checkable artifact whose result is recorded with a timestamp and a revision.",
+      "definition": "A control is a check that ran, not a paragraph that says it runs.",
+      "failurePath": "If evidence for a control is missing for the period, the control is reported as unmet rather than assumed satisfied.",
+      "acceptance": [
+        "Given a period with no evidence, when the report is generated, then the control is marked unmet.",
+        "Given a passing check, when it runs, then a timestamped record is retained with the revision it ran against."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "security.access-review",
+      "title": "Access is reviewed on a schedule and the review is recorded",
+      "area": "security",
+      "statement": "When the access-review interval elapses, the application shall produce a list of who holds which privilege for a named reviewer to decide on.",
+      "definition": "The list of people who can do things is reviewed by a person, on a date, with a decision per row.",
+      "failurePath": "If the review is overdue, the build reports it and the overdue state is visible rather than implied.",
+      "acceptance": [
+        "Given an overdue review, when the report runs, then it fails and names the date it was due.",
+        "Given a completed review, when it is read, then each privilege entry has a decision and a reviewer."
+      ],
+      "verify": "automated"
+    }
+  ]
+}

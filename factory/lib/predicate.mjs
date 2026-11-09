@@ -14,6 +14,7 @@
  *   { "field": "risks.payments", "eq": true }
  *   { "field": "traits", "includes": "realtime" }
  *   { "field": "constraints.weeks", "gte": 8 }
+ *   { "field": "idea", "matches": "recover|restore|grace" }
  */
 
 export function getPath(object, path) {
@@ -44,6 +45,17 @@ function compare(actual, op, expected) {
       return false;
     case 'exists':
       return expected ? actual !== undefined && actual !== null : actual == null;
+    // Content-sensitive selection: an idea that says "recoverable for 30 days" needs
+    // a different deletion requirement from one that says "erased on request".
+    // Matching is case-insensitive and the pattern is validated by the catalog tests,
+    // so a bad regex fails the build rather than a user's compile.
+    case 'matches':
+      if (typeof actual !== 'string') return false;
+      try {
+        return new RegExp(String(expected), 'i').test(actual);
+      } catch {
+        throw new Error(`Invalid predicate pattern: ${expected}`);
+      }
     case 'truthy':
       return Boolean(actual) === Boolean(expected === undefined ? true : expected);
     default:
@@ -51,7 +63,7 @@ function compare(actual, op, expected) {
   }
 }
 
-const OPERATORS = ['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'in', 'includes', 'exists', 'truthy'];
+const OPERATORS = ['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'in', 'includes', 'exists', 'truthy', 'matches'];
 
 export function evaluate(predicate, context) {
   if (predicate === undefined || predicate === null) return true;

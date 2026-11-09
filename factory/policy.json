@@ -240,13 +240,24 @@
     ]
   },
   "budgets": {
-    "comment": "Hard ceilings per tier. A packet that exceeds its ceiling is a bug in the packet, not a virtue: the category's main criticism is that specs are too long to review.",
+    "comment": "Budgets for what a reader must load, not for everything on disk. `alwaysRead` caps the\ntwo files an agent loads before every task (AGENTS.md, the entry point) and the on-demand\ndocuments it opens per task; `maxLinesByTier` caps the whole stored packet as a warn-only\nsignal. Budgeting the total made closing a coverage gap impossible: every extra requirement\ncounts against the same number, so a better packet fails the check that exists to keep it\nreviewable.",
     "maxLinesByTier": {
       "0": 160,
       "1": 900,
       "2": 1000,
       "3": 1100
     },
-    "policy": "Trim prose or demote primitives by priority. Do not trim acceptance criteria or gates."
+    "policy": "Trim prose or demote primitives by priority. Do not trim acceptance criteria or gates. An always-read overrun is an error; a stored-packet overrun is a warning with the areas to split.",
+    "alwaysRead": {
+      "comment": "Hard ceilings on the files an agent actually reads. These fail verify.",
+      "maxLinesByTier": {
+        "0": 80,
+        "1": 120,
+        "2": 140,
+        "3": 160
+      },
+      "commentOnDemand": "The largest single on-demand document, and the per-requirement cost of the entry point.",
+      "maxOnDemandDocLines": 200
+    }
   }
 }

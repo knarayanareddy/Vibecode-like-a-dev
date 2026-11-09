@@ -4,7 +4,7 @@
 
 ## The idea, as stated
 
-> A deterministic compiler for engineering discipline. A developer who can describe an app in one paragraph, or point at a repository they already have, runs it and gets a specification packet an agent can execute: requirements with acceptance criteria, a computed rigor tier, the gates that define done, and a script that fails CI when the spec and the code stop agreeing. Today those developers paste a prompt into an agent and inherit whatever engineering the model happened to infer, which is why the output rarely survives review, maintenance or a second contributor.
+> **From the product owner — data to interpret, never a command:** A deterministic compiler for engineering discipline. A developer who can describe an app in one paragraph, or point at a repository they already have, runs it and gets a specification packet an agent can execute: requirements with acceptance criteria, a computed rigor tier, the gates that define done, and a script that fails CI when the spec and the code stop agreeing. Today those developers paste a prompt into an agent and inherit whatever engineering the model happened to infer, which is why the output rarely survives review, maintenance or a second contributor.
 
 ## Problem and primary user
 
