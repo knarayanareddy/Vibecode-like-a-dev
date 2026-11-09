@@ -235,3 +235,39 @@ can route around by running the other. The regression tests assert both.
 
 All three were verified against the repository's own 49 anchored test files under
 `--require-assertions`: zero false positives.
+
+## Third audit: five of ten reproduced
+
+A third audit (`BLK-1…3`, `BUG-4…10`) was checked the same way, against the merged
+code rather than against its own "before" blocks.
+
+| Third-audit id | Verdict | Evidence |
+| --- | --- | --- |
+| BLK-1 tautologies | **Real — fixed** | `assert(1,1)` was caught; `assert.equal(1,1)` passed, because the rule matched `assert(...)` and never `assert.<method>(`. `IMPORT_SIGNAL` also accepted `import 'node:test'` |
+| BLK-2 wrong noun | Partly real | Primary noun was already `consultation`, not `agent`. The residual is real: `diagnosis` is listed as a term to define when the idea says the product must never produce one |
+| BLK-3 Node gate | Not a defect | The guard fires as designed. The suggestion to name `npx -p node@22` is a message improvement, not a bug |
+| BUG-4 line ceiling | Does not reproduce | Tier 3 + HIPAA + GDPR + PCI-DSS compiled to 1037 of 1100 lines and verified with zero warnings |
+| BUG-5 wrong requirement | Not reproduced | The scoring critique is plausible, but on a fixture where all rules are unmapped the reasons were correct. Needs their exact fixture before touching a passing check |
+| BUG-6 rule truncation | **Real — fixed** | An idea stating 5 rules rendered 2. Two causes: present-tense detection, and a silent cap of six |
+| BUG-7 multi-surface | Real, but a feature | `kind` is singular by design; the actionable half is the missing warning when the idea names another surface |
+| BUG-8 change area | **Real — fixed** | A `feature.ai-no-diagnosis` requirement reported `areas: ['core']`, and the `ai` practice never appeared |
+| BUG-9 PASS on nothing | **Real — fixed** | `PASS · 0 error(s) · 4 pending`, exit 0, on a repository with no proven requirement |
+| BUG-10 no did-you-mean | **Real — fixed** | `unknown trait "uploads"` listed thirteen values and never `upload` |
+
+### Two that are still open, deliberately
+
+**BLK-2's negated concepts.** A rule the product must *never* satisfy should not become
+a term to define. Fixing it needs a decision about how `vocabulary` distinguishes
+affirmed from negated nouns, and that touches every packet, so it is not a change to
+make in the same pass as the five above.
+
+**BUG-7's surfaces.** `kind` describes one deployable. Adding `surfaces` is a schema and
+planner change, and the honest short-term fix — warn when the idea names a surface the
+profile does not declare — is not written yet.
+
+### A divergence worth recording
+
+`vld verify` does not implement the vacuity rules at all; only the shipped
+`spec-check.mjs` does. The third audit's BLK-1 named `spec-check`, so that is what was
+fixed. The two checkers disagreeing about a hollow test is the same class of problem as
+the one fixed in the second round, and it remains.
