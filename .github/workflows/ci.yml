@@ -77,8 +77,14 @@ jobs:
       - name: Self-spec gates pass
         run: node specs/enforcement/gates.mjs --repo . --strict
 
+      # --require-assertions turns a hollow anchored test into an error. Without it a
+      # test can carry the @req anchor, import the product and assert nothing; the
+      # report says so, but the job still passes, so nothing stops an agent from
+      # weakening a test to make a build green. It is opt-in upstream because a
+      # half-written test is normal during development, which is why the packet
+      # template leaves it off and this repository turns it on.
       - name: This repository passes its own drift guard
-        run: node specs/spec-check.mjs --repo . --strict
+        run: node specs/spec-check.mjs --repo . --strict --require-assertions
 
   secret-history:
     name: Secret history scan

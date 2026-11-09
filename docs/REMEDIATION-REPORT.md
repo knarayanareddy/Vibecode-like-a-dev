@@ -277,6 +277,45 @@ Regression tests pin the carepulse case (`diagnosis` moves), the `settlement`
 counter-example (a real noun survives "never lose"), the modifier/head-noun distinction,
 the primary-noun guarantee, and both overrides.
 
+### Fourth audit: one real gap, six overstated
+
+A fourth review named seven items. Two hold in part, and only one of those has a
+defect small enough to fix on its own.
+
+**What was already true.** Requirement IDs have been stable per key since before the
+review (`planner.mjs:246`): a key keeps its id, retired ids are never recycled, new
+keys take the next unused number. Adding nine requirements to a six-requirement
+packet repointed nothing. The payments-trait bypass is *shipped code* — `policy.json`
+already carries the trait-plus-risk signal, label included. Go has a full command
+profile and unrecognised stacks return `null` rather than a TypeScript default; the
+review's repro passes `stack: "Go"`, which the schema rejects (`constraints.stack` is
+the real key). Forged headings cannot break out of the handoff: newlines are
+flattened before interpolation, so `## 9. …` renders as inline text.
+
+**The one real gap.** `spec-check.mjs` detects hollow tests, including a test that
+carries the anchor, imports the product and asserts nothing. But without
+`--require-assertions` that finding is a *notice*: the report prints it and the job
+exits 0. This repository's own CI passed only `--strict`, so the guard that exists to
+catch a weakened test could not fail the build — the review's lead claim was one flag
+away from being right, and its diagnosis (no AST inspection) described a much larger
+defect than the one present.
+
+Fixed here: the repository now runs `--strict --require-assertions`, and
+`drift-guard.test.mjs` asserts the workflow keeps it. It stays opt-in *upstream* — a
+half-written test is normal during development, and an emitted packet should not fail
+on one until the author claims it is done.
+
+**Not fixed, and why.** The unmapped-obligation detector does miss indicative rules
+("redacts SSN patterns… writes rejected batches to a dead-letter file"), and one of
+those two sentences was captured while the other was not. The fix the review proposes
+— regexing action verbs into auto-generated `REQ-DOM-xxx` stubs — manufactures
+requirements from prose, which is the failure mode the term table exists to prevent.
+That needs a designed pass, not a patch.
+
+The Tier-1 line numbers are honest (898/900, 907 after two requirements), but overrun
+is a warning by design: the binding budget is what an agent reads, and that packet sits
+at 58 of 120 entry-point lines with every area document under 200.
+
 ### BUG-7's surfaces — deliberately still open
 
 `kind` describes one deployable and decides document layout; adding `surfaces[]` means
