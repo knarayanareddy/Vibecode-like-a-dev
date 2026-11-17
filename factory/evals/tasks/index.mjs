@@ -1,3 +1,4 @@
+import { ADVANCED_TASKS } from './advanced.mjs';
 import { BROWNFIELD_TASKS } from './brownfield.mjs';
 import { BUGFIX_TASKS } from './bugfix.mjs';
 import { GREENFIELD_TASKS } from './greenfield.mjs';
@@ -9,7 +10,8 @@ export const OUTCOME_TASKS = [
   ...BROWNFIELD_TASKS,
   ...BUGFIX_TASKS,
   ...REFACTOR_TASKS,
-  ...SYSTEMS_TASKS
+  ...SYSTEMS_TASKS,
+  ...ADVANCED_TASKS
 ];
 
 export const OUTCOME_ARMS = ['no-spec', 'generic-spec', 'vld-packet'];

@@ -87,7 +87,7 @@ const collisions = [...byTrigger.entries()]
 // Run every committed profile through the real planner and count how often each
 // practice is selected. A practice selected everywhere is not a decision.
 const profileFiles = [
-  ...readdirSync(path.join(ROOT, 'examples', 'ideas')).filter((file) => file.endsWith('.json')).map((file) => path.join(ROOT, 'examples', 'ideas', file)),
+  ...readdirSync(path.join(ROOT, 'examples', 'ideas')).filter((file) => file.endsWith('.json') && file !== 'expected.json').map((file) => path.join(ROOT, 'examples', 'ideas', file)),
   path.join(ROOT, 'examples', 'retro-board', 'profile.json'),
   path.join(ROOT, 'profile.json'),
   // An explicit opt-in must be represented in the library corpus: it proves this

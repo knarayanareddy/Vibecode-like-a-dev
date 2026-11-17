@@ -170,7 +170,21 @@ const BASELINE_FILE = '.vld/gates-baseline.json';
 // Model process. In that bounded harness it passes this internal hand-off flag
 // so the gate runner does not need child-process permission merely to repeat it.
 const DRIFT_ALREADY_CHECKED = flag('--drift-already-checked');
-const REPO = path.resolve(option('--repo', process.cwd()));
+function defaultRepoRoot(packetDir) {
+  const cwd = path.resolve(process.cwd());
+  const packet = path.resolve(packetDir);
+  if (cwd !== packet) return cwd;
+  let cursor = packet;
+  for (let depth = 0; depth < 6; depth += 1) {
+    if (existsSync(path.join(cursor, '.git'))) return cursor;
+    const parent = path.dirname(cursor);
+    if (parent === cursor) break;
+    cursor = parent;
+  }
+  return packet;
+}
+
+const REPO = path.resolve(option('--repo', defaultRepoRoot(PACKET)));
 
 // Scan all committed product directories. Only Git metadata, dependency trees and
 // language caches are excluded; credentials often hide in generated-looking or
@@ -182,7 +196,7 @@ const IGNORED = new Set(['node_modules', '.git', '.next', '.nuxt', '.venv', 'ven
 const SOURCE = /\.(ts|tsx|js|jsx|mjs|cjs|py|go|rb|java|kt|cs|php|rs|sh|feature|exs)$/;
 const TEST_PATH = /(^|\/)(tests?|__tests__|spec|e2e)\//i;
 const TEST_NAME = /\.(test|spec)\.[a-z]+$|(^|\/)test_[^/]+\.py$|_test\.(py|go|rb|rs|exs)$|Tests?\.(java|kt|cs|php)$/;
-const ANCHOR_LINE = /@req\s+(REQ-\d{3,})/g;
+const ANCHOR_LINE = /@req\s+(REQ-(?:C\d{2,}|\d{3,}))/g;
 const SUPPRESSED = /@req-ignore/i;
 const ASSERTION_SIGNAL = /\b(?:assert[A-Za-z0-9_.]*|expect\s*\(|should\b|require\.[A-Z]\w*|t\.(?:Fatal|Fatalf|Error|Errorf|Fail|FailNow)|pytest\.raises|raises\s*\(|rejects\b|throws\b)\b|!==|===|!=|==|<=|>=/;
 
@@ -204,7 +218,10 @@ function walk(dir, out = []) {
     }
     // Never follow repository links: scans must neither escape their root nor loop.
     if (stats.isSymbolicLink()) continue;
-    if (stats.isDirectory()) walk(full, out);
+    if (stats.isDirectory()) {
+      if (full !== REPO && full !== PACKET && existsSync(path.join(full, 'profile.json')) && (existsSync(path.join(full, 'spec', 'spec.json')) || existsSync(path.join(full, 'specs', 'spec.json')))) continue;
+      walk(full, out);
+    }
     else out.push(full);
   }
   return out;

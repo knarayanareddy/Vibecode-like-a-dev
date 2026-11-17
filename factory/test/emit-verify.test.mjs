@@ -520,20 +520,20 @@ test('factory verify and the shipped guard agree on hollow assertions and EARS f
   // nothing. What stays lenient is a hollow test on a requirement not yet done.
   const claimedHollow = verifyPacket(project.outDir, { repo, strict: true });
   assert.equal(claimedHollow.ok, false, 'a done requirement backed by an empty test must fail');
-  assert.match(claimedHollow.errors.join('\\n'), /no visible assertion/);
+  assert.match(claimedHollow.errors.join('\\n'), /no assertion in the anchored test/);
 
   patchRequirement(path.join(project.outDir, 'spec.json'), victim.key, { status: 'todo' });
   const lenient = verifyPacket(project.outDir, { repo, strict: true });
-  assert.match(lenient.warnings.join('\\n'), /no visible assertion/);
+  assert.match(lenient.warnings.join('\\n'), /no assertion in the anchored test/);
   assert.equal(runShippedChecker(project.outDir, repo, { strict: true }).code, 0, 'a todo requirement may carry a hollow test while it is being written');
   patchRequirement(path.join(project.outDir, 'spec.json'), victim.key, { status: 'done' });
 
   const factoryHollow = verifyPacket(project.outDir, { repo, strict: true, requireAssertions: true });
   const shippedHollow = runShippedChecker(project.outDir, repo, { strict: true, requireAssertions: true });
   assert.equal(factoryHollow.ok, false);
-  assert.match(factoryHollow.errors.join('\\n'), /no visible assertion/);
+  assert.match(factoryHollow.errors.join('\\n'), /no assertion in the anchored test/);
   assert.equal(shippedHollow.code, 1);
-  assert.match(shippedHollow.stdout, /no visible assertion/);
+  assert.match(shippedHollow.stdout, /no assertion in the anchored test/);
 
   writeFileSync(testFile, `// @req ${victim.id}\\ntest('real', () => { expect(true).toBe(true); });\\n`);
   patchRequirement(path.join(project.outDir, 'spec.json'), victim.key, { statement: 'The system shall behave appropriately for requests.' });
@@ -612,7 +612,10 @@ test('verification anchor examples use valid Python and Go syntax for their decl
 });
 
 test('an unsupported stack does not invent TypeScript commands or test syntax and labels anchor placeholders', (t) => {
-  const project = compileTemp(makeProject('unsupported-stack', { constraints: { stack: 'Rust 1.82' } }));
+  // Rust, Java, Kotlin, Ruby, PHP and C# now ship data-driven stack profiles under
+  // factory/stacks/; exercise a stack outside the built-in 10 (Haskell) to verify
+  // the honest unrecognised-stack path still holds.
+  const project = compileTemp(makeProject('unsupported-stack', { constraints: { stack: 'Haskell GHC 9.8' } }));
   t.after(project.cleanup);
   const manifest = JSON.parse(readFileSync(path.join(project.outDir, 'spec.json'), 'utf8'));
   for (const requirement of manifest.requirements.filter((entry) => entry.verify === 'automated')) assert.match(requirement.anchor, /^tests\/choose-runner\/.*\.test$/);
@@ -910,14 +913,18 @@ test('documented commands point at the real output directory and run', (t) => {
   const commands = new Set();
   for (const text of markdown) {
     for (const match of text.matchAll(/node\s+(\S*(?:spec-check|gates)\.mjs)/g)) {
-      commands.add(match[1]);
+      const target = match[1].replace(/^"|"$/g, '');
+      if (target.startsWith('$PACKET_DIR/')) continue;
+      commands.add(target);
     }
   }
   assert.ok(commands.size > 0, 'no documented command referenced the drift guard');
 
   for (const command of commands) {
     const relative = command.split(' ')[0];
-    const resolved = path.isAbsolute(relative) ? relative : path.join(root, relative);
+    // Packet commands resolve relative to the packet's own directory so relocating
+    // the packet never leaves stale paths behind.
+    const resolved = path.isAbsolute(relative) ? relative : path.resolve(outDir, relative);
     assert.ok(existsSync(resolved), `documented command target does not exist: ${relative}`);
   }
 
@@ -1060,10 +1067,10 @@ test('an assertion in a neighbour does not prove a hollow anchored test', (t) =>
 
   assert.equal(factory.ok, false, 'the hollow anchored test must fail verification');
   const message = factory.errors.join('\n');
-  assert.match(message, new RegExp(`no visible assertion`));
+  assert.match(message, /no assertion in the anchored test/);
   // It must name the unproven requirement, and must not blame the proven one.
   assert.match(message, new RegExp(second.id), 'the unproven requirement must be named');
-  assert.ok(!new RegExp(`${first.id}[,)]\\s*but no visible`).test(message), 'the proven requirement must not be named');
+  assert.ok(!new RegExp(`${first.id}[,)]\\s*but no assertion`).test(message), 'the proven requirement must not be named');
 
   assert.equal(shipped.code, 1, 'the shipped checker must agree with the factory verifier');
   assert.match(shipped.stdout, new RegExp(second.id));
@@ -1101,10 +1108,10 @@ test('one asserted test may carry several anchors without being reported hollow'
   );
 
   const factory = verifyPacket(project.outDir, { repo, strict: true, requireAssertions: true });
-  assert.doesNotMatch(factory.errors.concat(factory.warnings).join('\n'), /no visible assertion/);
+  assert.doesNotMatch(factory.errors.concat(factory.warnings).join('\n'), /no assertion in the anchored test/);
   // No --strict here: the fixture leaves the packet's other requirements pending,
   // and strict would fail on those for reasons unrelated to the rule under test.
   const shipped = runShippedChecker(project.outDir, repo, { requireAssertions: true });
   assert.equal(shipped.code, 0);
-  assert.doesNotMatch(shipped.stdout, /no visible assertion/);
+  assert.doesNotMatch(shipped.stdout, /no assertion in the anchored test/);
 });

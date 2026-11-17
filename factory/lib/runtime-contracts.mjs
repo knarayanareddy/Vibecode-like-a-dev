@@ -7,9 +7,12 @@ export const RUNTIME_API_VERSION = 1;
 export const RUNTIME_API_METHODS = Object.freeze([
   'status',
   'events',
+  'evidence',
   'allocate',
   'heartbeat',
   'transition',
+  'approve',
+  'queue',
   'recover',
   'shutdown'
 ]);

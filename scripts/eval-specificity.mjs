@@ -55,7 +55,7 @@ const index = buildIndex();
 
 function profiles() {
   const files = readdirSync(path.join(ROOT, 'examples', 'ideas'))
-    .filter((file) => file.endsWith('.json'))
+    .filter((file) => file.endsWith('.json') && file !== 'expected.json')
     .sort()
     .map((file) => path.join(ROOT, 'examples', 'ideas', file));
 

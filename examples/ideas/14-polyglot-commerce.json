@@ -1,0 +1,39 @@
+{
+  "name": "polyglot-commerce",
+  "idea": "A cross-border B2B storefront, checkout API, fulfillment worker and settlement engine where merchants sell wholesale catalog bundles. Every order refund must reference an original settled charge, and merchant workspaces must never expose another merchant's invoices.",
+  "kind": "web-app",
+  "stage": "production",
+  "users": { "scale": "large" },
+  "traits": ["auth", "persistence", "payments", "webhooks", "search", "i18n"],
+  "risks": { "pii": true, "money": true, "multiTenant": true, "regulated": true, "publicFacing": true },
+  "regulation": ["pci-dss", "gdpr"],
+  "constraints": {
+    "team": 10,
+    "weeks": 18,
+    "stack": {
+      "web": "typescript",
+      "api": "go",
+      "worker": "python",
+      "settlement": "rust"
+    }
+  },
+  "rules": [
+    {
+      "slug": "wholesale-minimum-order",
+      "title": "Wholesale minimum order threshold",
+      "text": "Wholesale orders below the merchant configured minimum subtotal must be rejected with ORDER_BELOW_MINIMUM before creating a payment intent.",
+      "statement": "When a buyer submits a wholesale order below the merchant's configured minimum subtotal, the checkout service shall reject the order with a structured threshold error before creating a payment intent.",
+      "failurePath": "Orders below the configured minimum subtotal return ORDER_BELOW_MINIMUM and create zero payment intents.",
+      "acceptance": [
+        "Given an order below the merchant minimum subtotal, when checkout is attempted, then the service returns ORDER_BELOW_MINIMUM and creates zero downstream charge calls."
+      ],
+      "area": "core",
+      "verify": "automated"
+    },
+    {
+      "text": "Replayed checkout requests across currency conversions return the original settlement identifier without recomputing FX rates.",
+      "covers": "payments.correctness",
+      "appendCriterion": true
+    }
+  ]
+}

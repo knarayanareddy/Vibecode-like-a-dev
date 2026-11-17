@@ -71,9 +71,12 @@ test('a rule nothing resembles is unmapped, not partially covered by one shared 
 test('the idea cannot cover itself through the domain text', () => {
   const idea = 'A booking must never double-book a therapist, and a cancellation must free the slot immediately.';
   // Passing the idea back as "domain text" is exactly the self-coverage bug.
-  const [entry] = obligationCoverage({ idea }, [], idea);
-  assert.equal(entry.state, 'unmapped');
-  assert.deepEqual(unmappedObligations({ idea }, lines(), idea), [idea]);
+  const entries = obligationCoverage({ idea }, [], idea);
+  assert.ok(entries.length >= 1 && entries.every((entry) => entry.state === 'unmapped'));
+  assert.deepEqual(unmappedObligations({ idea }, lines(), idea), [
+    'A booking must never double-book a therapist.',
+    'A cancellation must free the slot immediately.'
+  ]);
 });
 
 function lines() {

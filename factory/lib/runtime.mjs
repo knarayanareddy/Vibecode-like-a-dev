@@ -327,9 +327,28 @@ function validDigest(value) {
 }
 
 /** Agent receipts are deliberately metadata-only: no argv, host path, env or raw output. */
+const SAFE_REL_PATH = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9._/@+ -]{1,300}$/;
+const SANDBOX_CONFINEMENTS = new Set(['os-container', 'os-namespace', 'os-seatbelt', 'runtime-permission']);
+
+function validateAgentSandboxSummary(sandbox) {
+  if (!sandbox || typeof sandbox !== 'object' || Array.isArray(sandbox)) throw extensionError('runtime agent receipt.sandbox must be an object', 'INVALID_RUNTIME_LEDGER');
+  const allowed = new Set(['id', 'backend', 'confinementClass', 'mode', 'workspaceDigestBefore', 'workspaceDigestAfter', 'changedPaths', 'receiptDigest']);
+  for (const key of Object.keys(sandbox)) if (!allowed.has(key)) throw extensionError(`runtime agent receipt.sandbox.${key} is not allowed`, 'INVALID_RUNTIME_LEDGER');
+  if (!ID_PATTERN.test(String(sandbox.id ?? '')) || !ID_PATTERN.test(String(sandbox.backend ?? ''))) throw extensionError('runtime agent receipt.sandbox has invalid id/backend', 'INVALID_RUNTIME_LEDGER');
+  if (!SANDBOX_CONFINEMENTS.has(sandbox.confinementClass)) throw extensionError('runtime agent receipt.sandbox has invalid confinementClass', 'INVALID_RUNTIME_LEDGER');
+  if (!['read-only', 'write-workspace'].includes(sandbox.mode)) throw extensionError('runtime agent receipt.sandbox has invalid mode', 'INVALID_RUNTIME_LEDGER');
+  for (const field of ['workspaceDigestBefore', 'workspaceDigestAfter', 'receiptDigest']) {
+    if (!validDigest(sandbox[field])) throw extensionError(`runtime agent receipt.sandbox has invalid ${field}`, 'INVALID_RUNTIME_LEDGER');
+  }
+  if (!Array.isArray(sandbox.changedPaths) || sandbox.changedPaths.length > 512 || sandbox.changedPaths.some((p) => !SAFE_REL_PATH.test(String(p ?? '')))) {
+    throw extensionError('runtime agent receipt.sandbox.changedPaths is invalid', 'INVALID_RUNTIME_LEDGER');
+  }
+  return sandbox;
+}
+
 function validateAgentRunReceipt(receipt) {
   if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt)) throw extensionError('runtime agent receipt must be an object', 'INVALID_RUNTIME_LEDGER');
-  const allowed = new Set(['id', 'adapter', 'policyDigest', 'contextDigest', 'workspaceDigest', 'outcome', 'attempts', 'startedAt', 'finishedAt', 'durationMs', 'output']);
+  const allowed = new Set(['id', 'adapter', 'policyDigest', 'contextDigest', 'workspaceDigest', 'outcome', 'attempts', 'startedAt', 'finishedAt', 'durationMs', 'output', 'sandbox']);
   for (const key of Object.keys(receipt)) if (!allowed.has(key)) throw extensionError(`runtime agent receipt.${key} is not allowed`, 'INVALID_RUNTIME_LEDGER');
   if (!ID_PATTERN.test(String(receipt.id ?? ''))) throw extensionError('runtime agent receipt has an invalid id', 'INVALID_RUNTIME_LEDGER');
   if (!ID_PATTERN.test(String(receipt.adapter ?? ''))) throw extensionError('runtime agent receipt has an invalid adapter', 'INVALID_RUNTIME_LEDGER');
@@ -340,6 +359,7 @@ function validateAgentRunReceipt(receipt) {
   if (!Number.isSafeInteger(receipt.durationMs) || receipt.durationMs < 0 || receipt.durationMs > 24 * 60 * 60 * 1_000) throw extensionError('runtime agent receipt has an invalid duration', 'INVALID_RUNTIME_LEDGER');
   if (!receipt.output || typeof receipt.output !== 'object' || Array.isArray(receipt.output) || Object.keys(receipt.output).some((key) => !new Set(['digest', 'bytes', 'summary']).has(key))) throw extensionError('runtime agent receipt output is invalid', 'INVALID_RUNTIME_LEDGER');
   if (!validDigest(receipt.output.digest) || !Number.isSafeInteger(receipt.output.bytes) || receipt.output.bytes < 0 || typeof receipt.output.summary !== 'string' || receipt.output.summary.length > 4_000 || /[\r\n\0]/.test(receipt.output.summary)) throw extensionError('runtime agent receipt output is invalid', 'INVALID_RUNTIME_LEDGER');
+  if (receipt.sandbox !== undefined) validateAgentSandboxSummary(receipt.sandbox);
   return receipt;
 }
 
@@ -355,7 +375,8 @@ function publicAgentRun(receipt) {
     startedAt: receipt.startedAt,
     finishedAt: receipt.finishedAt,
     durationMs: receipt.durationMs,
-    output: { ...receipt.output }
+    output: { ...receipt.output },
+    ...(receipt.sandbox ? { sandbox: { ...receipt.sandbox, changedPaths: [...receipt.sandbox.changedPaths] } } : {})
   };
 }
 
@@ -383,11 +404,14 @@ function validateCandidateReceipt(candidate) {
   return candidate;
 }
 
+const VALID_CHECK_KINDS = new Set(['vld-packet', 'vld-drift-guard', 'vld-gates', 'sandboxed-command', 'resource-claims']);
+
 function validateCheckReceipt(check) {
   if (!check || typeof check !== 'object' || Array.isArray(check)) throw extensionError('runtime verification check must be an object', 'INVALID_RUNTIME_LEDGER');
-  const allowed = new Set(['id', 'kind', 'passed', 'output']);
+  const allowed = new Set(['id', 'kind', 'passed', 'output', 'sandboxReceiptDigest']);
   for (const key of Object.keys(check)) if (!allowed.has(key)) throw extensionError(`runtime verification check.${key} is not allowed`, 'INVALID_RUNTIME_LEDGER');
-  if (!ID_PATTERN.test(String(check.id ?? '')) || check.kind !== 'vld-packet' || typeof check.passed !== 'boolean') throw extensionError('runtime verification check is invalid', 'INVALID_RUNTIME_LEDGER');
+  if (!ID_PATTERN.test(String(check.id ?? '')) || !VALID_CHECK_KINDS.has(check.kind) || typeof check.passed !== 'boolean') throw extensionError('runtime verification check is invalid', 'INVALID_RUNTIME_LEDGER');
+  if (check.sandboxReceiptDigest !== undefined && !validDigest(check.sandboxReceiptDigest)) throw extensionError('runtime verification check sandboxReceiptDigest is invalid', 'INVALID_RUNTIME_LEDGER');
   if (!check.output || typeof check.output !== 'object' || Array.isArray(check.output) || Object.keys(check.output).some((key) => !new Set(['digest', 'bytes', 'summary']).has(key))) throw extensionError('runtime verification output is invalid', 'INVALID_RUNTIME_LEDGER');
   if (!validDigest(check.output.digest) || !Number.isSafeInteger(check.output.bytes) || check.output.bytes < 0 || !safeSummary(check.output.summary)) throw extensionError('runtime verification output is invalid', 'INVALID_RUNTIME_LEDGER');
   return check;
@@ -399,7 +423,7 @@ function validateVerificationReceipt(verification) {
   for (const key of Object.keys(verification)) if (!allowed.has(key)) throw extensionError(`runtime verification.${key} is not allowed`, 'INVALID_RUNTIME_LEDGER');
   if (!ID_PATTERN.test(String(verification.id ?? '')) || !ID_PATTERN.test(String(verification.candidateId ?? '')) || !validCommit(verification.candidateSha) || !validCommit(verification.targetSha) || !validCommit(verification.integrationTree) || !validDigest(verification.policyDigest) || !validTime(verification.generatedAt)) throw extensionError('runtime verification has invalid identity metadata', 'INVALID_RUNTIME_LEDGER');
   if (!['passed', 'failed', 'conflict', 'invalidated'].includes(verification.outcome)) throw extensionError('runtime verification has an invalid outcome', 'INVALID_RUNTIME_LEDGER');
-  if (!Array.isArray(verification.checks) || verification.checks.length !== 1) throw extensionError('runtime verification requires exactly one builtin check receipt', 'INVALID_RUNTIME_LEDGER');
+  if (!Array.isArray(verification.checks) || verification.checks.length < 1 || verification.checks.length > 16) throw extensionError('runtime verification requires 1 to 16 check receipts', 'INVALID_RUNTIME_LEDGER');
   for (const check of verification.checks) validateCheckReceipt(check);
   return verification;
 }

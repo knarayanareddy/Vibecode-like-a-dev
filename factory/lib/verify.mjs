@@ -24,15 +24,133 @@ const IGNORED_DIRS = new Set([
 
 const SOURCE_FILE = /\.(ts|tsx|js|jsx|mjs|cjs|py|go|rb|java|kt|cs|php|rs|sh|feature|exs)$/;
 const TEST_FILE = /(^|\/)(tests?|__tests__|specs?)\//;
-const TEST_NAME = /\.(test|spec)\.[a-z]+$|(^|\/)test_[^/]+\.py$|_test\.(py|go|rb|rs|exs)$|Tests?\.(java|kt|cs|php)$/;
-const ANCHOR_LINE = /@req\s+(REQ-\d{3,})/g;
-const REQUIREMENT_ID = /^REQ-\d{3,}$/;
+const TEST_NAME = /\.(test|spec)\.[a-z]+$|(^|\/)test_[^/]+\.py$|_test\.(py|go|rb|rs|exs)$|_spec\.rb$|Tests?\.(java|kt|cs|php)$/;
+const ANCHOR_LINE = /@req\s+(REQ-(?:\d{3,}|C\d{2,}))/g;
+const REQUIREMENT_ID = /^REQ-(?:\d{3,}|C\d{2,})$/;
 const SUPPRESSED = /@req-ignore/i;
 const CLARIFY_MARKER = /\[(?:CLARIFY|NEEDS CLARIFICATION)(?::[^\]]*)?\]/i;
 // Keep this deliberately lexical and mirror it in the dependency-free checker
 // emitted into packets. It detects a hollow anchored test; it does not claim a
 // mutation score or semantic proof.
-const ASSERTION_SIGNAL = /\b(?:assert[A-Za-z0-9_.]*|expect\s*\(|should\b|require\.[A-Z]\w*|t\.(?:Fatal|Fatalf|Error|Errorf|Fail|FailNow)|pytest\.raises|raises\s*\(|rejects\b|throws\b)\b|!==|===|!=|==|<=|>=/;
+const ASSERTION_SIGNAL =
+  /^[ \t]*assert\s+\S|\b(?:assert\s*!?\s*\(|assert_[a-z0-9_]+\s*!?\s*\(|assert\.[A-Za-z_]\w*\s*\(|assert[A-Z]\w*\s*\(|Assert\.[A-Z]\w*\s*\(|refute(?:_\w+)?\b|expect\s*\(|should\b|require\.[A-Z]\w*\s*\(|t\.(?:Fatal|Fatalf|Error|Errorf|Fail|FailNow)\b|pytest\.raises|raises\s*\(|rejects\b|throws\b)|!==|===|!=|==|<=|>=/m;
+
+const JS_TEST_INFRA =
+  /^(?:node:(?:test|assert)(?:\/|$)|(?:@jest\/globals|vitest|jest|mocha|chai|ava|tap|uvu|sinon|@testing-library\/[\w-]+|@playwright\/test|playwright|supertest|fast-check)(?:\/|$))/;
+const PY_TEST_INFRA =
+  /^(?:pytest|_\w*pytest|pytest_\w+|unittest|hypothesis|freezegun|responses|respx|faker|factory|typing|typing_extensions|__future__|dataclasses)(?:\.|$)/;
+const RUST_NON_PRODUCT =
+  /^(?:std|core|alloc|test|proptest|quickcheck|rstest|pretty_assertions|insta|criterion|mockall|wiremock|serial_test)(?:::|$)/;
+const JVM_NON_PRODUCT =
+  /^(?:org\.junit|junit|org\.testng|org\.assertj|org\.hamcrest|org\.mockito|io\.mockk|io\.kotest|kotlin\.test|net\.jqwik|java|javax|kotlin|kotlinx\.coroutines\.test)(?:\.|$)/;
+const PHP_NON_PRODUCT =
+  /^\\?(?:PHPUnit|Pest|Mockery|Prophecy|Faker|Eris|Hamcrest)(?:\\|$)/i;
+const RUBY_NON_PRODUCT =
+  /^(?:rspec|minitest|test\/unit|spec_helper|rails_helper|test_helper|minitest_helper|webmock|vcr|factory_bot|faker|rantly|json|yaml|time|date|set|ostruct|fileutils|tmpdir|pathname|securerandom)(?:\/|$)/;
+const CSHARP_NON_PRODUCT =
+  /^(?:System|Xunit|NUnit|Microsoft\.VisualStudio\.TestTools|FluentAssertions|Moq|NSubstitute|FakeItEasy|AutoFixture|FsCheck)(?:\.|$)/;
+const GO_NON_PRODUCT =
+  /^(?:testing(?:\/\w+)?|fmt|time|os|io|bytes|strings|strconv|context|sync|errors|math|sort|reflect|regexp|path(?:\/filepath)?|encoding\/\w+|net(?:\/http(?:\/httptest)?)?|github\.com\/stretchr\/testify(?:\/[\w-]+)?|pgregory\.net\/rapid)$/;
+
+export function reachesProductCode(source, filePath = '') {
+  const ext = path.extname(String(filePath)).toLowerCase();
+  if (ext === '.py') {
+    for (const rawLine of source.split('\n')) {
+      const line = rawLine.replace(/#.*$/, '').trim();
+      if (!line) continue;
+      const fromMatch = /^from\s+(\.+[\w.]*|[\w.]+)\s+import\s+.+$/.exec(line);
+      if (fromMatch) {
+        if (fromMatch[1].startsWith('.') || !PY_TEST_INFRA.test(fromMatch[1])) return true;
+        continue;
+      }
+      const importMatch = /^import\s+(.+)$/.exec(line);
+      if (importMatch) {
+        const mods = importMatch[1].split(',').map((part) => part.trim().split(/\s+as\s+/)[0].trim()).filter(Boolean);
+        if (mods.some((mod) => !PY_TEST_INFRA.test(mod))) return true;
+      }
+    }
+    return false;
+  }
+  if (ext === '.rs') {
+    for (const match of source.matchAll(/^\s*(?:pub\s+)?use\s+((?:crate|super|self)(?:::\S+)?|[a-zA-Z_]\w*(?:::[\w*{},\s]+)?)\s*;/gm)) {
+      const target = match[1].trim().replace(/^::/, '');
+      if (/^(?:crate|super|self)(?:::|$)/.test(target)) return true;
+      const root = target.split('::')[0];
+      if (root && !RUST_NON_PRODUCT.test(target) && !RUST_NON_PRODUCT.test(root)) return true;
+    }
+    for (const match of source.matchAll(/^\s*extern\s+crate\s+([a-zA-Z_]\w*)\s*;/gm)) {
+      if (!RUST_NON_PRODUCT.test(match[1])) return true;
+    }
+    return false;
+  }
+  if (ext === '.java' || ext === '.kt') {
+    for (const match of source.matchAll(/^\s*import\s+(?:static\s+)?([A-Za-z_][\w.]*(?:\.\*)?)\s*;?/gm)) {
+      if (!JVM_NON_PRODUCT.test(match[1])) return true;
+    }
+    return false;
+  }
+  if (ext === '.php') {
+    for (const match of source.matchAll(/^\s*use\s+(?:function\s+|const\s+)?(\\?[A-Za-z_]\w*(?:\\[A-Za-z_]\w*)+)(?:\s+as\s+\w+)?\s*;/gm)) {
+      if (!PHP_NON_PRODUCT.test(match[1])) return true;
+    }
+    for (const match of source.matchAll(/\b(?:require|require_once|include|include_once)\s*\(?\s*(?:__DIR__\s*\.\s*)?['"]([^'"]+)['"]/gm)) {
+      if (!/vendor\/autoload\.php$/i.test(match[1]) && !/bootstrap/i.test(match[1])) return true;
+    }
+    return false;
+  }
+  if (ext === '.rb') {
+    for (const match of source.matchAll(/^\s*require_relative\s*\(?\s*['"]([^'"]+)['"]\s*\)?/gm)) {
+      const target = match[1].replace(/^\.\//, '');
+      if (!/^(?:\.\.\/)*(?:spec_helper|rails_helper|test_helper|minitest_helper)(?:\.rb)?$/.test(target)) return true;
+    }
+    for (const match of source.matchAll(/^\s*require\s*\(?\s*['"]([^'"]+)['"]\s*\)?/gm)) {
+      const target = match[1];
+      if (target.startsWith('./') || target.startsWith('../')) {
+        if (!/(?:spec_helper|rails_helper|test_helper|minitest_helper)(?:\.rb)?$/.test(target)) return true;
+        continue;
+      }
+      if (/^(?:lib|app|config\/environment)\//.test(target)) return true;
+      if (!RUBY_NON_PRODUCT.test(target) && target.includes('/')) return true;
+    }
+    return false;
+  }
+  if (ext === '.go') {
+    const imports = [];
+    for (const single of source.matchAll(/^\s*import\s+(?:[\w.]+\s+)?["']([^"']+)["']/gm)) imports.push(single[1]);
+    for (const block of source.matchAll(/^\s*import\s*\(([\s\S]*?)\)/gm)) {
+      for (const line of block[1].matchAll(/["']([^"']+)["']/g)) imports.push(line[1]);
+    }
+    if (imports.some((spec) => !GO_NON_PRODUCT.test(spec))) return true;
+    const pkg = /^\s*package\s+([A-Za-z_]\w*)/m.exec(source)?.[1];
+    if (!pkg || pkg.endsWith('_test') || pkg === 'test' || pkg === 'tests') return false;
+    const stripped = source
+      .replace(/\/\/.*$/gm, '')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/"(?:\\.|[^"\\])*"|`[^`]*`/g, '""')
+      .replace(/\bfunc\s+Test\w*\s*\([^)]*\)/g, '')
+      .replace(/\bt\.\w+\s*\(/g, '');
+    return /\b[A-Za-z_]\w*\s*\(/.test(stripped) || /\b[A-Za-z_]\w*\s*\{/.test(stripped);
+  }
+  if (ext === '.cs') {
+    for (const match of source.matchAll(/^\s*(?:global\s+)?using\s+(?:static\s+)?([A-Za-z_][\w.]*)\s*;/gm)) {
+      if (!CSHARP_NON_PRODUCT.test(match[1])) return true;
+    }
+    return false;
+  }
+  if (ext === '.exs') {
+    for (const match of source.matchAll(/^\s*(?:alias|import|use)\s+([A-Z][\w.]*)/gm)) {
+      if (!/^ExUnit(?:\.|$)/.test(match[1])) return true;
+    }
+    return false;
+  }
+  if (ext === '.sh' || ext === '.feature') return true;
+  const pattern = /(?:^\s*import\s[\s\S]*?\bfrom\s+|^\s*import\s+|(?:\brequire|\bimport)\s*\(\s*)['"]([^'"]+)['"]/gm;
+  for (const match of source.matchAll(pattern)) {
+    const spec = match[1];
+    if (spec.startsWith('.') || spec.startsWith('@/') || spec.startsWith('~/') || spec.startsWith('/') || !JS_TEST_INFRA.test(spec)) return true;
+  }
+  return false;
+}
 
 /**
  * Which anchored requirements in one test file are not proven by their own test.
@@ -52,6 +170,30 @@ const ASSERTION_FREE_WINDOW = 40;
 
 function scopedAssertionFor(source, anchorIndex) {
   const lines = source.split('\n');
+  const pyOffset = lines.slice(anchorIndex, Math.min(lines.length, anchorIndex + 6)).findIndex((line) => /^\s*(?:async\s+)?def\s+\w+\s*\(/.test(line));
+  if (pyOffset !== -1) {
+    const defIndex = anchorIndex + pyOffset;
+    const indent = lines[defIndex].match(/^\s*/)[0].length;
+    const body = [];
+    for (let i = defIndex + 1; i < lines.length; i += 1) {
+      const line = lines[i];
+      if (line.trim() !== '' && !line.trim().startsWith('#') && line.match(/^\s*/)[0].length <= indent) break;
+      body.push(line);
+    }
+    return ASSERTION_SIGNAL.test(body.join('\n'));
+  }
+  const rbOffset = lines.slice(anchorIndex, Math.min(lines.length, anchorIndex + 4)).findIndex((line) => /^\s*(?:it|specify|scenario)\b.*\bdo\b|^\s*def\s+test_\w+/.test(line));
+  if (rbOffset !== -1) {
+    const startIdx = anchorIndex + rbOffset;
+    const indent = lines[startIdx].match(/^\s*/)[0].length;
+    const body = [];
+    for (let i = startIdx + 1; i < lines.length; i += 1) {
+      const line = lines[i];
+      if (new RegExp(`^\\s{0,${indent}}end\\b`).test(line)) break;
+      body.push(line);
+    }
+    return ASSERTION_SIGNAL.test(body.join('\n'));
+  }
   const window = [];
   let depth = 0;
   let opened = false;
@@ -68,21 +210,7 @@ function scopedAssertionFor(source, anchorIndex) {
     }
     if (opened && depth <= 0) break;
   }
-  if (ASSERTION_SIGNAL.test(window.join('\n'))) return true;
-
-  const pyOffset = lines.slice(anchorIndex, Math.min(lines.length, anchorIndex + 3)).findIndex((line) => /^\s*def\s+\w+\s*\(/.test(line));
-  if (pyOffset !== -1) {
-    const defIndex = anchorIndex + pyOffset;
-    const indent = lines[defIndex].match(/^\s*/)[0].length;
-    const body = [lines[defIndex]];
-    for (let i = defIndex + 1; i < lines.length; i += 1) {
-      const line = lines[i];
-      if (line.trim() !== '' && line.match(/^\s*/)[0].length <= indent) break;
-      body.push(line);
-    }
-    return ASSERTION_SIGNAL.test(body.join('\n'));
-  }
-  return false;
+  return ASSERTION_SIGNAL.test(window.join('\n'));
 }
 
 function globToRegExp(glob) {
@@ -118,7 +246,11 @@ function walk(dir, root, out = []) {
     }
     // Never follow repository links: scans must neither escape their root nor loop.
     if (stats.isSymbolicLink()) continue;
-    if (stats.isDirectory()) walk(full, root, out);
+    if (stats.isDirectory()) {
+      // Nested self-contained VLD projects (e.g. examples/case-studies/*) verify against their own spec.json.
+      if (full !== root && existsSync(path.join(full, 'profile.json')) && (existsSync(path.join(full, 'spec', 'spec.json')) || existsSync(path.join(full, 'specs', 'spec.json')))) continue;
+      walk(full, root, out);
+    }
     else if (SOURCE_FILE.test(entry)) out.push(full);
   }
   return out;
@@ -169,11 +301,11 @@ export function scanAnchors(repoDir, { exclude = [] } = {}) {
     }
     if (isTest && fileIds.length > 0) {
       const ids = [...new Set(fileIds)];
-      // File-level first, then per requirement. Naming the specific ids is what
-      // makes the failure actionable; the file-level message stays for files whose
-      // anchors share one asserted test.
-      if (!ASSERTION_SIGNAL.test(source)) hollow.push({ file: relative, ids });
-      else if (unproven.size > 0) hollow.push({ file: relative, ids: [...unproven].filter((id) => fileIds.includes(id)) });
+      // File-level first, then per requirement, and report missing product imports
+      // distinctly so `vld verify` agrees with `spec-check.mjs`.
+      if (!ASSERTION_SIGNAL.test(source)) hollow.push({ file: relative, ids, reason: 'no assertion in the anchored test', kind: 'no-assertion' });
+      else if (unproven.size > 0) hollow.push({ file: relative, ids: [...unproven].filter((id) => fileIds.includes(id)), reason: 'no assertion in the anchored test', kind: 'no-assertion' });
+      if (!reachesProductCode(source, file)) hollow.push({ file: relative, ids, reason: 'the test does not import product code', kind: 'no-import' });
     }
   }
 
@@ -316,7 +448,7 @@ export function verifyPacket(packetDir, { repo = null, strict = false, requireAs
 
   const expectedGates = [];
   for (let t = 0; t <= (Number.isInteger(tier) ? tier : 0); t += 1) {
-    expectedGates.push(...(policy.gates[String(t)] ?? []));
+    expectedGates.push(...(policy.gates[String(t)] ?? []).filter((gate) => !gate.primitiveOnly));
   }
   const gateIds = new Set((spec.gates ?? []).map((gate) => gate.id));
   for (const gate of expectedGates) {
@@ -464,8 +596,12 @@ export function verifyPacket(packetDir, { repo = null, strict = false, requireAs
     // The reverse direction: nothing may claim an overlay that is not listed.
     for (const requirement of requirements) {
       const origin = String(requirement.origin ?? 'catalog');
-      if (origin === 'catalog') continue;
-      const ids = origin.replace(/^overlay:/, '').split('+').map((entry) => entry.replace('overlay:', ''));
+      if (origin === 'catalog' || origin === 'profile' || origin === 'change') continue;
+      const ids = origin
+        .replace(/^overlay:/, '')
+        .split('+')
+        .map((entry) => entry.replace('overlay:', ''))
+        .filter((entry) => entry !== 'catalog' && entry !== 'profile' && entry !== 'change');
       for (const id of ids) {
         if (!overlayIds.has(id)) errors.push(`${requirement.id} claims overlay "${id}", which is not in spec.json`);
       }
@@ -518,8 +654,9 @@ export function verifyPacket(packetDir, { repo = null, strict = false, requireAs
     for (const entry of hollow) {
       const ids = entry.ids.filter((id) => known.has(id));
       if (ids.length === 0) continue;
-      const message = `${entry.file} carries @req anchor(s) (${ids.join(', ')}) with no visible assertion`;
-      const claimed = ids.some((id) => doneIds.has(id));
+      const reason = entry.reason ?? 'no assertion in the anchored test';
+      const message = `${entry.file} carries @req anchor(s) (${ids.join(', ')}) but ${reason}`;
+      const claimed = entry.kind !== 'no-import' && ids.some((id) => doneIds.has(id));
       if (requireAssertions || claimed) errors.push(message);
       else warnings.push(`${message} (pass --require-assertions to fail on hollow tests)`);
     }

@@ -1,0 +1,33 @@
+{
+  "id": "ruby",
+  "match": ["ruby", "rails", "sinatra", "hanami", "rspec", "bundler"],
+  "language": "Ruby 3.3",
+  "runtime": "CRuby (YJIT enabled)",
+  "ui": "Hotwire (Turbo + Stimulus) only if a UI is in scope",
+  "http": "Rails or Roda with typed parameter contracts at controller boundaries",
+  "db": "PostgreSQL + ActiveRecord/Sequel forward-only migrations",
+  "validation": "dry-schema or strong parameter contracts at every boundary",
+  "unitRunner": "RSpec",
+  "tests": "RSpec for unit, request and system tests",
+  "lint": "RuboCop + Sorbet/Steep static checks in CI",
+  "logs": "SemanticLogger JSON with request correlation IDs",
+  "ci": "GitHub Actions",
+  "fenceLanguage": "ruby",
+  "testExtension": "rb",
+  "anchorComment": "#",
+  "anchorPattern": "spec/{snake}_spec.rb",
+  "defaultTestGlobs": ["spec/**/*_spec.rb", "test/**/*_test.rb"],
+  "countedIn": ["spec/**", "tests/**", "test/**"],
+  "commands": {
+    "lint": "bundle exec rubocop",
+    "typecheck": "bundle exec ruby -wc",
+    "test": "bundle exec rspec"
+  },
+  "mutation": {
+    "tool": "mutant",
+    "command": "bundle exec mutant run",
+    "configFile": ".mutant.yml"
+  },
+  "propertyLibrary": "rantly",
+  "runnerForbidden": ["Vitest", "pytest", "ESLint", "npm test", "npm run lint", "cargo test"]
+}

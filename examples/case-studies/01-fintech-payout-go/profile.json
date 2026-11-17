@@ -1,0 +1,41 @@
+{
+  "name": "fintech-payout-go",
+  "idea": "Regulated merchant payout ledger for treasury operators to approve, post and reconcile cross-border EUR wire settlements with immutable audit records instead of manual CSV banking batches.",
+  "kind": "api",
+  "stage": "production",
+  "users": {
+    "scale": "medium"
+  },
+  "traits": [
+    "auth",
+    "payments",
+    "persistence",
+    "webhooks"
+  ],
+  "risks": {
+    "pii": true,
+    "payments": true,
+    "regulated": true,
+    "multiTenant": true,
+    "destructiveWrites": true,
+    "publicFacing": true,
+    "integrations": true
+  },
+  "regulation": [
+    "pci-dss",
+    "sox",
+    "dora"
+  ],
+  "rules": [
+    "When a payout exceeds 1000000 euro cents, the ledger shall require a distinct second treasury approver before posting.",
+    "When a settlement request reuses an idempotency key with altered parameters, the ledger shall reject the transfer with IDEMPOTENCY_CONFLICT."
+  ],
+  "constraints": {
+    "team": 5,
+    "weeks": 12,
+    "stack": "go",
+    "mustUse": [
+      "PostgreSQL"
+    ]
+  }
+}

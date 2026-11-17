@@ -1,0 +1,56 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "version": 1,
+  "metadata": {
+    "tools": [
+      {
+        "vendor": "vibecode-like-a-dev",
+        "name": "generate-sbom.mjs",
+        "version": "0.20.0"
+      }
+    ],
+    "component": {
+      "type": "application",
+      "bom-ref": "pkg:npm/vibecode-like-a-dev@0.20.0",
+      "name": "vibecode-like-a-dev",
+      "version": "0.20.0",
+      "description": "Turn a one-line idea or an existing repository into an enforceable software factory spec that any coding agent can execute.",
+      "purl": "pkg:npm/vibecode-like-a-dev@0.20.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "4df884dbd97a174773b5fb94d4cb90f28337dcc7b64440c559b5851590bff321"
+        }
+      ],
+      "properties": [
+        {
+          "name": "vld:runtimeDependencies",
+          "value": "0"
+        },
+        {
+          "name": "vld:nodeEngine",
+          "value": ">=22"
+        },
+        {
+          "name": "vld:shippedFileCount",
+          "value": "442"
+        }
+      ]
+    }
+  },
+  "components": [],
+  "dependencies": [
+    {
+      "ref": "pkg:npm/vibecode-like-a-dev@0.20.0",
+      "dependsOn": []
+    }
+  ]
+}

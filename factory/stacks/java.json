@@ -1,0 +1,33 @@
+{
+  "id": "java",
+  "match": ["java", "spring", "spring-boot", "quarkus", "micronaut", "maven", "junit"],
+  "language": "Java 21 LTS",
+  "runtime": "OpenJDK 21 JVM",
+  "ui": "Thymeleaf or a typed React frontend only if a UI is in scope",
+  "http": "Spring Boot Web with Bean Validation DTOs at controller boundaries",
+  "db": "PostgreSQL + Flyway (forward-only SQL migrations)",
+  "validation": "Jakarta Bean Validation at every boundary (request, config, external client)",
+  "unitRunner": "JUnit 5",
+  "tests": "JUnit 5 + Testcontainers for unit and integration tests",
+  "lint": "Checkstyle + Error Prone, javac -Werror in CI",
+  "logs": "SLF4J + Logback JSON with MDC correlation IDs",
+  "ci": "GitHub Actions",
+  "fenceLanguage": "java",
+  "testExtension": "java",
+  "anchorComment": "//",
+  "anchorPattern": "src/test/java/{Pascal}Test.java",
+  "defaultTestGlobs": ["src/test/java/**/*Test.java", "src/test/java/**/*Tests.java", "**/*Test.java"],
+  "countedIn": ["src/test/**", "tests/**"],
+  "commands": {
+    "lint": "./mvnw -q checkstyle:check",
+    "typecheck": "./mvnw -q test-compile",
+    "test": "./mvnw test"
+  },
+  "mutation": {
+    "tool": "PIT",
+    "command": "./mvnw test-compile org.pitest:pitest-maven:mutationCoverage",
+    "configFile": "pitest.properties"
+  },
+  "propertyLibrary": "jqwik",
+  "runnerForbidden": ["Vitest", "pytest", "ESLint", "npm test", "npm run lint", "cargo test"]
+}

@@ -28,7 +28,12 @@ const RUNTIME_MODULES = new Set([
   'runtime-server.mjs',
   'workspaces.mjs',
   'missions.mjs',
-  'forge-plan.mjs'
+  'forge-plan.mjs',
+  'repair.mjs',
+  'build.mjs',
+  'sandbox/index.mjs',
+  'sandbox/backends.mjs',
+  'sandbox/receipt.mjs'
 ]);
 
 /** Modules that must stay usable with no process, worktree or network authority. */

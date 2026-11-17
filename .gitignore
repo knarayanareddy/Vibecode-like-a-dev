@@ -40,3 +40,7 @@ tmp/
 
 
 examples/ideas/build/
+/.vld/telemetry/
+/.vld/reviews/
+/.vld/evidence/
+/.vld/build-report.json

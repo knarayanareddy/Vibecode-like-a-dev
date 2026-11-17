@@ -1,0 +1,40 @@
+{
+  "name": "polyglot-saas-platform",
+  "idea": "Multi-service analytics workspace for B2B product teams to ingest customer events, explore dashboards and schedule export digests per tenant instead of stitched CSV scripts.",
+  "kind": "web-app",
+  "stage": "production",
+  "users": {
+    "scale": "medium"
+  },
+  "traits": [
+    "auth",
+    "persistence",
+    "background-jobs",
+    "webhooks"
+  ],
+  "risks": {
+    "pii": true,
+    "payments": false,
+    "regulated": true,
+    "multiTenant": true,
+    "destructiveWrites": false,
+    "publicFacing": true,
+    "integrations": true
+  },
+  "regulation": [
+    "gdpr"
+  ],
+  "rules": [
+    "When a tenant exceeds 10 scheduled exports per hour, the worker shall defer new jobs with QUOTA_EXCEEDED."
+  ],
+  "constraints": {
+    "team": 6,
+    "weeks": 10,
+    "stack": {
+      "web": "typescript",
+      "api": "go",
+      "worker": "rust"
+    },
+    "mustUse": []
+  }
+}

@@ -1,0 +1,1520 @@
+{
+  "$schema": "https://raw.githubusercontent.com/knarayanareddy/Vibecode-like-a-dev/main/factory/schema/spec.schema.json",
+  "schemaVersion": 1,
+  "generatedWith": {
+    "tool": "vibecode-like-a-dev",
+    "version": "0.20.0"
+  },
+  "project": {
+    "name": "fintech-payout-go",
+    "title": "Fintech Payout Go",
+    "profile": "examples/case-studies/01-fintech-payout-go/profile.json",
+    "packetDir": "examples/case-studies/01-fintech-payout-go/spec",
+    "kind": "api",
+    "stage": "production",
+    "idea": "Regulated merchant payout ledger for treasury operators to approve, post and reconcile cross-border EUR wire settlements with immutable audit records instead of manual CSV banking batches.",
+    "users": {
+      "scale": "medium"
+    },
+    "traits": [
+      "auth",
+      "payments",
+      "persistence",
+      "webhooks"
+    ],
+    "traitWaivers": [],
+    "regulation": [
+      "pci-dss",
+      "sox",
+      "dora"
+    ],
+    "risks": {
+      "pii": true,
+      "payments": true,
+      "regulated": true,
+      "multiTenant": true,
+      "destructiveWrites": true,
+      "publicFacing": true,
+      "integrations": true
+    },
+    "constraints": {
+      "team": 5,
+      "weeks": 12,
+      "stack": "go",
+      "mustUse": [
+        "PostgreSQL"
+      ]
+    }
+  },
+  "rigor": {
+    "tier": 3,
+    "label": "critical",
+    "score": 14,
+    "signals": [
+      {
+        "label": "handles money",
+        "weight": 3,
+        "field": "risks.payments"
+      },
+      {
+        "label": "regulated data or domain",
+        "weight": 3,
+        "field": "risks.regulated"
+      },
+      {
+        "label": "stores personal data",
+        "weight": 1,
+        "field": "risks.pii"
+      },
+      {
+        "label": "multi-tenant isolation",
+        "weight": 2,
+        "field": "risks.multiTenant"
+      },
+      {
+        "label": "destructive writes",
+        "weight": 1,
+        "field": "risks.destructiveWrites"
+      },
+      {
+        "label": "publicly reachable",
+        "weight": 1,
+        "field": "risks.publicFacing"
+      },
+      {
+        "label": "third-party integrations",
+        "weight": 1,
+        "field": "risks.integrations"
+      },
+      {
+        "label": "production target",
+        "weight": 1,
+        "field": "stage"
+      },
+      {
+        "label": "medium user scale",
+        "weight": 1,
+        "field": "users.scale"
+      }
+    ],
+    "capped": false,
+    "cappedReason": null,
+    "packet": "full"
+  },
+  "anchorConvention": {
+    "marker": "@req",
+    "syntax": "// @req REQ-xxx",
+    "countedIn": [
+      "**/*_test.go"
+    ],
+    "check": "node ./spec-check.mjs"
+  },
+  "overlays": [
+    {
+      "id": "pci-dss",
+      "layer": "domain",
+      "title": "PCI-DSS cardholder data scope",
+      "source": "factory/overlays/pci-dss.json",
+      "why": "Card data changes the architecture, not just the rigor: the cheapest compliant design is one where the card number never reaches the application at all. That decision belongs in the packet, before a form is built.",
+      "adds": {
+        "requirements": [
+          "payments.card-data-out-of-scope",
+          "payments.tokenization",
+          "security.change-review-separation"
+        ],
+        "gates": [
+          "G3-CARD-SCOPE"
+        ],
+        "practices": []
+      },
+      "modifies": [],
+      "removes": []
+    },
+    {
+      "id": "sox",
+      "layer": "domain",
+      "title": "Sarbanes-Oxley internal controls over financial reporting (SOX)",
+      "source": "factory/overlays/sox.json",
+      "why": "Systems that originate, transform or report financial postings must satisfy SOX Section 302/404 IT general and application controls: segregation of duties between author and approver, closed-period immutability, automated reconciliation evidence and seven-year tamper-evident audit retention.",
+      "adds": {
+        "requirements": [
+          "finance.segregation-of-duties",
+          "finance.period-close-and-reconciliation",
+          "finance.sox-audit-and-access-review"
+        ],
+        "gates": [
+          "G3-SOX-CONTROLS"
+        ],
+        "practices": []
+      },
+      "modifies": [],
+      "removes": []
+    },
+    {
+      "id": "dora",
+      "layer": "domain",
+      "title": "EU Digital Operational Resilience Act (DORA)",
+      "source": "factory/overlays/dora.json",
+      "why": "Financial entities and critical ICT systems under DORA must classify and report major ICT-related incidents within strict statutory windows, prove operational continuity and recovery under disruption, and maintain an enforceable register and exit strategy for third-party ICT providers.",
+      "adds": {
+        "requirements": [
+          "resilience.ict-incident-classification",
+          "resilience.continuity-and-failover",
+          "resilience.ict-third-party-register"
+        ],
+        "gates": [
+          "G3-DORA-RESILIENCE"
+        ],
+        "practices": []
+      },
+      "modifies": [],
+      "removes": []
+    }
+  ],
+  "primitives": [
+    {
+      "id": "product.product-brief",
+      "title": "Product brief",
+      "path": "primitives/product/product-brief/SKILL.md",
+      "why": "An agent fills every ambiguity silently. A written brief is the cheapest place to remove ambiguity.",
+      "when": "always",
+      "enforces": [],
+      "origin": "router"
+    },
+    {
+      "id": "product.non-goals-and-scope",
+      "title": "Non-goals and scope discipline",
+      "path": "primitives/product/non-goals-and-scope/SKILL.md",
+      "why": "Scope creep is the default failure mode of generated code; explicit non-goals are the brake.",
+      "when": "always",
+      "enforces": [
+        "core.non-goals"
+      ],
+      "origin": "router"
+    },
+    {
+      "id": "domain.ubiquitous-language",
+      "title": "Ubiquitous language and DDD basics",
+      "path": "primitives/domain/ubiquitous-language/SKILL.md",
+      "why": "Shared vocabulary is the highest-leverage defence against plausible-but-wrong generated code.",
+      "when": "always",
+      "enforces": [],
+      "origin": "router"
+    },
+    {
+      "id": "testing.tdd-loop",
+      "title": "Test-driven loop",
+      "path": "primitives/testing/tdd-loop/SKILL.md",
+      "why": "A failing test is the only instruction an agent cannot misinterpret.",
+      "when": "always",
+      "enforces": [],
+      "origin": "router"
+    },
+    {
+      "id": "testing.acceptance-traceability",
+      "title": "Acceptance criteria and traceability anchors",
+      "path": "primitives/testing/acceptance-traceability/SKILL.md",
+      "why": "Requirement-to-test anchors are the mechanism that closes the enforcement gap.",
+      "when": "always",
+      "enforces": [
+        "spec.drift-guard"
+      ],
+      "origin": "router"
+    },
+    {
+      "id": "agent.handoff-packet",
+      "title": "Agent handoff packet",
+      "path": "primitives/agent/handoff-packet/SKILL.md",
+      "why": "The spec is useless if the agent that receives it cannot find the entry point.",
+      "when": "always",
+      "enforces": [],
+      "origin": "router"
+    },
+    {
+      "id": "domain.aggregates-and-invariants",
+      "title": "Aggregates and invariants",
+      "path": "primitives/domain/aggregates-and-invariants/SKILL.md",
+      "why": "Invariants are the properties mutation and property-based tests verify.",
+      "when": "always",
+      "enforces": [
+        "payments.correctness",
+        "core.domain-invariants"
+      ],
+      "origin": "router"
+    },
+    {
+      "id": "architecture.style-selection",
+      "title": "Architecture style selection",
+      "path": "primitives/architecture/style-selection/SKILL.md",
+      "why": "Default to a modular monolith; distributed complexity must be justified, not inherited.",
+      "when": "always",
+      "enforces": [],
+      "origin": "router"
+    },
+    {
+      "id": "security.secrets-and-supply-chain",
+      "title": "Secrets and supply chain hygiene",
+      "path": "primitives/security/secrets-and-supply-chain/SKILL.md",
+      "why": "Leaked keys and unpinned dependencies are the two cheapest attacks on a new product.",
+      "when": "tier gte 1",
+      "enforces": [],
+      "origin": "router"
+    },
+    {
+      "id": "delivery.ci-gates",
+      "title": "CI gates from the first commit",
+      "path": "primitives/delivery/ci-gates/SKILL.md",
+      "why": "A gate that does not run in CI is a suggestion.",
+      "when": "tier gte 1",
+      "enforces": [
+        "core.runnable"
+      ],
+      "origin": "router"
+    },
+    {
+      "id": "product.user-journeys",
+      "title": "User journeys as testable slices",
+      "path": "primitives/product/user-journeys/SKILL.md",
+      "why": "Journeys turn a paragraph of intent into testable slices.",
+      "when": "always",
+      "enforces": [
+        "core.primary-journey"
+      ],
+      "origin": "router"
+    },
+    {
+      "id": "domain.bounded-contexts",
+      "title": "Bounded contexts and module seams",
+      "path": "primitives/domain/bounded-contexts/SKILL.md",
+      "why": "Context boundaries decide module seams before any file is generated.",
+      "when": "tier gte 1",
+      "enforces": [
+        "auth.tenant-isolation"
+      ],
+      "origin": "router"
+    },
+    {
+      "id": "architecture.api-contract-first",
+      "title": "Contract before implementation",
+      "path": "primitives/architecture/api-contract-first/SKILL.md",
+      "why": "A contract written before implementation is the only interface an agent cannot improvise.",
+      "when": "(kind in [\"api\",\"web-app\",\"mobile\"] OR risks.integrations eq true)",
+      "enforces": [
+        "api.contract",
+        "api.error-envelope"
+      ],
+      "origin": "router"
+    },
+    {
+      "id": "data.schema-and-migrations",
+      "title": "Schema and forward-only migrations",
+      "path": "primitives/data/schema-and-migrations/SKILL.md",
+      "why": "Schemas outlive code. Forward-only migrations keep the data recoverable.",
+      "when": "(kind in [\"api\",\"web-app\",\"data-pipeline\",\"mobile\"] OR traits includes \"persistence\")",
+      "enforces": [
+        "data.persistence"
+      ],
+      "origin": "router"
+    },
+    {
+      "id": "testing.test-budget",
+      "title": "Test budget and suite shape",
+      "path": "primitives/testing/test-budget/SKILL.md",
+      "why": "Test suite shape must match risk: heavy on domain rules, thin on frameworks.",
+      "when": "always",
+      "enforces": [],
+      "origin": "router"
+    },
+    {
+      "id": "security.authz-model",
+      "title": "Authorization model, deny by default",
+      "path": "primitives/security/authz-model/SKILL.md",
+      "why": "Authorization bugs are invisible in happy-path demos and catastrophic in production.",
+      "when": "(traits includes \"auth\" OR risks.multiTenant eq true OR traits includes \"admin\")",
+      "enforces": [
+        "auth.authorization",
+        "auth.tenant-isolation"
+      ],
+      "origin": "router"
+    },
+    {
+      "id": "security.asvs-baseline",
+      "title": "OWASP ASVS baseline",
+      "path": "primitives/security/asvs-baseline/SKILL.md",
+      "why": "OWASP ASVS gives a numbered baseline where there is a network surface or a credential; a local tool inherits supply-chain hygiene instead.",
+      "when": "tier gte 1 AND (kind in [\"web-app\",\"api\",\"mobile\"] OR risks.publicFacing eq true OR traits includes \"auth\")",
+      "enforces": [
+        "auth.identity",
+        "auth.authorization"
+      ],
+      "origin": "router"
+    },
+    {
+      "id": "agent.review-protocol",
+      "title": "Automated review protocol",
+      "path": "primitives/agent/review-protocol/SKILL.md",
+      "why": "Self-review is theatre when the reviewer shares the author's blind spots.",
+      "when": "tier gte 1",
+      "enforces": [],
+      "origin": "router"
+    },
+    {
+      "id": "architecture.ports-and-adapters",
+      "title": "Ports and adapters (hexagonal)",
+      "path": "primitives/architecture/ports-and-adapters/SKILL.md",
+      "why": "Keeping the domain free of framework and vendor code is what makes later replacement cheap.",
+      "when": "always",
+      "enforces": [
+        "library.api-stability",
+        "cli.ergonomics"
+      ],
+      "origin": "router"
+    },
+    {
+      "id": "architecture.adr-log",
+      "title": "Architecture decision records",
+      "path": "primitives/architecture/adr-log/SKILL.md",
+      "why": "Decisions without rationale get re-litigated on every agent session.",
+      "when": "always",
+      "enforces": [],
+      "origin": "router"
+    },
+    {
+      "id": "architecture.build-vs-buy",
+      "title": "Build versus buy for commodity concerns",
+      "path": "primitives/architecture/build-vs-buy/SKILL.md",
+      "why": "Most generated auth, billing and queues are worse than the boring proven option.",
+      "when": "tier gte 1",
+      "enforces": [],
+      "origin": "router"
+    },
+    {
+      "id": "data.data-lifecycle",
+      "title": "Data lifecycle, export and deletion",
+      "path": "primitives/data/data-lifecycle/SKILL.md",
+      "why": "Retention and deletion are cheap to design and expensive to retrofit.",
+      "when": "(risks.pii eq true OR risks.regulated eq true OR tier gte 2)",
+      "enforces": [
+        "data.lifecycle"
+      ],
+      "origin": "router"
+    },
+    {
+      "id": "testing.contract-tests",
+      "title": "Contract tests and real fixtures",
+      "path": "primitives/testing/contract-tests/SKILL.md",
+      "why": "Mocks hide integration breakage; contract tests catch it before deploy.",
+      "when": "(kind in [\"api\",\"web-app\",\"mobile\"] OR risks.integrations eq true)",
+      "enforces": [
+        "api.contract",
+        "integration.retries"
+      ],
+      "origin": "router"
+    },
+    {
+      "id": "security.threat-model",
+      "title": "Lightweight threat model",
+      "path": "primitives/security/threat-model/SKILL.md",
+      "why": "Trust boundaries define where input validation and authorization must exist.",
+      "when": "(tier gte 2 OR risks.payments eq true OR risks.regulated eq true)",
+      "enforces": [
+        "auth.authorization",
+        "ops.rate-limits",
+        "data.uploads",
+        "ai.guardrails"
+      ],
+      "origin": "router"
+    },
+    {
+      "id": "reliability.idempotency-and-retries",
+      "title": "Idempotency and retry policy",
+      "path": "primitives/reliability/idempotency-and-retries/SKILL.md",
+      "why": "Retries and duplicate events are guaranteed in production; naive handlers double-charge.",
+      "when": "(tier gte 2 OR risks.integrations eq true OR traits includes \"webhooks\")",
+      "enforces": [
+        "integration.retries",
+        "pipeline.idempotency",
+        "mobile.offline"
+      ],
+      "origin": "router"
+    },
+    {
+      "id": "architecture.fitness-functions",
+      "title": "Fitness functions for boundaries",
+      "path": "primitives/architecture/fitness-functions/SKILL.md",
+      "why": "Architecture that is not executable is decoration. Fitness functions make boundaries fail loudly.",
+      "when": "tier gte 2",
+      "enforces": [
+        "ui.design-tokens"
+      ],
+      "origin": "router"
+    },
+    {
+      "id": "testing.mutation-testing",
+      "title": "Mutation testing",
+      "path": "primitives/testing/mutation-testing/SKILL.md",
+      "why": "Coverage measures execution, mutation testing measures assertion strength.",
+      "when": "tier gte 2",
+      "enforces": [],
+      "origin": "router"
+    },
+    {
+      "id": "reliability.observability-baseline",
+      "title": "Observability baseline",
+      "path": "primitives/reliability/observability-baseline/SKILL.md",
+      "why": "Without correlation IDs and error rates you cannot tell drift from incident.",
+      "when": "tier gte 2",
+      "enforces": [
+        "ops.observability",
+        "delivery.audit-trail"
+      ],
+      "origin": "router"
+    },
+    {
+      "id": "delivery.release-and-rollback",
+      "title": "Release, feature flags and rollback",
+      "path": "primitives/delivery/release-and-rollback/SKILL.md",
+      "why": "The ability to undo is worth more than the ability to predict.",
+      "when": "tier gte 2",
+      "enforces": [],
+      "origin": "router"
+    },
+    {
+      "id": "testing.property-based-testing",
+      "title": "Property-based testing for invariants",
+      "path": "primitives/testing/property-based-testing/SKILL.md",
+      "why": "Hand-picked examples miss the edge cases that matter most in money and state machines.",
+      "when": "(tier gte 3 OR risks.payments eq true)",
+      "enforces": [
+        "payments.correctness"
+      ],
+      "origin": "router"
+    },
+    {
+      "id": "agent.spec-drift-guard",
+      "title": "Spec drift guard",
+      "path": "primitives/agent/spec-drift-guard/SKILL.md",
+      "why": "Specs that nothing checks become confident lies within weeks.",
+      "when": "tier gte 2",
+      "enforces": [
+        "spec.drift-guard"
+      ],
+      "origin": "router"
+    }
+  ],
+  "deferred": [],
+  "skipped": [
+    {
+      "id": "frontend.design-system-tokens",
+      "title": "Design tokens and UI consistency",
+      "reason": "predicate",
+      "detail": "not applicable: kind in [\"web-app\",\"mobile\"]"
+    },
+    {
+      "id": "frontend.accessibility-baseline",
+      "title": "Accessibility baseline",
+      "reason": "predicate",
+      "detail": "not applicable: kind in [\"web-app\",\"mobile\"]"
+    },
+    {
+      "id": "frontend.ui-state-model",
+      "title": "UI state model: loading, empty, error, success",
+      "reason": "predicate",
+      "detail": "not applicable: kind in [\"web-app\",\"mobile\"]"
+    },
+    {
+      "id": "agent.autonomy-limits",
+      "title": "Agent autonomy limits and action boundaries",
+      "reason": "predicate",
+      "detail": "not applicable: (kind eq \"agent\" OR kind eq \"automation\" AND traits includes \"ai\" OR traits includes \"ai\" AND risks.destructiveWrites eq true)"
+    }
+  ],
+  "requirements": [
+    {
+      "id": "REQ-001",
+      "key": "core.runnable",
+      "area": "core",
+      "origin": "catalog",
+      "title": "Runnable from a clean clone",
+      "statement": "The application shall start, run its tests and name every missing environment variable from a clean clone using only the commands in the README.",
+      "failurePath": "A missing environment variable produces a single actionable error naming the variable, not a stack trace deep in a startup path.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given a fresh clone and an empty environment file, when the documented setup command runs, then it either succeeds or lists every missing required variable by name."
+        }
+      ],
+      "verify": "gate",
+      "traits": [],
+      "anchor": null,
+      "status": "todo"
+    },
+    {
+      "id": "REQ-002",
+      "key": "core.primary-journey",
+      "area": "core",
+      "origin": "catalog",
+      "title": "The primary journey works end to end",
+      "statement": "The application shall carry one record through the journey in the product brief from first step to last, through the documented interface, and leave the promised outcome readable on a second visit.",
+      "failurePath": "If any step of the journey fails, the user is left in a state they can retry from, with no partially written data and an explanation that names what failed.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given a new user and empty storage, when they complete the primary journey using only the documented interface, then the outcome named in the brief exists and is readable on a second visit."
+        },
+        {
+          "id": "AC-02",
+          "text": "Given the same journey, when a dependency it relies on is unavailable, then the user sees an actionable message and no partial record is created."
+        }
+      ],
+      "verify": "automated",
+      "traits": [],
+      "anchor": "core_primary_journey_test.go",
+      "status": "todo"
+    },
+    {
+      "id": "REQ-003",
+      "key": "core.non-goals",
+      "area": "core",
+      "origin": "catalog",
+      "title": "Explicit non-goals",
+      "statement": "The product brief shall name at least three capabilities this version deliberately does not provide, with no partially built version of them anywhere in the codebase.",
+      "failurePath": "Out-of-scope work arrives as a failing review comment referencing a non-goal, rather than as silent extra code.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given the brief, when a reviewer reads the change, then every capability in the diff maps to an in-scope requirement or is rejected."
+        }
+      ],
+      "verify": "manual",
+      "traits": [],
+      "anchor": null,
+      "status": "todo"
+    },
+    {
+      "id": "REQ-004",
+      "key": "data.persistence",
+      "area": "data",
+      "origin": "catalog",
+      "title": "Durable state with forward-only migrations",
+      "statement": "When the schema of stored state changes, the application shall apply a forward-only migration that runs against a non-empty database without losing data.",
+      "failurePath": "A migration that fails halfway leaves the database in a known state, and the documented restore step returns it to the pre-migration snapshot.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given a database at the previous schema version with representative rows, when the migration runs, then all rows remain readable and no column required by the new code is null."
+        },
+        {
+          "id": "AC-02",
+          "text": "Given the same database, when the migration is re-run, then it is a no-op rather than an error."
+        }
+      ],
+      "verify": "automated",
+      "traits": [
+        "persistence"
+      ],
+      "anchor": "data_persistence_test.go",
+      "status": "todo"
+    },
+    {
+      "id": "REQ-005",
+      "key": "data.lifecycle",
+      "area": "data",
+      "origin": "catalog",
+      "title": "Data lifecycle: retention, export and deletion",
+      "statement": "When a subject asks for their data to be deleted, the application shall remove every field, derived row and cached copy about that subject in one operation, under the purpose and retention period recorded for each field.",
+      "failurePath": "A deletion request for an unknown subject returns success without inventing records, and leaves no orphan rows.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given a subject with records in every table, when deletion runs, then a query for that subject across all tables returns zero rows."
+        },
+        {
+          "id": "AC-02",
+          "text": "Given a deletion request, when the audit log is inspected, then the request is recorded without storing the deleted personal data."
+        }
+      ],
+      "verify": "automated",
+      "traits": [],
+      "anchor": "data_lifecycle_test.go",
+      "status": "todo"
+    },
+    {
+      "id": "REQ-006",
+      "key": "auth.identity",
+      "area": "security",
+      "origin": "catalog",
+      "title": "Authentication with explicit session lifecycle",
+      "statement": "While a session is open, the application shall accept it only after verifying it server-side, and expire or revoke it on the documented triggers.",
+      "failurePath": "An expired or revoked session receives an unauthenticated response and performs no state change.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given valid credentials, when the user signs in, then a session is issued and the identifier is not placed in a URL."
+        },
+        {
+          "id": "AC-02",
+          "text": "Given a revoked session, when any protected endpoint is called, then the response is 401 and no data is written."
+        },
+        {
+          "id": "AC-03",
+          "text": "Given a sign-out-everywhere request, when any previously issued session is used, then all are rejected except the current one."
+        }
+      ],
+      "verify": "automated",
+      "traits": [
+        "auth"
+      ],
+      "anchor": "auth_identity_test.go",
+      "status": "todo"
+    },
+    {
+      "id": "REQ-007",
+      "key": "auth.authorization",
+      "area": "security",
+      "origin": "catalog",
+      "title": "Server-side authorization with deny-by-default",
+      "statement": "When a request reads or changes data belonging to another subject, the application shall deny it unless a named role or policy grants that action on that object.",
+      "failurePath": "A forbidden request returns 403 or 404 as documented, writes nothing, and emits an authorization-denied log line without leaking the resource's contents.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given a user without the required role, when the operation is attempted directly against the API, then it is refused even if the UI hides the control."
+        },
+        {
+          "id": "AC-02",
+          "text": "Given a resource owned by another subject, when it is requested by identifier, then the response does not reveal existence."
+        }
+      ],
+      "verify": "automated",
+      "traits": [
+        "admin",
+        "auth"
+      ],
+      "anchor": "auth_authorization_test.go",
+      "status": "todo"
+    },
+    {
+      "id": "REQ-008",
+      "key": "auth.tenant-isolation",
+      "area": "security",
+      "origin": "catalog",
+      "title": "Tenant isolation",
+      "statement": "The data-access layer shall apply the caller's tenant key to every unit of work and ignore any tenant identifier supplied by the client.",
+      "failurePath": "A query constructed without a tenant filter fails closed (returns no rows or raises), rather than returning all tenants. A caller from one {tenantNoun} who presents another {tenantNoun}'s identifier is refused before any row is read.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given two tenants with records, when tenant A lists records, then no tenant B identifier appears."
+        },
+        {
+          "id": "AC-02",
+          "text": "Given a forged tenant identifier, when it is processed, then it is rejected before any record is returned or changed."
+        }
+      ],
+      "verify": "automated",
+      "traits": [],
+      "anchor": "auth_tenant_isolation_test.go",
+      "status": "todo"
+    },
+    {
+      "id": "REQ-009",
+      "key": "api.contract",
+      "area": "api",
+      "origin": "catalog",
+      "title": "Versioned machine-readable interface contract",
+      "statement": "When an exposed or consumed interface changes, the application shall update the machine-readable contract in the repository before merge, in a form a breaking-change check can reject.",
+      "failurePath": "An incompatible change fails the contract check and names the field and the consumer affected.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given the contract and the implementation, when the contract check runs, then they agree on paths, methods, status codes and error shape."
+        },
+        {
+          "id": "AC-02",
+          "text": "Given a removed response field, when the check runs, then it fails as a breaking change."
+        }
+      ],
+      "verify": "automated",
+      "traits": [],
+      "anchor": "api_contract_test.go",
+      "status": "todo"
+    },
+    {
+      "id": "REQ-010",
+      "key": "api.error-envelope",
+      "area": "api",
+      "origin": "catalog",
+      "title": "One error envelope and one identifier scheme",
+      "statement": "The application shall return every error in one envelope carrying a stable machine code, a human message, a correlation ID and optional field details, with opaque identifiers instead of sequential ones.",
+      "failurePath": "An unknown route and a failed validation return the same envelope shape with distinguishable machine codes.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given an invalid payload, when the response is inspected, then its shape matches the documented envelope and the machine code is stable across releases."
+        }
+      ],
+      "verify": "automated",
+      "traits": [],
+      "anchor": "api_error_envelope_test.go",
+      "status": "todo"
+    },
+    {
+      "id": "REQ-011",
+      "key": "integration.retries",
+      "area": "reliability",
+      "origin": "catalog",
+      "title": "Idempotent handling of retried work",
+      "statement": "When an inbound webhook or outbound retry is replayed, the application shall reach the same end state with no duplicate side effect.",
+      "failurePath": "A duplicate event is acknowledged without reprocessing, and a retry storm does not create duplicate records or double-charge.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given the same event delivered twice, when both are processed, then exactly one record exists and one side effect occurred."
+        },
+        {
+          "id": "AC-02",
+          "text": "Given a client error from the upstream service (400/401/403), when the call fails, then it is not retried."
+        },
+        {
+          "id": "AC-03",
+          "text": "Given a 5xx or timeout, when the call fails, then it is retried with exponential backoff and jitter up to a documented cap."
+        }
+      ],
+      "verify": "automated",
+      "traits": [
+        "webhooks"
+      ],
+      "anchor": "integration_retries_test.go",
+      "status": "todo"
+    },
+    {
+      "id": "REQ-012",
+      "key": "payments.correctness",
+      "area": "reliability",
+      "origin": "catalog",
+      "title": "Money movement is correct under retries and partial failure",
+      "statement": "When a charge, refund or transfer is retried or partially fails, the application shall write exactly one append-only ledger entry in integer minor units with an explicit currency, and reconcile it against the provider.",
+      "failurePath": "A webhook arriving before the checkout response, or twice, results in exactly one entitlement and one ledger entry.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given a payment intent confirmed twice with the same idempotency key, when both requests are handled, then one charge exists."
+        },
+        {
+          "id": "AC-02",
+          "text": "Given a provider timeout after a successful capture, when reconciliation runs, then the local ledger converges to the provider's state without creating a second charge."
+        },
+        {
+          "id": "AC-03",
+          "text": "Given any ledger entry, when the totals are recomputed, then sums reconcile to zero across debits and credits for settled transactions."
+        }
+      ],
+      "verify": "automated",
+      "traits": [
+        "payments"
+      ],
+      "anchor": "payments_correctness_test.go",
+      "status": "todo"
+    },
+    {
+      "id": "REQ-013",
+      "key": "ops.observability",
+      "area": "reliability",
+      "origin": "catalog",
+      "title": "Observable behaviour under failure",
+      "statement": "When a request or job fails, the application shall record one structured log line with a correlation ID propagated to outbound calls, and expose error, latency and queue-depth numbers that can be alerted on.",
+      "failurePath": "A failing dependency produces log lines carrying the correlation ID and an alertable error-rate increase, not a silent retry loop.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given a failing dependency, when a request is traced, then its log lines share one correlation ID and include the dependency name and outcome."
+        }
+      ],
+      "verify": "automated",
+      "traits": [
+        "background-jobs"
+      ],
+      "anchor": "ops_observability_test.go",
+      "status": "todo"
+    },
+    {
+      "id": "REQ-014",
+      "key": "ops.rate-limits",
+      "area": "security",
+      "origin": "catalog",
+      "title": "Abuse limits on public entry points",
+      "statement": "When a public write or authentication endpoint is called, the application shall limit requests per identity and per IP and answer a refused request with a retry hint.",
+      "failurePath": "Exceeding the limit returns 429 with a retry hint and performs no work; the limiter fails closed for authentication endpoints.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given N+1 requests within the window, when the last is made, then it is refused with 429 and no state change occurred."
+        }
+      ],
+      "verify": "automated",
+      "traits": [],
+      "anchor": "ops_rate_limits_test.go",
+      "status": "todo"
+    },
+    {
+      "id": "REQ-015",
+      "key": "delivery.audit-trail",
+      "area": "security",
+      "origin": "catalog",
+      "title": "Append-only audit trail for privileged actions",
+      "statement": "When a privileged or destructive action succeeds or fails, the application shall append an immutable record of actor, action, target, time and outcome that application code cannot update or delete.",
+      "failurePath": "If the audit record cannot be written, the privileged change fails: an unattributable change to {aPrimary} is never allowed to succeed quietly.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given a privileged action, when it completes or fails, then exactly one audit record exists and the application user has no update or delete grant on that table."
+        }
+      ],
+      "verify": "automated",
+      "traits": [],
+      "anchor": "delivery_audit_trail_test.go",
+      "status": "todo"
+    },
+    {
+      "id": "REQ-016",
+      "key": "spec.drift-guard",
+      "area": "core",
+      "origin": "catalog",
+      "title": "Spec drift is detected mechanically",
+      "statement": "When a requirement marked automated loses its @req anchor, or a test cites an unknown requirement, or the spec references a missing primitive, the build shall fail and name the requirement or primitive that broke the link.",
+      "failurePath": "Deleting a test that proves an automated requirement fails CI with the requirement identifier and the missing anchor.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given a requirement anchored to a deleted test, when CI runs, then it fails and names the requirement."
+        },
+        {
+          "id": "AC-02",
+          "text": "Given an @req anchor for an identifier absent from the spec, when CI runs, then it fails as unknown."
+        }
+      ],
+      "verify": "automated",
+      "traits": [],
+      "anchor": "spec_drift_guard_test.go",
+      "status": "todo"
+    },
+    {
+      "id": "REQ-017",
+      "key": "core.domain-invariants",
+      "area": "core",
+      "origin": "catalog",
+      "title": "The product's own rules are named and pinned",
+      "statement": "The domain model shall state every product-specific invariant as a rule, each pinned by an automated test that fails when the rule is inverted.",
+      "failurePath": "If a core rule is inverted by a refactor, a test fails and names the rule, rather than the change being discovered by a user or a reviewer.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given the invariants listed in the domain model, when the suite runs, then each invariant is covered by a test that fails if its rule is inverted."
+        },
+        {
+          "id": "AC-02",
+          "text": "Given an invariant added to the domain model, when it has no test, then the review checklist rejects the change."
+        }
+      ],
+      "verify": "automated",
+      "traits": [],
+      "anchor": "core_domain_invariants_test.go",
+      "status": "todo"
+    },
+    {
+      "id": "REQ-018",
+      "key": "payments.card-data-out-of-scope",
+      "area": "data",
+      "origin": "overlay:pci-dss",
+      "title": "Card data never reaches application storage",
+      "statement": "The application shall keep every full card number and security code outside its own storage, logs and request bodies by using provider-hosted fields or tokens.",
+      "failurePath": "If a request carries a card-shaped value, it is rejected and logged as a redaction event, not stored.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given a request body containing a 16-digit card number, when it is processed, then it is refused and the value is absent from logs."
+        },
+        {
+          "id": "AC-02",
+          "text": "Given the storage schema, when it is inspected, then it contains no field that holds a full card number or a security code."
+        }
+      ],
+      "verify": "automated",
+      "traits": [],
+      "anchor": "payments_card_data_out_of_scope_test.go",
+      "status": "todo"
+    },
+    {
+      "id": "REQ-019",
+      "key": "payments.tokenization",
+      "area": "api",
+      "origin": "overlay:pci-dss",
+      "title": "Tokens are the only reference to a payment instrument",
+      "statement": "When the application refers to a payment method, the application shall use a provider-issued token bound to one customer and one tenant.",
+      "failurePath": "If a token belongs to another tenant, the operation is refused and reported rather than attempted.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given a token issued for tenant A, when tenant B presents it, then the operation is refused."
+        },
+        {
+          "id": "AC-02",
+          "text": "Given a stored reference, when it is read, then it is a token, never a card fragment."
+        }
+      ],
+      "verify": "automated",
+      "traits": [],
+      "anchor": "payments_tokenization_test.go",
+      "status": "todo"
+    },
+    {
+      "id": "REQ-020",
+      "key": "security.change-review-separation",
+      "area": "security",
+      "origin": "overlay:pci-dss",
+      "title": "Production changes require separation of duties",
+      "statement": "The build pipeline shall refuse a production-affecting change whose approver is also its author.",
+      "failurePath": "If the approval record is missing, the change is refused rather than treated as implicitly approved.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given a change approved by its author, when CI evaluates it, then it is refused."
+        },
+        {
+          "id": "AC-02",
+          "text": "Given an approved change, when the record is read, then it names the reviewer and the revision."
+        }
+      ],
+      "verify": "automated",
+      "traits": [],
+      "anchor": "security_change_review_separation_test.go",
+      "status": "todo"
+    },
+    {
+      "id": "REQ-021",
+      "key": "finance.segregation-of-duties",
+      "area": "security",
+      "origin": "overlay:sox",
+      "title": "Segregation of duties separates entry, approval and configuration",
+      "statement": "When a manual financial entry, adjustment or control-configuration change is submitted, the application shall require approval from a distinct authorised actor and reject self-approval.",
+      "failurePath": "If the approver matches the initiator or lacks the independent approver role, the transition is rejected and recorded in the audit log.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given an actor who created a manual journal or adjustment, when the same actor attempts to approve it, then the application rejects the approval."
+        },
+        {
+          "id": "AC-02",
+          "text": "Given a distinct authorised approver, when they approve the entry, then both initiator and approver identities and timestamps are persisted immutably."
+        }
+      ],
+      "verify": "automated",
+      "traits": [],
+      "anchor": "finance_segregation_of_duties_test.go",
+      "status": "todo"
+    },
+    {
+      "id": "REQ-022",
+      "key": "finance.period-close-and-reconciliation",
+      "area": "data",
+      "origin": "overlay:sox",
+      "title": "Closed accounting periods reject mutation and reconcile completely",
+      "statement": "When an accounting period is marked closed, the application shall reject direct inserts, updates or deletes dated in that period and require corrections to post as adjusting entries in an open period with automated completeness reconciliation.",
+      "failurePath": "If a posting targets a closed period or a reconciliation run detects an out-of-balance total, the posting is refused and an exception alert is raised.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given a closed period, when a write or edit dated inside that period is attempted, then the application rejects it and leaves prior balances unchanged."
+        },
+        {
+          "id": "AC-02",
+          "text": "Given a reconciliation run across source transactions and ledger postings, when any variance exists, then the run fails loudly with the exact unmatched identifiers."
+        }
+      ],
+      "verify": "automated",
+      "traits": [],
+      "anchor": "finance_period_close_and_reconciliation_test.go",
+      "status": "todo"
+    },
+    {
+      "id": "REQ-023",
+      "key": "finance.sox-audit-and-access-review",
+      "area": "reliability",
+      "origin": "overlay:sox",
+      "title": "Financial control evidence is append-only for seven years and access is recertified",
+      "statement": "The application shall retain immutable audit logs of financial entries, schema/control changes and privileged access grants for at least seven years and export periodic user-access recertification snapshots.",
+      "failurePath": "If audit persistence fails on a financial mutation or role change, the operation aborts rather than committing unaudited state.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given a stored financial audit entry, when an update or delete is attempted, then storage rejects it and retention preserves entries younger than seven years."
+        },
+        {
+          "id": "AC-02",
+          "text": "Given an access-recertification export, when generated, then it lists every active role assignment, granter, grant date and last use."
+        }
+      ],
+      "verify": "automated",
+      "traits": [],
+      "anchor": "finance_sox_audit_and_access_review_test.go",
+      "status": "todo"
+    },
+    {
+      "id": "REQ-024",
+      "key": "resilience.ict-incident-classification",
+      "area": "reliability",
+      "origin": "overlay:dora",
+      "title": "Major ICT incidents are classified and logged on a reporting clock",
+      "statement": "When an operational outage, data-integrity failure or security anomaly occurs, the application shall record a structured ICT incident with severity criteria, affected services, client-impact count and detection timestamp to support initial, intermediate and final DORA regulatory reports.",
+      "failurePath": "If impact telemetry is incomplete at detection time, the incident defaults to escalated review and records the detection timestamp immediately rather than delaying classification.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given a fault crossing configured availability or data-integrity thresholds, when detected, then a structured incident record is persisted with detection time, classification and escalation deadline."
+        },
+        {
+          "id": "AC-02",
+          "text": "Given a classified major incident, when an incident report export is generated, then it includes initial, intermediate and root-cause timeline fields without mutating earlier entries."
+        }
+      ],
+      "verify": "automated",
+      "traits": [],
+      "anchor": "resilience_ict_incident_classification_test.go",
+      "status": "todo"
+    },
+    {
+      "id": "REQ-025",
+      "key": "resilience.continuity-and-failover",
+      "area": "reliability",
+      "origin": "overlay:dora",
+      "title": "Critical functions degrade predictably and verify backup integrity",
+      "statement": "When a primary dependency or storage node fails, the application shall enforce bounded timeouts, preserve transactional integrity without silent data loss, and verify backup integrity hashes before restore.",
+      "failurePath": "If a backup fails integrity verification or a failover target is unhealthy, the application aborts automated promotion and alerts the on-call operator.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given a simulated dependency outage, when requests hit a critical workflow, then the application fails closed with no partial state corruption and emits a recovery metric."
+        },
+        {
+          "id": "AC-02",
+          "text": "Given a backup artifact with a tampered checksum, when restore verification runs, then the restore is rejected."
+        }
+      ],
+      "verify": "automated",
+      "traits": [],
+      "anchor": "resilience_continuity_and_failover_test.go",
+      "status": "todo"
+    },
+    {
+      "id": "REQ-026",
+      "key": "resilience.ict-third-party-register",
+      "area": "core",
+      "origin": "overlay:dora",
+      "title": "Third-party ICT dependencies carry a register of information and exit path",
+      "statement": "The application shall maintain a machine-readable register of every third-party ICT provider naming criticality, data location, contractual audit rights and fallback or exit adapter, and refuse unregistered outbound ICT integrations.",
+      "failurePath": "If a critical workflow enables an external ICT provider missing from the register or lacking a declared exit plan, startup validation or CI rejects the configuration.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given an external provider not listed in the ICT register, when configuration is validated, then validation fails naming the unregistered provider."
+        },
+        {
+          "id": "AC-02",
+          "text": "Given a registered critical provider, when its entry is inspected, then service scope, region, criticality tier and exit mechanism are all populated."
+        }
+      ],
+      "verify": "automated",
+      "traits": [],
+      "anchor": "resilience_ict_third_party_register_test.go",
+      "status": "todo"
+    },
+    {
+      "id": "REQ-C01",
+      "key": "custom.payout-exceeds-1000000-euro-cents",
+      "area": "data",
+      "origin": "profile",
+      "title": "When a payout exceeds 1000000 euro cents, the ledger shall require a",
+      "statement": "When a payout exceeds 1000000 euro cents, the ledger shall require a distinct second treasury approver before posting.",
+      "failurePath": "If a request or state transition violates this rule, the application rejects it with a typed domain error and leaves persisted state unchanged.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given an operation governed by the rule that when a payout exceeds 1000000 euro cents, the ledger shall require a distinct second treasury approver before posting, when executed on both compliant and violating inputs, then compliant inputs succeed and violating inputs are rejected."
+        }
+      ],
+      "verify": "automated",
+      "traits": [],
+      "anchor": "custom_payout_exceeds_1000000_euro_cents_test.go",
+      "status": "todo"
+    },
+    {
+      "id": "REQ-C02",
+      "key": "custom.settlement-request-reuses-idempotency-key",
+      "area": "data",
+      "origin": "profile",
+      "title": "When a settlement request reuses an idempotency key with altered",
+      "statement": "When a settlement request reuses an idempotency key with altered parameters, the ledger shall reject the transfer with IDEMPOTENCY_CONFLICT.",
+      "failurePath": "If a request or state transition violates this rule, the application rejects it with a typed domain error and leaves persisted state unchanged.",
+      "acceptance": [
+        {
+          "id": "AC-01",
+          "text": "Given an input or action that violates \"When a settlement request reuses an idempotency key with altered parameters, the ledger shall reject the transfer with IDEMPOTENCY_CONFLICT\", when the operation is attempted, then the application rejects it with a typed error and performs no state change."
+        }
+      ],
+      "verify": "automated",
+      "traits": [],
+      "anchor": "custom_settlement_request_reuses_idempotency_key_test.go",
+      "status": "todo"
+    }
+  ],
+  "gates": [
+    {
+      "id": "G0-RUN",
+      "statement": "The project starts from a clean clone with one documented command.",
+      "origin": "policy:tier-0",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [],
+        "kind": "local",
+        "proves": "The README contains a fenced command block a new contributor can copy.",
+        "doesNotProve": "The README itself. This check only proves a command is written down; G0-SMOKE proves it works."
+      }
+    },
+    {
+      "id": "G0-CHECK",
+      "statement": "Lint or typecheck runs in CI on every pull request.",
+      "origin": "policy:tier-0",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [],
+        "kind": "local",
+        "proves": "A CI workflow runs a lint or typecheck step on pull requests.",
+        "doesNotProve": "The workflow file. Add the same command to the README so a local run matches CI."
+      }
+    },
+    {
+      "id": "G0-SMOKE",
+      "statement": "One happy-path smoke test exercises the primary user journey.",
+      "origin": "policy:tier-0",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [],
+        "kind": "local",
+        "proves": "A smoke or end-to-end test file exists for the primary journey.",
+        "doesNotProve": "One end-to-end test, exercising the documented interface rather than the internals."
+      }
+    },
+    {
+      "id": "G1-CI",
+      "statement": "The full test suite runs in CI on every pull request and is required to merge.",
+      "origin": "policy:tier-1",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [],
+        "kind": "local",
+        "proves": "A CI workflow runs the test command.",
+        "doesNotProve": "The workflow file, plus a branch protection rule that makes the job required. The rule is in the forge, not in the repository."
+      }
+    },
+    {
+      "id": "G1-DOMAIN-TESTS",
+      "statement": "Every rule in the domain model has at least one automated test.",
+      "origin": "policy:tier-1",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [],
+        "kind": "local",
+        "proves": "Every core requirement carries an @req anchor in a test file.",
+        "doesNotProve": "`spec-check.mjs` counts the anchors; this gate fails while a core requirement has none."
+      }
+    },
+    {
+      "id": "G1-AC-TRACE",
+      "statement": "Every requirement marked automated maps to a named test through an @req anchor.",
+      "origin": "policy:tier-1",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [],
+        "kind": "local",
+        "proves": "Every requirement marked automated has a test anchor.",
+        "doesNotProve": "`spec-check.mjs --strict`, run in CI."
+      }
+    },
+    {
+      "id": "G1-RUNBOOK",
+      "statement": "README documents how to run, test and deploy, plus known limitations.",
+      "origin": "policy:tier-1",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [],
+        "kind": "local",
+        "proves": "The README covers running, testing and deploying.",
+        "doesNotProve": "Three headings. A runbook with none of them is a README for the author."
+      }
+    },
+    {
+      "id": "G1-SECRETS",
+      "statement": "No secret is committed; configuration comes from the environment and is validated at startup.",
+      "origin": "policy:tier-1",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [
+          "enforcement/gitleaks.toml"
+        ],
+        "kind": "local",
+        "proves": "No credential-shaped string is committed, and a gitleaks config is present for the pre-commit hook.",
+        "doesNotProve": "The runner scans the working tree; gitleaks scans history. Both are needed: this file cannot see what was already committed and deleted."
+      }
+    },
+    {
+      "id": "G2-AUTHZ",
+      "statement": "Authorization is enforced server-side and covered by denial-path tests.",
+      "origin": "policy:tier-2",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [
+          "enforcement/policy/authz.rego"
+        ],
+        "kind": "local",
+        "proves": "A denial-path test exists, and the authorization policy has a home outside the handlers.",
+        "doesNotProve": "The rego policy is evaluated with `conftest test --policy enforcement/policy`; the runner only proves a denial test exists."
+      }
+    },
+    {
+      "id": "G2-THREAT",
+      "statement": "A threat model exists and each accepted mitigation maps to a control or a test.",
+      "origin": "policy:tier-2",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [],
+        "kind": "local",
+        "proves": "A threat model lists accepted risks, each with an owner.",
+        "doesNotProve": "The document. A threat model without an owner column is a list of worries."
+      }
+    },
+    {
+      "id": "G2-CONTRACTS",
+      "statement": "Every consumed or exposed interface has a versioned contract and a breaking-change check.",
+      "origin": "policy:tier-2",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [
+          "enforcement/contracts/contract.test.ts"
+        ],
+        "kind": "local",
+        "proves": "A machine-readable contract or contract test exists in the repository.",
+        "doesNotProve": "The skeleton consumes a recorded fixture; replace the fixture with a real capture, not a mock written from the docs."
+      }
+    },
+    {
+      "id": "G2-OBSERVABILITY",
+      "statement": "Requests, errors and latency are observable with correlation IDs.",
+      "origin": "policy:tier-2",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [],
+        "kind": "local",
+        "proves": "Source code propagates a correlation or request id.",
+        "doesNotProve": "A grep is the weakest form of this check. It proves the identifier exists, not that every path carries it."
+      }
+    },
+    {
+      "id": "G2-MIGRATIONS",
+      "statement": "Schema changes ship as forward-only migrations with a tested rollback or restore path.",
+      "origin": "policy:tier-2",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [],
+        "kind": "local",
+        "proves": "Schema changes live as migrations in version control.",
+        "doesNotProve": "The migration directory. Forward-only is a convention the runner cannot see; the restore drill in G3-RESTORE is what proves it."
+      }
+    },
+    {
+      "id": "G2-ADR",
+      "statement": "Significant decisions are recorded as ADRs with context, decision and consequence.",
+      "origin": "policy:tier-2",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [],
+        "kind": "local",
+        "proves": "At least one ADR records a decision and its consequence.",
+        "doesNotProve": "The ADR directory. An ADR with no consequence section is a changelog entry."
+      }
+    },
+    {
+      "id": "G2-DRIFT",
+      "statement": "CI fails when a requirement loses its test anchor or the spec references a missing primitive.",
+      "origin": "policy:tier-2",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [],
+        "kind": "local",
+        "proves": "`spec-check.mjs --repo .` passes: every anchor resolves and every done requirement is proven.",
+        "doesNotProve": "`spec-check.mjs`, shipped with the packet. This gate is the one check that needs no project code to be honest."
+      }
+    },
+    {
+      "id": "G3-MUTATION",
+      "statement": "Domain-layer mutation score is at or above the target recorded in the spec.",
+      "origin": "policy:tier-3",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [
+          "enforcement/mutation.config.json"
+        ],
+        "kind": "local",
+        "proves": "A mutation configuration and a separate semantic-oracle manifest bind every automated requirement to a black-box or property test outside its ordinary unit test file.",
+        "doesNotProve": "The runner rejects an absent/malformed manifest, a missing requirement oracle, or an oracle with no @req anchor/assertion. CI must run the selected mutation tool; the structural runner cannot measure its score or prove the oracle is complete."
+      }
+    },
+    {
+      "id": "G3-PROPERTY",
+      "statement": "Core invariants are covered by property-based or generative tests.",
+      "origin": "policy:tier-3",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [],
+        "kind": "local",
+        "proves": "A property-based testing library is present and used by a test.",
+        "doesNotProve": "The generated-seed corpus is not checked; a property test without a recorded seed is an example test in disguise."
+      }
+    },
+    {
+      "id": "G3-SLO",
+      "statement": "Service level objectives and an error budget are documented and alerted on.",
+      "origin": "policy:tier-3",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [],
+        "kind": "local",
+        "proves": "An SLO document states a target percentage and an error budget.",
+        "doesNotProve": "The document plus the alert rule. The number is a policy decision; this check only proves someone wrote it down."
+      }
+    },
+    {
+      "id": "G3-RESTORE",
+      "statement": "A restore drill has been performed and its date recorded.",
+      "origin": "policy:tier-3",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [
+          "enforcement/templates/enforcement/restore-drill.md"
+        ],
+        "kind": "local",
+        "proves": "A restore drill is recorded with a date, what was restored and who verified it.",
+        "doesNotProve": "An attestation, because the drill happens against production data the repository cannot see."
+      }
+    },
+    {
+      "id": "G3-SECURITY",
+      "statement": "Threat model is reviewed each release; a security regression suite exists.",
+      "origin": "policy:tier-3",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [],
+        "kind": "local",
+        "proves": "The threat model records a per-release review.",
+        "doesNotProve": "The document plus the security regression suite. A review nobody signed for is a meeting."
+      }
+    },
+    {
+      "id": "G3-ROLLBACK",
+      "statement": "Every deploy has a tested rollback or a feature-flag kill switch.",
+      "origin": "policy:tier-3",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [
+          "enforcement/templates/enforcement/rollback.md"
+        ],
+        "kind": "local",
+        "proves": "A rollback or kill switch has been executed once, and the record says when.",
+        "doesNotProve": "An attestation, because executing the rollback is the evidence. An unexecuted rollback procedure is a paragraph."
+      }
+    },
+    {
+      "id": "G3-CARD-SCOPE",
+      "statement": "No request body, schema field or log line can hold a full card number, proven by a test.",
+      "origin": "overlay:pci-dss",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [],
+        "kind": "local",
+        "proves": "A test asserts that a card-shaped value is rejected or absent from storage and logs.",
+        "doesNotProve": "One test. It cannot prove no future endpoint accepts one; the review of the payment surface is the compensating control."
+      }
+    },
+    {
+      "id": "G3-SOX-CONTROLS",
+      "statement": "Segregation of duties, closed-period immutability and seven-year append-only audit controls are proven by automated tests.",
+      "origin": "overlay:sox",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [],
+        "kind": "local",
+        "proves": "Tests reject self-approval and closed-period mutation and verify reconciliation.",
+        "doesNotProve": "Automated control tests; external SOX audit still requires sampled operational evidence over the reporting period."
+      }
+    },
+    {
+      "id": "G3-DORA-RESILIENCE",
+      "statement": "ICT incident classification, backup-integrity verification and the third-party ICT provider register are proven by automated tests.",
+      "origin": "overlay:dora",
+      "enforcement": {
+        "runner": "enforcement/gates.mjs",
+        "command": "node enforcement/gates.mjs",
+        "files": [],
+        "kind": "local",
+        "proves": "Tests prove ICT incident classification, backup checksum checks and third-party provider registry validation.",
+        "doesNotProve": "Test coverage on incident and registry rules; live failover timing requires a scheduled resilience drill."
+      }
+    }
+  ],
+  "docs": [
+    "00-constitution.md",
+    "01-product-brief.md",
+    "02-domain-model.md",
+    "03-architecture.md",
+    "04-contracts.md",
+    "05-verification.md",
+    "06-delivery-plan.md",
+    "07-agent-handoff.md",
+    "spec.json",
+    "AGENTS.md",
+    "spec-check.mjs"
+  ],
+  "stats": {
+    "primitives": 31,
+    "requirements": 28,
+    "customRequirements": 2,
+    "acceptanceCriteria": 51,
+    "automated": 26,
+    "gates": 24,
+    "deferred": 0,
+    "skipped": 4
+  }
+}

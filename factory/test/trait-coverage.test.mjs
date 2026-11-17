@@ -185,8 +185,8 @@ test('an unknown regulation is rejected rather than ignored', () => {
       idea: 'A clinic booking system with a long enough idea sentence to pass validation.',
       kind: 'web-app',
       stage: 'mvp',
-      regulation: ['sox']
+      regulation: ['fedramp']
     })
   );
-  assert.ok(errors.some((error) => /unknown regime "sox"/.test(error)));
+  assert.ok(errors.some((error) => /unknown regime "fedramp"/.test(error)));
 });

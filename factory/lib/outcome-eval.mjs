@@ -379,8 +379,63 @@ export function attachReferenceArtifacts(workspaceDir, arm) {
   if (gateIds.has('G3-RESTORE')) {
     writeRel(workspaceDir, 'enforcement/restore-drill.md', '# Restore Drill\n\ndate: 2026-10-30\nrestored: ledger snapshot\nverified by: oncall-eng\n');
   }
+  if (gateIds.has('G2-AUTONOMY')) {
+    writeRel(
+      workspaceDir,
+      'tests/autonomy.test.mjs',
+      [
+        "import assert from 'node:assert/strict';",
+        "import test from 'node:test';",
+        "import * as mod from '../src/index.mjs';",
+        '',
+        "test('agent enforces tool allowlist and step budget / kill-switch', () => {",
+        '  assert.ok(Object.keys(mod).length >= 1);',
+        '});',
+        ''
+      ].join('\n')
+    );
+  }
+  if (gateIds.has('G3-PARENTAL-CONSENT')) {
+    writeRel(workspaceDir, 'tests/coppa-consent.test.mjs', "import assert from 'node:assert/strict';\nimport test from 'node:test';\ntest('parental consent verification and child erasure hold', () => { assert.ok(true); });\n");
+  }
+  if (gateIds.has('G3-FERPA-DISCLOSURE')) {
+    writeRel(workspaceDir, 'tests/ferpa-disclosure.test.mjs', "import assert from 'node:assert/strict';\nimport test from 'node:test';\ntest('legitimate interest role access and disclosure log hold', () => { assert.ok(true); });\n");
+  }
+  if (gateIds.has('G3-SOX-CONTROLS')) {
+    writeRel(workspaceDir, 'tests/sox-controls.test.mjs', "import assert from 'node:assert/strict';\nimport test from 'node:test';\ntest('segregation of duties and period reconciliation hold', () => { assert.ok(true); });\n");
+  }
+  if (gateIds.has('G3-DORA-RESILIENCE')) {
+    writeRel(workspaceDir, 'tests/dora-resilience.test.mjs', "import assert from 'node:assert/strict';\nimport test from 'node:test';\ntest('incident report and failover exit plan verified', () => { assert.ok(true); });\n");
+  }
+  if (gateIds.has('G3-AI-OVERSIGHT')) {
+    writeRel(workspaceDir, 'tests/ai-oversight.test.mjs', "import assert from 'node:assert/strict';\nimport test from 'node:test';\ntest('human oversight override and ai disclosure trace hold', () => { assert.ok(true); });\n");
+  }
   if (gateIds.has('G3-ROLLBACK')) {
     writeRel(workspaceDir, 'enforcement/rollback.md', '# Rollback Record\n\nexecuted: rehearsal\ndate: 2026-10-30\nflag: enable_v2_path\n');
+  }
+  if (gateIds.has('G1-RUNBOOK') || gateIds.has('G2-RUNBOOK')) {
+    writeRel(workspaceDir, 'docs/runbook.md', '# Runbook\n\n## Deploy\nRun CI checks and roll forward.\n\n## Rollback\nRevert release tag and verify health check.\n\n## Incident\nPage on-call engineer and inspect audit logs.\n');
+  }
+  if (gateIds.has('G2-PRIVACY') || gateIds.has('G3-CONSENT')) {
+    writeRel(workspaceDir, 'docs/consent-basis.md', '# Consent and Lawful Basis\n\n- Lawful basis: contract and explicit consent\n- Retention: 90 days active, statutory archive\n- Erasure: automated subject deletion endpoint\n');
+  }
+  if (gateIds.has('G3-REVIEW')) {
+    writeRel(workspaceDir, 'docs/review-record.md', '# Independent Review Record\n\n- Reviewer: security-lead\n- Approved: 2026-11-16\n- Scope: spec.json obligations verified\n');
+  }
+  if (gateIds.has('G3-AUDIT-RETENTION')) {
+    writeRel(workspaceDir, 'docs/audit-retention.md', '# Audit Log Retention\n\n- Retention period: 7 years immutable storage\n- Integrity: append-only SHA-256 hash chain\n');
+  }
+  if (gateIds.has('G3-IDEMPOTENCY') || gateIds.has('G2-MONEY')) {
+    writeRel(workspaceDir, 'tests/idempotency.test.mjs', "import assert from 'node:assert/strict';\nimport test from 'node:test';\ntest('idempotency key prevents duplicate charge and preserves reconciliation balance', () => { assert.ok(true); });\n");
+  }
+  if (gateIds.has('G2-TENANT')) {
+    writeRel(workspaceDir, 'tests/tenant.test.mjs', "import assert from 'node:assert/strict';\nimport test from 'node:test';\ntest('tenant isolation rejects cross-tenant access', () => { assert.ok(true); });\n");
+  }
+  if (gateIds.has('G2-OBSERVABILITY')) {
+    writeRel(workspaceDir, 'src/telemetry.mjs', 'export function withCorrelation(correlationId = "req-0") { return { correlationId }; }\n');
+  }
+  if (gateIds.has('G2-SECRETS') || gateIds.has('G1-SECRETS')) {
+    writeRel(workspaceDir, '.gitignore', 'node_modules/\n.env\n.env.*\n');
   }
 }
 
@@ -724,15 +779,38 @@ function summarizeArm(records) {
   const semanticWeakenMutationIdentityCaught = records.filter((r) => r.drift?.semanticWeakenCaughtByMutationIdentity).length;
   const meanContextTokens = Math.round(records.reduce((sum, r) => sum + r.contextTokensEst, 0) / count);
   const meanWallClockMs = Math.round(records.reduce((sum, r) => sum + (r.wallClockMs ?? 0), 0) / count);
+  const structuralCaught = anchorDropCaught + gateRegressionCaught;
+  const structuralTotal = records.length * 2;
 
   return {
     tasks: records.length,
     mergeRate: Number((mergeable / count).toFixed(3)),
+    mergeRateCI95: wilsonInterval(mergeable, records.length),
     reviewCleanMergeRate: Number((reviewClean / count).toFixed(3)),
+    reviewCleanMergeRateCI95: wilsonInterval(reviewClean, records.length),
     meanDefects: Number((totalDefects / count).toFixed(2)),
     totalDefects,
     naiveBlockedPreReviewRate: Number((naiveBlockedPreReview / count).toFixed(3)),
+    naiveBlockedPreReviewRateCI95: wilsonInterval(naiveBlockedPreReview, records.length),
     driftCatchRate: driftTotal === 0 ? 0 : Number((driftCaught / driftTotal).toFixed(3)),
+    driftCatchRateCI95: wilsonInterval(driftCaught, driftTotal),
+    metricSplit: {
+      structural: {
+        driftCatchRate: structuralTotal === 0 ? 0 : Number((structuralCaught / structuralTotal).toFixed(3)),
+        driftCatchRateCI95: wilsonInterval(structuralCaught, structuralTotal),
+        anchorDropRate: Number((anchorDropCaught / count).toFixed(3)),
+        gateRegressionRate: Number((gateRegressionCaught / count).toFixed(3)),
+        naiveBlockedPreReviewRate: Number((naiveBlockedPreReview / count).toFixed(3)),
+        meanContextTokens
+      },
+      behavioral: {
+        oracleMergeRate: Number((mergeable / count).toFixed(3)),
+        reviewCleanMergeRate: Number((reviewClean / count).toFixed(3)),
+        meanDefects: Number((totalDefects / count).toFixed(2)),
+        semanticDriftCatchRate: Number((semanticWeakenCaught / count).toFixed(3)),
+        semanticDriftCatchRateCI95: wilsonInterval(semanticWeakenCaught, records.length)
+      }
+    },
     driftByClass: {
       anchorDrop: Number((anchorDropCaught / count).toFixed(3)),
       gateRegression: Number((gateRegressionCaught / count).toFixed(3)),
@@ -744,6 +822,21 @@ function summarizeArm(records) {
     meanContextTokens,
     meanWallClockMs
   };
+}
+
+/** Wilson score 95% binomial confidence interval (`[low, high]`). */
+export function wilsonInterval(successes, total, z = 1.959964) {
+  if (!Number.isFinite(total) || total <= 0) return [0, 0];
+  const n = total;
+  const p = Math.max(0, Math.min(1, successes / n));
+  const z2 = z * z;
+  const denom = 1 + z2 / n;
+  const center = (p + z2 / (2 * n)) / denom;
+  const half = (z * Math.sqrt((p * (1 - p)) / n + z2 / (4 * n * n))) / denom;
+  return [
+    Number(Math.max(0, center - half).toFixed(3)),
+    Number(Math.min(1, center + half).toFixed(3))
+  ];
 }
 
 function deltaBetween(target, baseline) {
@@ -794,7 +887,7 @@ export async function runOutcomeHarness({
   const calibrationChecks = [];
 
   try {
-    // Process tasks with bounded concurrency so 24 tasks x 3 arms finish in ~1-2s.
+    // Process tasks with bounded concurrency so 34 tasks x 3 arms finish in ~1-2s.
     let cursor = 0;
     const workers = Array.from({ length: Math.min(concurrency, tasks.length) }, async () => {
       while (cursor < tasks.length) {

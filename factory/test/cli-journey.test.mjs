@@ -88,18 +88,18 @@ test('primary journey: plan, compile, verify, then the shipped drift guard agree
     'the same profile produces the same manifest'
   );
 
-  // An override must not hide the real default: without it, the embedded path is
-  // the actual output directory.
-  // A destination outside the repository has no meaningful repo-relative name,
-  // so the emitted label must be the absolute path rather than the default.
+  // Packet docs and commands use packet-relative paths so relocating a packet never
+  // leaves stale compile paths behind, while spec.json records project.packetDir.
   const third = path.join(workspace, 'elsewhere', 'packet');
   const honored = await cli(['compile', profilePath, '-o', third]);
   assert.equal(honored.code, 0, honored.stderr);
   const thirdText = readFileSync(path.join(third, '07-agent-handoff.md'), 'utf8');
+  const thirdSpec = JSON.parse(readFileSync(path.join(third, 'spec.json'), 'utf8'));
   const expectedLabel = third.split(path.sep).join('/');
+  assert.equal(thirdSpec.project.packetDir, expectedLabel);
   assert.ok(
-    thirdText.includes(`Read ${expectedLabel}/AGENTS.md first`),
-    `handoff does not name the real packet directory ${expectedLabel}`
+    thirdText.includes('Read ./AGENTS.md first'),
+    'handoff uses packet-relative ./AGENTS.md'
   );
   assert.ok(!/(^|[^\w-])specs\//.test(thirdText), 'the default path leaked into a non-default output directory');
 });
@@ -362,7 +362,7 @@ test('vld adopt accepts a Git repository URL, and spec-check/verify enforce [CLA
 
     const hollowCheck = await runSpecCheck(['--strict', '--require-assertions']);
     assert.equal(hollowCheck.code, 1, 'hollow Go test with no assertion must fail --require-assertions');
-    assert.match(hollowCheck.stdout, /no visible assertion/);
+    assert.match(hollowCheck.stdout, /no assertion in the anchored test/);
 
     writeFileSync(
       path.join(appRepo, 'journey_test.go'),

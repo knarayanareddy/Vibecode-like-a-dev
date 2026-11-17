@@ -1,0 +1,33 @@
+{
+  "id": "kotlin",
+  "match": ["kotlin", "ktor", "ktlint"],
+  "language": "Kotlin 2.0 (JVM 21)",
+  "runtime": "OpenJDK 21 JVM",
+  "ui": "Compose Multiplatform or typed React frontend only if a UI is in scope",
+  "http": "Ktor or Spring Boot with kotlinx.serialization boundary types",
+  "db": "PostgreSQL + Exposed/jOOQ with Flyway forward-only migrations",
+  "validation": "Explicit value-class and schema validation at every boundary",
+  "unitRunner": "JUnit 5 / Kotest",
+  "tests": "JUnit 5 on Gradle Test with Testcontainers for integration tests",
+  "lint": "ktlint + detekt, Gradle compileTestKotlin in CI",
+  "logs": "SLF4J + Logback JSON with MDC correlation IDs",
+  "ci": "GitHub Actions",
+  "fenceLanguage": "kotlin",
+  "testExtension": "kt",
+  "anchorComment": "//",
+  "anchorPattern": "src/test/kotlin/{Pascal}Test.kt",
+  "defaultTestGlobs": ["src/test/kotlin/**/*Test.kt", "src/test/kotlin/**/*Tests.kt", "**/*Test.kt"],
+  "countedIn": ["src/test/**", "tests/**"],
+  "commands": {
+    "lint": "./gradlew ktlintCheck",
+    "typecheck": "./gradlew compileTestKotlin",
+    "test": "./gradlew test"
+  },
+  "mutation": {
+    "tool": "PIT",
+    "command": "./gradlew pitest",
+    "configFile": "pitest.properties"
+  },
+  "propertyLibrary": "jqwik",
+  "runnerForbidden": ["Vitest", "pytest", "ESLint", "npm test", "npm run lint", "cargo test"]
+}

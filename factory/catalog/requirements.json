@@ -477,6 +477,120 @@
       "verify": "automated"
     },
     {
+      "key": "agent.action-boundaries",
+      "when": {
+        "all": [
+          { "field": "tier", "gte": 1 },
+          {
+            "any": [
+              { "field": "kind", "eq": "agent" },
+              {
+                "all": [
+                  { "field": "kind", "eq": "automation" },
+                  { "field": "traits", "includes": "ai" }
+                ]
+              },
+              {
+                "all": [
+                  { "field": "traits", "includes": "ai" },
+                  { "field": "risks.destructiveWrites", "eq": true }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "render": "ai",
+      "title": "Autonomous tool calls are allowlisted, isolated and action-logged",
+      "statement": "When an autonomous workflow proposes a tool invocation, the application shall validate the tool name and parameters against a closed allowlist, isolate untrusted retrieved input from privileged tool authority, and record the decision in an append-only action log.",
+      "definition": "The agent acting on {aPrimary} can invoke only registered tools with schema-valid arguments, and prompt injection inside untrusted data cannot unlock unapproved actions.",
+      "failurePath": "If a proposed tool is outside the allowlist, fails schema validation or follows an untrusted prompt-injection escalation, the dispatcher denies execution and writes a denied entry to the action log.",
+      "acceptance": [
+        "Given a model proposing an unregistered tool or invalid parameters, when the dispatcher evaluates it, then execution is refused and the denial is recorded in the action log.",
+        "Given untrusted input containing embedded instructions to call a privileged tool, when processed, then the privileged tool call is blocked unless explicitly authorised by policy.",
+        "Given any completed or denied agent run, when the action log is queried by run id, then every tool call appears in order with parameters digest, verdict and outcome."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "agent.approval-gate",
+      "when": {
+        "all": [
+          { "field": "tier", "gte": 1 },
+          {
+            "any": [
+              { "field": "kind", "eq": "agent" },
+              {
+                "all": [
+                  { "field": "kind", "eq": "automation" },
+                  { "field": "traits", "includes": "ai" }
+                ]
+              },
+              {
+                "all": [
+                  { "field": "traits", "includes": "ai" },
+                  { "field": "risks.destructiveWrites", "eq": true }
+                ]
+              }
+            ]
+          },
+          {
+            "any": [
+              { "field": "risks.destructiveWrites", "eq": true },
+              { "field": "risks.payments", "eq": true },
+              { "field": "risks.integrations", "eq": true },
+              { "field": "tier", "gte": 2 }
+            ]
+          }
+        ]
+      },
+      "render": "security",
+      "title": "Destructive and external agent actions require human confirmation",
+      "statement": "When an autonomous workflow proposes a destructive write, financial transfer or irreversible external action, the application shall pause execution and require an explicit, single-use human confirmation bound to the exact action payload before performing it.",
+      "definition": "No irreversible effect on {aPrimary} or an external service happens on model authority alone: a named {privilegedActor} approves the exact payload digest.",
+      "failurePath": "If confirmation is rejected, expired or altered after signing, the action is cancelled without side effect and the rejection is logged.",
+      "acceptance": [
+        "Given a tool classified as destructive or external, when invoked without a valid human approval token, then the dispatcher halts and performs zero side effects.",
+        "Given an approval token issued for payload A, when replayed or presented for modified payload B, then execution is rejected."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "agent.budget-and-killswitch",
+      "when": {
+        "all": [
+          { "field": "tier", "gte": 1 },
+          {
+            "any": [
+              { "field": "kind", "eq": "agent" },
+              {
+                "all": [
+                  { "field": "kind", "eq": "automation" },
+                  { "field": "traits", "includes": "ai" }
+                ]
+              },
+              {
+                "all": [
+                  { "field": "traits", "includes": "ai" },
+                  { "field": "risks.destructiveWrites", "eq": true }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "render": "reliability",
+      "title": "Agent runs enforce step, cost and kill-switch limits",
+      "statement": "When an autonomous run executes, the application shall enforce configurable maximum step count, token budget, wall-clock duration and cost ceilings and halt immediately when a run or global kill switch is engaged.",
+      "definition": "A runaway loop around {aPrimary} terminates deterministically at its declared ceiling or within one step of a kill-switch signal, releasing held leases cleanly.",
+      "failurePath": "If a step, token, duration or cost limit is reached or the kill switch fires, the run transitions to a stopped state, cancels pending tool calls and records the stop reason.",
+      "acceptance": [
+        "Given an agent loop exceeding its maximum step count or cost ceiling, when the next step is requested, then execution stops cleanly and records the exceeded limit.",
+        "Given an active agent run, when the kill switch is activated, then no further tool call executes and the stop event is logged with actor and timestamp."
+      ],
+      "verify": "automated"
+    },
+    {
       "key": "ops.observability",
       "when": {
         "any": [

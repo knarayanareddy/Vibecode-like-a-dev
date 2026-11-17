@@ -2,10 +2,58 @@
   "meta": {
     "purpose": "Machine-readable catalog for agent traversal. Read this before opening any SKILL.md.",
     "generatedFrom": "primitives/**/SKILL.md",
-    "count": 35,
+    "count": 36,
     "note": "Do not edit by hand. Run `vld index` after changing a primitive."
   },
   "primitives": [
+    {
+      "id": "agent.autonomy-limits",
+      "module": "agent",
+      "title": "Agent autonomy limits and action boundaries",
+      "summary": "Bound every autonomous tool loop with an explicit tool allowlist, human confirmation before destructive actions, step and cost budgets, prompt-injection separation, sandbox containment, a live kill switch and an append-only action log.",
+      "tier_min": 1,
+      "cost": "medium",
+      "priority": 4,
+      "enforces": [
+        "agent.action-boundaries",
+        "agent.approval-gate",
+        "agent.budget-and-killswitch"
+      ],
+      "gates": [
+        "G2-AUTONOMY"
+      ],
+      "advisory": false,
+      "advisory_reason": "",
+      "obligation": "In {project}, every autonomous action on {aPrimary} passes a closed tool allowlist, a step/cost budget and a human confirmation gate before any destructive or external write executes.",
+      "artifacts": [
+        "03-architecture.md",
+        "04-contracts.md",
+        "05-verification.md"
+      ],
+      "tags": [
+        "agent-safety",
+        "autonomy",
+        "tool-allowlist",
+        "human-in-the-loop",
+        "kill-switch",
+        "prompt-injection",
+        "sandbox"
+      ],
+      "triggers": [
+        "agent autonomy",
+        "autonomous agent",
+        "tool allowlist",
+        "human confirmation",
+        "kill switch",
+        "step budget",
+        "tool injection",
+        "runaway agent",
+        "action log",
+        "sandboxed tool execution"
+      ],
+      "path": "primitives/agent/autonomy-limits/SKILL.md",
+      "dir": "agent/autonomy-limits"
+    },
     {
       "id": "agent.handoff-packet",
       "module": "agent",

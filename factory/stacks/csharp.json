@@ -1,0 +1,33 @@
+{
+  "id": "csharp",
+  "match": ["csharp", "c#", "dotnet", ".net", "asp.net", "aspnet", "xunit", "nunit"],
+  "language": "C# 12 (.NET 8 LTS, nullable enabled)",
+  "runtime": ".NET 8 LTS CLR",
+  "ui": "Blazor or typed React frontend only if a UI is in scope",
+  "http": "ASP.NET Core Minimal APIs / Controllers with typed request validation",
+  "db": "PostgreSQL + Npgsql with EF Core / DbUp forward-only migrations",
+  "validation": "FluentValidation or DataAnnotations at every boundary",
+  "unitRunner": "xUnit",
+  "tests": "dotnet test (xUnit + WebApplicationFactory / Testcontainers)",
+  "lint": "dotnet format --verify-no-changes + Roslyn analyzers (-warnaserror)",
+  "logs": "Microsoft.Extensions.Logging / Serilog JSON with correlation IDs",
+  "ci": "GitHub Actions",
+  "fenceLanguage": "csharp",
+  "testExtension": "cs",
+  "anchorComment": "//",
+  "anchorPattern": "tests/{Pascal}Tests.cs",
+  "defaultTestGlobs": ["tests/**/*Tests.cs", "tests/**/*Test.cs", "**/*Tests.cs"],
+  "countedIn": ["tests/**"],
+  "commands": {
+    "lint": "dotnet format --verify-no-changes",
+    "typecheck": "dotnet build --no-restore -warnaserror",
+    "test": "dotnet test"
+  },
+  "mutation": {
+    "tool": "Stryker.NET",
+    "command": "dotnet stryker",
+    "configFile": "stryker-config.json"
+  },
+  "propertyLibrary": "FsCheck",
+  "runnerForbidden": ["Vitest", "pytest", "ESLint", "npm test", "npm run lint", "cargo test"]
+}

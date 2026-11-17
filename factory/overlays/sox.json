@@ -1,0 +1,54 @@
+{
+  "id": "sox",
+  "layer": "domain",
+  "title": "Sarbanes-Oxley internal controls over financial reporting (SOX)",
+  "why": "Systems that originate, transform or report financial postings must satisfy SOX Section 302/404 IT general and application controls: segregation of duties between author and approver, closed-period immutability, automated reconciliation evidence and seven-year tamper-evident audit retention.",
+  "addRequirements": [
+    {
+      "key": "finance.segregation-of-duties",
+      "title": "Segregation of duties separates entry, approval and configuration",
+      "area": "security",
+      "statement": "When a manual financial entry, adjustment or control-configuration change is submitted, the application shall require approval from a distinct authorised actor and reject self-approval.",
+      "definition": "The principal who initiates a material financial change or rule change can never be the sole principal who approves it into effect.",
+      "failurePath": "If the approver matches the initiator or lacks the independent approver role, the transition is rejected and recorded in the audit log.",
+      "acceptance": [
+        "Given an actor who created a manual journal or adjustment, when the same actor attempts to approve it, then the application rejects the approval.",
+        "Given a distinct authorised approver, when they approve the entry, then both initiator and approver identities and timestamps are persisted immutably."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "finance.period-close-and-reconciliation",
+      "title": "Closed accounting periods reject mutation and reconcile completely",
+      "area": "data",
+      "statement": "When an accounting period is marked closed, the application shall reject direct inserts, updates or deletes dated in that period and require corrections to post as adjusting entries in an open period with automated completeness reconciliation.",
+      "definition": "Reported numbers do not shift retroactively: corrections are forward-only adjusting entries and batch totals reconcile source-to-ledger.",
+      "failurePath": "If a posting targets a closed period or a reconciliation run detects an out-of-balance total, the posting is refused and an exception alert is raised.",
+      "acceptance": [
+        "Given a closed period, when a write or edit dated inside that period is attempted, then the application rejects it and leaves prior balances unchanged.",
+        "Given a reconciliation run across source transactions and ledger postings, when any variance exists, then the run fails loudly with the exact unmatched identifiers."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "finance.sox-audit-and-access-review",
+      "title": "Financial control evidence is append-only for seven years and access is recertified",
+      "area": "reliability",
+      "statement": "The application shall retain immutable audit logs of financial entries, schema/control changes and privileged access grants for at least seven years and export periodic user-access recertification snapshots.",
+      "definition": "External auditors can trace any figure back to its originating event, approver and effective access policy across a seven-year window.",
+      "failurePath": "If audit persistence fails on a financial mutation or role change, the operation aborts rather than committing unaudited state.",
+      "acceptance": [
+        "Given a stored financial audit entry, when an update or delete is attempted, then storage rejects it and retention preserves entries younger than seven years.",
+        "Given an access-recertification export, when generated, then it lists every active role assignment, granter, grant date and last use."
+      ],
+      "verify": "automated"
+    }
+  ],
+  "addGates": [
+    {
+      "id": "G3-SOX-CONTROLS",
+      "tier": 3,
+      "statement": "Segregation of duties, closed-period immutability and seven-year append-only audit controls are proven by automated tests."
+    }
+  ]
+}

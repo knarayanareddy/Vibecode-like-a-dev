@@ -10,7 +10,8 @@
  *   vld module|bundle|agent|workflow manage opt-in delivery extensions
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 /**
@@ -42,18 +43,26 @@ import { emitPacket } from './lib/emit/index.mjs';
 import { exportPacket } from './lib/exports.mjs';
 import { buildIndex, loadIndex, writeIndex } from './lib/indexer.mjs';
 import { enableModules, listModules, moduleStatus } from './lib/modules.mjs';
-import { createMission, missionStatus, readMission, validateMission } from './lib/missions.mjs';
+import { createMission, missionStatus, readMission, rebaseMission, validateMission } from './lib/missions.mjs';
 import { addCatalog, catalogStatus, copyCatalogPayload, previewCatalogRefresh, readCatalogState, refreshCatalog, trustCatalogRoot } from './lib/catalog.mjs';
 import { addStore, copyStoreAsset, initStore, previewStoreRefresh, readStoreState, refreshStore, storeStatus } from './lib/stores.mjs';
 import { createWorkspace, recoverWorkspaces, removeWorkspace, workspaceStatus } from './lib/workspaces.mjs';
 import { allocateRuntimePackage, heartbeatRuntimeLease, initializeRuntime, recoverRuntime, runtimeEventHistory, runtimeStatus, transitionRuntimePackage } from './lib/runtime.mjs';
-import { exportRuntimeForgePlan, prepareRuntimeForgePlan, writeRuntimeForgePlan } from './lib/runtime-forge.mjs';
+import { exportRuntimeForgePlan, prepareRuntimeForgePlan, writeRuntimeForgePlan, executeRuntimeForgePlan } from './lib/runtime-forge.mjs';
+import { appendEvidence, configureTelemetry, exportEvidenceBundle, purgeTelemetry, telemetryStatus, verifyEvidenceChain } from './lib/evidence.mjs';
+import { prepareReviewPacket, recordReviewDecision, validateReviewReport } from './lib/review.mjs';
+import { detectSpecDrift, initSemanticOracles, scaffoldDriftWorkflow } from './lib/drift.mjs';
+import { runDoctor } from './lib/doctor.mjs';
+import { migrateProject } from './lib/migrate.mjs';
 import { runRuntimeAgent, runtimeAgentStatus } from './lib/runtime-agent.mjs';
-import { approveRuntimeDeliveryCandidate, queueRuntimeDeliveryCandidate, runtimeDeliveryStatus, submitRuntimeDeliveryCandidate, verifyRuntimeDeliveryCandidate } from './lib/runtime-delivery.mjs';
+import { approveRuntimeDeliveryCandidate, queueRuntimeDeliveryCandidate, runtimeDeliveryStatus, submitRuntimeDeliveryCandidate, verifyRuntimeDeliveryCandidateAsync } from './lib/runtime-delivery.mjs';
+import { runBuild } from './lib/build.mjs';
+import { detectSandboxBackends, runSandboxConformance } from './lib/sandbox/index.mjs';
 import { createRuntimeServer, listenRuntimeServer } from './lib/runtime-server.mjs';
 import { createRuntimeClient } from './lib/runtime-client.mjs';
 import { buildPlan, loadPolicy } from './lib/planner.mjs';
-import { injectionFindings, loadProfile, KINDS, STAGES, SCALES, TRAITS, RISK_FLAGS } from './lib/profile.mjs';
+import { injectionFindings, loadProfile, KINDS, STAGES, SCALES, TRAITS, RISK_FLAGS, REGULATIONS } from './lib/profile.mjs';
+import { scanRiskHints } from './lib/risk-hints.mjs';
 import { completeWorkflowStep, getWorkflow, listWorkflows, runWorkflow, workflowStatus } from './lib/workflows.mjs';
 import { verifyPacket } from './lib/verify.mjs';
 import { writeAbsoluteManagedFileAtomic } from './lib/extension-utils.mjs';
@@ -76,17 +85,24 @@ const option = (name, fallback) => {
 const VALUE_FLAGS = new Set([
   '-o', '--out', '--repo', '--name', '--idea', '--profile', '--packet',
   '--project', '--modules', '--evidence', '--file', '--ref', '--title', '--from-store', '--types', '--acknowledge', '--target', '--packet-dir',
-  '--assignee', '--lease-ms', '--run', '--lease-token', '--to', '--actor', '--expected-version', '--port', '--token', '--policy', '--sha', '--adapter-run', '--candidate', '--reason', '--repository', '--head-ref', '--base-ref', '--checks', '--id', '--runtime-url', '--runtime-token', '--request-id', '--after', '--limit', '--max-bytes', '--node', '--owner', '--expires'
+  '--assignee', '--lease-ms', '--run', '--lease-token', '--to', '--actor', '--expected-version', '--port', '--token', '--policy', '--sha', '--adapter-run', '--candidate', '--reason', '--repository', '--head-ref', '--base-ref', '--checks', '--id', '--runtime-url', '--runtime-token', '--request-id', '--after', '--limit', '--max-bytes', '--node', '--owner', '--expires',
+  '--backend', '--adapter', '--executable', '--arg', '--mission', '--max-repairs', '--assign-added',
+  '--action', '--pr', '--token-env', '--author', '--report', '--cron', '--kind', '--subject', '--format', '--from'
 ]);
 const positional = rest.filter((item, index) => !item.startsWith('-') && !(index > 0 && VALUE_FLAGS.has(rest[index - 1])));
 
 const USAGE = `vibecode like a dev — from one paragraph to a spec an agent can execute
 
 Usage
-  vld init <dir>                     write profile.json to fill in
+  vld init <dir> [--interactive]     write profile.json (or build one via guided wizard)
+  vld doctor [--project <dir>] [--packet <dir>] [--json]
+                                     diagnose Node runtime, Git, sandbox backends, packet and audit chain
+  vld migrate [--project <dir>] [--profile <file>] [--packet <dir>] [--dry-run] [--json]
+                                     safely upgrade legacy profiles, runtime policies and packets to current VLD
   vld adopt <repo-or-url> [-o <file>] [--name <slug>] [--idea <text>] [--force] [--json]
                                      infer a profile from a local path or Git repository URL
-  vld plan <profile.json> [--json] [--strict]   show selection and reasoning, write nothing; --strict refuses an adopted TODO idea
+  vld plan <profile.json> [--explain] [--json] [--strict]
+                                     show selection, risk/regime hints and domain-noun confidence; --strict refuses unwaived risks and TODO ideas
   vld compile <profile.json> -o <dir> [--force] [--strict] [--packet-dir <label>] [--lean]
                                      --packet-dir overrides the directory name embedded in generated commands
                                      --lean emits AGENTS.md and spec.json only, for a token-budgeted reader
@@ -99,8 +115,8 @@ Usage
                                      render a delta spec for a brownfield change
   vld change verify <change-dir> [--project <dir>]
                                      validate a change proposal, reviewed evidence links and resulting manifest
-  vld change archive <change-dir> <packet-dir> [--profile <p>]
-                                     fold an applied change into the profile's overlay stack
+  vld change archive <change-dir> <packet-dir> [--profile <p>] [--to-profile-rules]
+                                     fold an applied change into the profile's overlay stack or profile.rules
   vld change init <dir>              write change.json to fill in
   vld artifact list|init|validate|verify|status <type> [id] [--from-store store/asset] [--project <dir>]
                                      generate, validate and cross-check product, architecture, delivery, review and QA artifacts
@@ -144,12 +160,28 @@ Usage
                                      frozen candidate/packet verification, independent review and a local queue; no merge, push or forge access
   vld runtime forge plan-export <mission.json> <package> --candidate <id> --actor release-approver:<id> --repository <owner/repo> --head-ref <branch> [--base-ref <branch>] [--checks <name,...>] [--title <text>] [--out <file>] [--dry-run] [--json]
                                      derive a durable, offline GitHub v1 plan; never reads credentials, invokes gh, pushes, changes a PR, or requests merge
+  vld runtime forge execute <mission.json> <package> --candidate <id> --actor release-approver:<id> --repository <owner/repo> --head-ref <branch> [--action publish|inspect|merge] [--pr <n>] [--allow-merge] [--token-env GITHUB_TOKEN]
+                                     opt-in governed GitHub v1 delivery using an explicit memory-only token; records hash-chained receipt
+  vld review prepare|verify|record [--packet <dir>] [--project <dir>] [--report <review.json>] [--base-ref <ref>] [--head-ref <ref>] [--json]
+                                     context-isolated six-category spec review and high-rigor human escalation
+  vld drift check|init-workflow|init-oracles [--packet <dir>] [--project <dir>] [--base-ref <ref>] [--record] [--force] [--json]
+                                     continuous specification-to-code drift checks, CI workflow, and semantic oracles
+  vld evidence verify|export|append [--project <dir>] [--format json|markdown] [-o <file>] [--json]
+                                     verify or export the tamper-evident SHA-256 hash-chained evidence ledger
+  vld telemetry status|enable|disable|purge [--project <dir>] [--json]
+                                     strictly opt-in local anonymous telemetry (disabled by default; zero automatic network calls)
   vld runtime serve <mission.json> [--port <0-65535>] [--token <local-token>] [--project <dir>]
   vld runtime status|events|allocate|heartbeat|transition|recover [package] --runtime-url <https-url> --runtime-token <token> [--request-id <id>]
                                      explicit typed remote client; https required except loopback development
                                      loopback-only Runtime API plus the local Studio dashboard; never starts an agent
   vld studio serve <mission.json> [--port <0-65535>] [--token <local-token>] [--project <dir>]
                                      launch the same loopback Runtime API and accessible browser Studio; token stays in browser memory only
+  vld mission rebase <mission.json> [--target <ref>] [--packet <dir>] [--assign-added <pkg>] [--drop-removed] [--dry-run] [--project <dir>] [--json]
+                                     rebase a mission onto an updated target commit and/or recompiled packet without dropping coverage
+  vld sandbox probe|conformance [--backend <auto|oci|bwrap|linux-ns|darwin-seatbelt|node-permission>] [--json]
+                                     inspect host sandbox backends or execute the 8 live confinement probes (ADR 0011)
+  vld build [--profile <file>] [--packet <dir>] [--mission <file>] [--adapter <sandboxed-cli|sandboxed-acp|fake>] [--executable <path>] [--arg <value>] [--backend <id>] [--max-repairs <0-5>] [--gates] [--require-os] [--dry-run] [--project <dir>] [--json]
+                                     compile/verify spec, partition mission DAG, run sandboxed packages with bounded repair and emit build-report.json
   vld mcp                            run the MCP server over stdio
   vld index [--check]                rebuild primitives/index.json
 
@@ -211,7 +243,7 @@ function fail(message, error = null) {
 // A misspelled option used to be silently ignored because every command read the
 // shared argv array opportunistically. Reject it before a command can perform a
 // side effect; command-specific arity is checked by the command handlers below.
-const BOOLEAN_FLAGS = new Set(['--apply', '--check', '--debug', '--discard', '--dry-run', '--execute', '--force', '--json', '--require-assertions', '--reset', '--strict', '--lean', '--help', '-h']);
+const BOOLEAN_FLAGS = new Set(['--apply', '--check', '--debug', '--discard', '--drop-removed', '--dry-run', '--execute', '--explain', '--force', '--gates', '--interactive', '--json', '--require-assertions', '--require-os', '--reset', '--strict', '--to-profile-rules', '--lean', '--allow-merge', '--no-comment', '--record', '--help', '-h']);
 function validateCliTokens() {
   const seen = new Set();
   const canonical = (flag) => flag === '-o' ? '--out' : flag;
@@ -244,9 +276,11 @@ function requirePositionals(usage, { min = 0, max = min } = {}) {
 // routinely piped by people and automation. Extension families retain their own
 // subcommand validation while this parser rejects every unknown token globally.
 const TOP_LEVEL_FLAGS = {
-  init: new Set(),
+  init: new Set(['--interactive', '--force']),
+  doctor: new Set(['--project', '--profile', '--packet', '--json']),
+  migrate: new Set(['--project', '--profile', '--packet', '--dry-run', '--json']),
   adopt: new Set(['-o', '--out', '--name', '--idea', '--force', '--json']),
-  plan: new Set(['--json', '--strict']),
+  plan: new Set(['--explain', '--json', '--strict']),
   compile: new Set(['-o', '--out', '--force', '--strict', '--packet-dir', '--lean']),
   verify: new Set(['--repo', '--strict', '--require-assertions', '--json']),
   ci: new Set(['--project', '--packet', '--node', '--force']),
@@ -385,30 +419,159 @@ function printPlan(plan) {
     for (const warning of plan.warnings) lines.push(`  ! ${warning}`);
   }
 
+  if (plan.explain) {
+    lines.push('');
+    lines.push('explain · signal & vocabulary trace:');
+    lines.push(`  fired signals (${rigor.signals.length}):`);
+    if (rigor.signals.length === 0) lines.push('    (none)');
+    for (const sig of rigor.signals) lines.push(`    + ${sig.field ?? 'predicate'} (+${sig.weight}): ${sig.label}`);
+    const rh = plan.explain.riskHints ?? plan.riskHints;
+    if (rh) {
+      lines.push(`  unflagged risk cues (${rh.unflaggedRisks.length}):`);
+      if (rh.unflaggedRisks.length === 0) lines.push('    (none)');
+      for (const hit of rh.unflaggedRisks) {
+        lines.push(`    ! risks.${hit.flag} <- "${hit.phrase}" (${hit.cue})${hit.expiredWaiver ? ` [waiver expired ${hit.expiredWaiver}]` : ''}`);
+      }
+      lines.push(`  waived risk cues (${rh.waivedRisks.length}):`);
+      if (rh.waivedRisks.length === 0) lines.push('    (none)');
+      for (const w of rh.waivedRisks) {
+        lines.push(`    ~ risks.${w.flag} <- "${w.phrase}" (waived until ${w.expires}: ${w.reason})`);
+      }
+      lines.push(`  suggested regimes (${rh.suggestedRegimes.length}):`);
+      if (rh.suggestedRegimes.length === 0) lines.push('    (none)');
+      for (const reg of rh.suggestedRegimes) {
+        lines.push(`    * regulation "${reg.regime}" <- "${reg.phrase}"`);
+      }
+    }
+    if (plan.vocabulary) {
+      lines.push(
+        `  domain noun: "${plan.vocabulary.primary}" (actor: "${plan.vocabulary.secondary}") · source=${plan.vocabulary.source} · confidence=${plan.vocabulary.confidence.toFixed(2)}` +
+          `${plan.vocabulary.candidates.length ? ` · candidates=[${plan.vocabulary.candidates.join(', ')}]` : ''}`
+      );
+    }
+  }
+
   lines.push('');
   lines.push(`next      vld compile ${positional[0] ?? '<profile.json>'} -o spec`);
   lines.push('');
   console.log(lines.join('\n'));
 }
 
-function runInit(dir) {
-  requirePositionals('vld init <dir>', { min: 1 });
-  if (!dir) fail('Missing directory. Usage: vld init <dir>');
+async function runInit(dir) {
+  requirePositionals('vld init <dir> [--interactive]', { min: 1 });
+  if (!dir) fail('Missing directory. Usage: vld init <dir> [--interactive]');
   const target = path.resolve(dir);
   const file = path.join(target, 'profile.json');
+  let template = structuredClone(PROFILE_TEMPLATE);
+
+  if (hasFlag('--interactive')) {
+    let rl = null;
+    let scriptedLines = null;
+    let lineCursor = 0;
+    if (process.stdin.isTTY) {
+      const { createInterface } = await import('node:readline/promises');
+      rl = createInterface({ input: process.stdin, output: process.stdout });
+    } else {
+      try { scriptedLines = readFileSync(0, 'utf8').split(/\r?\n/); } catch { scriptedLines = []; }
+    }
+    const ask = async (label, fallback) => {
+      if (scriptedLines !== null) {
+        const raw = String(scriptedLines[lineCursor++] ?? '').trim();
+        return raw || fallback;
+      }
+      try {
+        const raw = (await rl.question(`  ${label} [${fallback}]: `)).trim();
+        return raw || fallback;
+      } catch {
+        return fallback;
+      }
+    };
+    try {
+      delete template.$help;
+      console.log('\nvibecode like a dev · interactive project setup\n');
+      const defaultSlug = path.basename(target).toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-|-$/g, '') || 'my-project';
+      template.name = await ask('Project slug', defaultSlug);
+      template.idea = await ask('One-paragraph idea (who, what, instead of what)', template.idea);
+      const kindAns = await ask(`Kind (${KINDS.join('|')})`, 'web-app');
+      template.kind = KINDS.includes(kindAns) ? kindAns : 'web-app';
+      const stageAns = await ask(`Stage (${STAGES.join('|')})`, 'mvp');
+      template.stage = STAGES.includes(stageAns) ? stageAns : 'mvp';
+      const scaleAns = await ask(`User scale (${SCALES.join('|')})`, 'small');
+      template.users = { scale: SCALES.includes(scaleAns) ? scaleAns : 'small' };
+      const stackAns = await ask('Primary stack (typescript|javascript|python|go|rust|java|kotlin|csharp|ruby|php|undecided)', 'typescript');
+      template.constraints.stack = stackAns;
+      const traitsAns = await ask(`Traits comma-separated (${TRAITS.slice(0, 6).join(',')}…)`, '');
+      template.traits = traitsAns.split(',').map((t) => t.trim()).filter((t) => TRAITS.includes(t));
+      const piiAns = await ask('Stores personal data (PII)? (y/n)', 'n');
+      template.risks.pii = /^y/i.test(piiAns);
+      const payAns = await ask('Moves money or processes payments? (y/n)', 'n');
+      template.risks.payments = /^y/i.test(payAns);
+      const regAns = await ask(`Regulatory overlays comma-separated (${REGULATIONS.join(',')})`, '');
+      const regs = regAns.split(',').map((r) => r.trim().toLowerCase()).filter((r) => REGULATIONS.includes(r));
+      if (regs.length > 0) {
+        template.risks.regulated = true;
+        template.regulation = regs;
+      }
+    } finally {
+      if (rl) rl.close();
+    }
+  }
 
   try {
-    writeAbsoluteManagedFileAtomic(file, `${JSON.stringify(PROFILE_TEMPLATE, null, 2)}\n`, { overwrite: false, label: 'initial profile' });
+    writeAbsoluteManagedFileAtomic(file, `${JSON.stringify(template, null, 2)}\n`, { overwrite: hasFlag('--force'), label: 'initial profile' });
   } catch (error) {
     if (error.code === 'MANAGED_FILE_EXISTS') fail(`${file} already exists; refusing to overwrite`);
     fail(error.message);
   }
-  console.log(`
-✓ wrote ${file}
 
-Fill in name, idea, kind and stage. Then:
-  vld plan ${path.relative(process.cwd(), file) || 'profile.json'}
-`);
+  const hints = hasFlag('--interactive') ? scanRiskHints(template) : null;
+  console.log(`\n✓ wrote ${file}`);
+  for (const h of hints?.undeclaredFlags ?? []) console.log(`  ! hint: idea mentions "${h.phrase}" — consider setting risks.${h.flag}=true`);
+  console.log(`\nFill in or refine fields, then:\n  vld plan ${path.relative(process.cwd(), file) || 'profile.json'}\n  vld compile ${path.relative(process.cwd(), file) || 'profile.json'} -o specs\n`);
+}
+
+function runDoctorCommand() {
+  const report = runDoctor({
+    projectDir: option('--project', '.'),
+    profileFile: option('--profile', 'profile.json'),
+    packetDir: option('--packet', 'specs')
+  });
+  if (hasFlag('--json')) {
+    console.log(JSON.stringify(report, null, 2));
+  } else {
+    console.log(`\nvld doctor · v${report.version} · ${report.platform}/${report.arch}\n`);
+    for (const check of report.checks) {
+      const icon = check.status === 'pass' ? '✓' : check.status === 'warn' ? '!' : check.status === 'fail' ? '✗' : '·';
+      console.log(`  ${icon} ${check.id.padEnd(16)} ${check.detail}`);
+      if (check.remediation) console.log(`                     → ${check.remediation}`);
+    }
+    console.log(`\n${report.ok ? 'PASS' : 'FAIL'} · ${report.failures} failure(s) · ${report.warnings} warning(s)\n`);
+  }
+  process.exit(report.ok ? 0 : 1);
+}
+
+function runMigrateCommand() {
+  try {
+    const report = migrateProject({
+      projectDir: option('--project', '.'),
+      profileFile: option('--profile', 'profile.json'),
+      packetDir: option('--packet', 'specs'),
+      dryRun: hasFlag('--dry-run')
+    });
+    if (hasFlag('--json')) {
+      console.log(JSON.stringify(report, null, 2));
+    } else {
+      console.log(`\nvld migrate · target v${report.targetVersion}${report.dryRun ? ' (dry-run)' : ''}\n`);
+      for (const action of report.actions) {
+        const icon = action.kind === 'up-to-date' ? '·' : '✓';
+        console.log(`  ${icon} ${action.target.padEnd(26)} ${action.kind}`);
+        for (const c of action.changes) console.log(`      - ${c}`);
+      }
+      console.log(`\nDONE · ${report.changedCount} file(s) ${report.dryRun ? 'would be updated' : 'updated'}\n`);
+    }
+  } catch (error) {
+    fail(error.message);
+  }
 }
 
 function runAdopt(repoPath) {
@@ -499,7 +662,39 @@ function enforceAdoptedIdea(plan) {
 function regulatedWithoutRegime(plan) {
   const { risks, regulation } = plan.profile;
   if (risks?.regulated !== true || (regulation ?? []).length > 0) return null;
-  return 'risks.regulated is true but profile.regulation is empty: the tier rises, but no regime-specific obligation is added. Name the regime (hipaa, gdpr, pci-dss, soc2) so its overlay applies.';
+  const suggested = (plan.riskHints?.suggestedRegimes ?? []).map((item) => item.regime);
+  const hint = suggested.length > 0 ? ` Suggested from idea: ${suggested.join(', ')}.` : '';
+  return `risks.regulated is true but profile.regulation is empty: the tier rises, but no regime-specific obligation is added. Name the regime (${REGULATIONS.join(', ')}) so its overlay applies.${hint}`;
+}
+
+function enforceStrictCompilerGuards(plan) {
+  const today = new Date().toISOString().slice(0, 10);
+  const liveRiskScan = scanRiskHints(plan.profile, { referenceDate: today });
+  const extraWarnings = [];
+
+  // Surface risk hints that are not waived (including waivers expired as of today).
+  const unwaived = liveRiskScan.unflaggedRisks.filter((hit) => !hit.traitPresent);
+  if (unwaived.length > 0 && hasFlag('--strict')) {
+    const details = unwaived.map(
+      (hit) =>
+        `risks.${hit.flag}: idea mentions "${hit.phrase}"${hit.expiredWaiver ? ` (waiver expired ${hit.expiredWaiver})` : ''} — set "risks.${hit.flag}": true or add a dated entry in "riskWaivers"`
+    );
+    fail(`unflagged risk signal(s) detected in profile.idea under --strict:\n  - ${details.join('\n  - ')}`);
+  }
+
+  // Roadmap 1.3 (F-03): tier >= 2 with low primary-noun confidence requires explicit profile.domain.
+  if (plan.rigor.tier >= 2 && plan.vocabulary?.lowConfidence && !plan.profile?.domain?.entity && hasFlag('--strict')) {
+    const candidates = plan.vocabulary.candidates?.length ? ` Candidates: ${plan.vocabulary.candidates.join(', ')}.` : '';
+    fail(
+      `primary domain noun confidence is ${plan.vocabulary.confidence.toFixed(2)} (< 0.60) at tier ${plan.rigor.tier}.${candidates} ` +
+        'Set profile.domain: { "entity": "<noun>", "actors": ["<actor>"] } before running with --strict.'
+    );
+  }
+
+  for (const expired of liveRiskScan.expiredWaivers) {
+    extraWarnings.push(`riskWaivers: waiver for risks.${expired.flag} expired on ${expired.expires}; renew or set risks.${expired.flag}: true.`);
+  }
+  return { liveRiskScan, extraWarnings };
 }
 
 /**
@@ -518,14 +713,32 @@ function injectionWarning(plan) {
 function runPlan(profilePath) {
   requirePositionals('vld plan <profile.json>', { min: 1 });
   const plan = loadPlanOrFail(profilePath);
-  const warnings = [enforceAdoptedIdea(plan), regulatedWithoutRegime(plan), ...injectionWarning(plan)].filter(Boolean);
+  const { liveRiskScan, extraWarnings } = enforceStrictCompilerGuards(plan);
+  const unregulated = regulatedWithoutRegime(plan);
+  if (unregulated && hasFlag('--strict')) {
+    fail(`${unregulated}\n  --strict refuses a regulated profile with no named regime.`);
+  }
+  const warnings = [enforceAdoptedIdea(plan), unregulated, ...injectionWarning(plan), ...extraWarnings].filter(Boolean);
   const warning = warnings.length > 0 ? warnings.join('\n⚠ ') : null;
+  const explain = hasFlag('--explain')
+    ? {
+        firedSignals: plan.rigor.signals,
+        riskHints: liveRiskScan,
+        vocabulary: plan.vocabulary,
+        overlays: plan.overlays
+      }
+    : undefined;
   if (hasFlag('--json')) {
-    console.log(JSON.stringify(warning ? { ...plan, warnings: [...(plan.warnings ?? []), warning] } : plan, null, 2));
+    const out = {
+      ...plan,
+      ...(explain ? { explain } : {}),
+      warnings: warning ? [...(plan.warnings ?? []), ...warnings] : plan.warnings
+    };
+    console.log(JSON.stringify(out, null, 2));
     return;
   }
   if (warning) console.error(`\n! ${warning}\n`);
-  printPlan(plan);
+  printPlan(explain ? { ...plan, explain } : plan);
 }
 
 function runCompile(profilePath) {
@@ -533,12 +746,15 @@ function runCompile(profilePath) {
   const out = option('-o', option('--out', null));
   if (!out) fail('Missing output directory. Usage: vld compile <profile.json> -o <dir>');
   const plan = loadPlanOrFail(profilePath, { previousIds: previousRequirementIds(out) });
-  const compileWarnings = [enforceAdoptedIdea(plan), regulatedWithoutRegime(plan), ...injectionWarning(plan)].filter(Boolean);
-  if (compileWarnings.length > 0) console.error(`\n! ${compileWarnings.join('\n! ')}\n`);
-  // A profile that declares itself regulated but names no regime is a gap the
-  // compiler cannot fill: the tier rises and no obligation arrives. Under --strict
-  // that is a refusal, not a note, because the packet would otherwise ship with a
-  // compliance claim nobody can check.
+  const { extraWarnings } = enforceStrictCompilerGuards(plan);
+  const compileWarnings = [
+    enforceAdoptedIdea(plan),
+    regulatedWithoutRegime(plan),
+    ...injectionWarning(plan),
+    ...(plan.warnings ?? []),
+    ...extraWarnings
+  ].filter(Boolean);
+  if (compileWarnings.length > 0) console.error(`\n! ${[...new Set(compileWarnings)].join('\n! ')}\n`);
   const unregulated = regulatedWithoutRegime(plan);
   if (unregulated && hasFlag('--strict')) {
     fail(`${unregulated}\n  --strict refuses a regulated profile with no named regime.`);
@@ -579,13 +795,15 @@ function runCompile(profilePath) {
     console.log(`    Trim prose or demote practices by priority. Do not trim criteria or gates.`);
   }
 
-  const entry = path.basename(result.outDir);
+  const relOut = path.relative(process.cwd(), result.outDir).split(path.sep).join('/');
+  const entry = relOut && !relOut.startsWith('..') ? relOut : path.basename(result.outDir);
+  const ciCommand = `node ${entry}/spec-check.mjs --repo . --strict --require-assertions && node ${entry}/enforcement/gates.mjs --repo . --strict`;
   console.log(`
 Next
   1. Read ${plan.packet === 'full' ? `${entry}/00-constitution.md` : `${entry}/spec.md`} and decide whether you agree.
-  2. Hand ${entry}/ to your agent, starting at AGENTS.md.
-  3. Wire the drift guard: node ${entry}/spec-check.mjs --repo .
-  4. Check the gates: node ${entry}/enforcement/gates.mjs --repo .
+  2. Hand ${entry}/ to your agent, starting at AGENTS.md (commands inside resolve relative to ${entry}/).
+  3. CI gate: ${ciCommand}
+  4. Optional GitHub Actions scaffold: vld ci init --packet ${entry}
 `);
 }
 
@@ -725,7 +943,8 @@ function runChange() {
       packetDir,
       changeDir,
       profilePath: option('--profile', null),
-      force: hasFlag('--force')
+      force: hasFlag('--force'),
+      toProfileRules: hasFlag('--to-profile-rules')
     })
       .then((result) => {
         console.log(`\n✓ archived ${changeDir} into ${displayPath(result.archiveDir)}\n`);
@@ -1374,6 +1593,28 @@ function runMission() {
       else printMissionReport('status', report);
       process.exit(report.ok ? 0 : 1);
     }
+    if (action === 'rebase') {
+      if (!file) fail('Usage: vld mission rebase <mission.json> [--target <ref>] [--packet <dir>] [--assign-added <pkg>] [--drop-removed] [--dry-run] [--project <dir>] [--json]');
+      const rebased = rebaseMission({
+        file,
+        projectDir: project,
+        targetRef: option('--target', null),
+        packetDir: option('--packet', null),
+        assignAddedTo: option('--assign-added', null),
+        dropRemoved: hasFlag('--drop-removed'),
+        dryRun: hasFlag('--dry-run')
+      });
+      if (hasFlag('--json')) console.log(JSON.stringify(rebased, null, 2));
+      else {
+        console.log(`\nmission rebase · ${displayPath(rebased.file)}${rebased.dryRun ? ' (dry-run)' : ''}\n`);
+        console.log(`  changed    ${rebased.changed ? 'yes' : 'no'} · fast-forward: ${rebased.fastForward ? 'yes' : 'no'}`);
+        console.log(`  target     ${rebased.diff.fromCommit.slice(0, 12)} -> ${rebased.diff.toCommit.slice(0, 12)}`);
+        console.log(`  coverage   retained ${rebased.diff.retainedCount} · added ${rebased.diff.addedRequirements.length} · removed ${rebased.diff.removedRequirements.length}`);
+        console.log(`  impacted   ${rebased.diff.impactedPackages.length ? rebased.diff.impactedPackages.join(', ') : '(none)'}`);
+        console.log(`\nPASS · digest ${rebased.digest.slice(0, 16)}\n`);
+      }
+      return;
+    }
     fail('Usage: vld mission init|validate|status <definition-or-mission.json>');
   } catch (error) {
     fail(error.message);
@@ -1570,7 +1811,7 @@ async function runRuntime() {
         if (!leaseToken || !candidateSha) fail('runtime delivery submit requires --lease-token and --sha');
         result = submitRuntimeDeliveryCandidate({ missionFile: deliveryMissionFile, packageId: deliveryPackageId, policyFile, leaseToken, candidateSha, adapterRunId: option('--adapter-run', null), projectDir: project });
       } else if (deliveryAction === 'verify') {
-        result = verifyRuntimeDeliveryCandidate({ missionFile: deliveryMissionFile, packageId: deliveryPackageId, policyFile, projectDir: project });
+        result = await verifyRuntimeDeliveryCandidateAsync({ missionFile: deliveryMissionFile, packageId: deliveryPackageId, policyFile, projectDir: project });
       } else if (deliveryAction === 'approve') {
         const actor = runtimeActor(option('--actor', null));
         const candidateId = option('--candidate', null);
@@ -1589,7 +1830,7 @@ async function runRuntime() {
     }
     if (action === 'forge') {
       const [_, forgeAction, forgeMissionFile, forgePackageId] = positional;
-      if (forgeAction !== 'plan-export' || !forgeMissionFile || !forgePackageId) {
+      if ((forgeAction !== 'plan-export' && forgeAction !== 'execute') || !forgeMissionFile || !forgePackageId) {
         fail('Usage: vld runtime forge plan-export <mission.json> <package> --candidate <id> --actor release-approver:<id> --repository <owner/repo> --head-ref <branch>');
       }
       const actor = runtimeActor(option('--actor', null));
@@ -1612,6 +1853,23 @@ async function runRuntime() {
         const prepared = prepareRuntimeForgePlan(request);
         const result = { ok: true, dryRun: true, plan: prepared.plan, proposedForgeReceipt: prepared.forge };
         console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+      if (forgeAction === 'execute' || hasFlag('--execute')) {
+        const tokenEnvName = option('--token-env', 'GITHUB_TOKEN');
+        const token = process.env[tokenEnvName];
+        if (!token) fail(`Governed GitHub execute mode requires an explicit token in ${tokenEnvName}.`);
+        const prRaw = option('--pr', null);
+        const pullNumber = prRaw ? Number.parseInt(prRaw, 10) : null;
+        const executed = await executeRuntimeForgePlan({
+          ...request,
+          action: option('--action', 'publish'),
+          allowMergeRequest: hasFlag('--allow-merge'),
+          pullNumber: Number.isSafeInteger(pullNumber) ? pullNumber : null,
+          postEvidence: !hasFlag('--no-comment'),
+          token
+        });
+        console.log(JSON.stringify(executed, null, 2));
         return;
       }
       const result = exportRuntimeForgePlan({ ...request, actor });
@@ -1779,11 +2037,275 @@ function runIndex() {
 // of the promise. They are separated here: `vld experimental <command>` is the only
 // way to reach the runtime family, the word appears in every error and in --help,
 // and `vld --core` never loads those modules at all.
-const EXPERIMENTAL = new Set(['runtime', 'workspace', 'mission', 'workflow', 'agent', 'studio']);
+const SESSION_NOTICE_TTL_MS = 12 * 60 * 60 * 1_000;
+function shouldPrintExperimentalNotice() {
+  const rawSession = process.env.VLD_SESSION_ID;
+  if (rawSession === 'always') return true;
+  // When a session id is exported (or inside an interactive shell whose PPID stays
+  // constant across commands), record a single session marker so the experimental
+  // notice prints on the first call and stays quiet for the rest of the session.
+  const sessionKey = typeof rawSession === 'string' && /^[A-Za-z0-9._-]{1,80}$/.test(rawSession)
+    ? `sid-${rawSession}`
+    : process.stderr.isTTY && Number.isInteger(process.ppid) && process.ppid > 1
+      ? `ppid-${process.ppid}`
+      : null;
+  if (!sessionKey) return true;
+  const uid = typeof process.getuid === 'function' ? process.getuid() : 'u';
+  const marker = path.join(os.tmpdir(), `vld-exp-notice-${uid}-${sessionKey}`);
+  try {
+    if (existsSync(marker)) {
+      const info = lstatSync(marker);
+      if (info.isSymbolicLink()) return true;
+      if (Date.now() - info.mtimeMs < SESSION_NOTICE_TTL_MS) return false;
+    }
+    writeFileSync(marker, `${process.pid}\n`, { mode: 0o600, flag: 'w' });
+  } catch {
+    // Non-fatal: fall back to printing the notice.
+  }
+  return true;
+}
+
+async function runSandboxCommand() {
+  const [action = 'probe'] = positional;
+  const backend = option('--backend', 'auto');
+  const json = hasFlag('--json');
+  if (action === 'probe') {
+    const probe = detectSandboxBackends({ refresh: true });
+    if (json) console.log(JSON.stringify(probe, null, 2));
+    else {
+      console.log(`\nsandbox probe · ${probe.platform} · Node ${probe.nodeVersion} · preferred: ${probe.preferred ?? 'none'}\n`);
+      for (const b of probe.backends) {
+        console.log(`  ${b.available ? '✓' : '·'} ${b.id.padEnd(18)} ${b.confinementClass.padEnd(20)} ${b.detail}`);
+      }
+      console.log('');
+    }
+    process.exit(probe.preferred ? 0 : 1);
+  }
+  if (action === 'conformance') {
+    const report = await runSandboxConformance({ backend });
+    if (json) console.log(JSON.stringify(report, null, 2));
+    else {
+      console.log(`\nsandbox conformance · ${report.backend} (${report.confinementClass})\n`);
+      for (const p of report.probes) console.log(`  ${p.passed ? '✓' : '✗'} ${p.id.padEnd(32)} ${p.detail}`);
+      console.log(`\n${report.ok ? 'PASS' : 'FAIL'} · ${report.passed}/${report.total} probe(s) passed\n`);
+    }
+    process.exit(report.ok ? 0 : 1);
+  }
+  fail('Usage: vld sandbox probe|conformance [--backend <auto|oci|bwrap|linux-ns|darwin-seatbelt|node-permission>] [--json]');
+}
+
+async function runBuildCommand() {
+  const project = option('--project', '.');
+  const rawMax = option('--max-repairs', '2');
+  const maxRepairs = Number(rawMax);
+  if (!Number.isSafeInteger(maxRepairs) || maxRepairs < 0 || maxRepairs > 5) fail('--max-repairs must be an integer from 0 to 5');
+  const argValue = option('--arg', null);
+  const report = await runBuild({
+    projectDir: project,
+    profileFile: option('--profile', null),
+    packetDir: option('--packet', 'specs'),
+    missionFile: option('--mission', null),
+    adapter: option('--adapter', 'sandboxed-cli'),
+    executable: option('--executable', null),
+    args: argValue ? [argValue] : [],
+    sandboxBackend: option('--backend', 'auto'),
+    requireOsSandbox: hasFlag('--require-os'),
+    verifyGates: hasFlag('--gates'),
+    requireAssertions: hasFlag('--require-assertions') || true,
+    maxRepairs,
+    dryRun: hasFlag('--dry-run'),
+    reportFile: option('-o', option('--out', null))
+  });
+  if (hasFlag('--json')) console.log(JSON.stringify(report, null, 2));
+  else {
+    console.log(`\nvld build · ${report.ok ? 'PASS' : 'FAIL'}${report.dryRun ? ' (dry-run)' : ''}\n`);
+    console.log(`  packet    ${report.packet?.path ?? 'specs'}`);
+    console.log(`  order     ${report.order.join(' -> ')}`);
+    for (const pkg of report.packages ?? []) {
+      console.log(`  ${pkg.ok ? '✓' : '✗'} ${pkg.packageId.padEnd(18)} stage=${pkg.stage} repairs=${pkg.repairsUsed} backend=${pkg.sandboxBackend ?? 'n/a'}`);
+    }
+  if (report.reportFile) console.log(`  report    ${report.reportFile}`);
+    console.log('');
+  }
+  process.exit(report.ok ? 0 : 1);
+}
+
+function runReviewCommand() {
+  const [sub = 'prepare'] = positional;
+  const project = option('--project', '.');
+  const packet = option('--packet', 'specs');
+  const json = hasFlag('--json');
+  try {
+    if (sub === 'prepare') {
+      const prepared = prepareReviewPacket({
+        projectDir: project,
+        packetDir: packet,
+        baseRef: option('--base-ref', 'HEAD~1'),
+        headRef: option('--head-ref', 'HEAD'),
+        authorId: option('--author', 'unknown-author')
+      });
+      const out = option('-o', option('--out', null));
+      if (out) {
+        mkdirSync(path.dirname(path.resolve(project, out)), { recursive: true });
+        writeFileSync(path.resolve(project, out), `${JSON.stringify(prepared, null, 2)}\n`, 'utf8');
+      }
+      if (json || !out) console.log(JSON.stringify(prepared, null, 2));
+      else console.log(`\n✓ prepared isolated review packet ${out} (${prepared.requirements.length} requirement(s), human escalation: ${prepared.humanEscalation.required ? 'yes' : 'no'})\n`);
+      return;
+    }
+    if (sub === 'verify') {
+      const reportPath = option('--report', positional[1]);
+      if (!reportPath) fail('Usage: vld review verify --report <review.json> [--packet <dir>] [--author <id>] [--json]');
+      const report = JSON.parse(readFileSync(path.resolve(reportPath), 'utf8'));
+      const specPath = path.resolve(project, packet, 'spec.json');
+      const known = existsSync(specPath) ? (JSON.parse(readFileSync(specPath, 'utf8')).requirements ?? []).map((r) => r.id) : null;
+      const result = validateReviewReport(report, { knownRequirements: known, authorId: option('--author', null) });
+      if (json) console.log(JSON.stringify(result, null, 2));
+      else {
+        console.log(`\nreview verify · ${result.ok ? 'PASS' : 'FAIL'}\n`);
+        for (const err of result.errors) console.log(`  ✗ ${err}`);
+      }
+      process.exit(result.ok ? 0 : 1);
+    }
+    if (sub === 'record') {
+      const reportPath = option('--report', positional[1]);
+      if (!reportPath) fail('Usage: vld review record --report <review.json> [--packet <dir>] [--project <dir>] [-o <file>] [--json]');
+      const report = JSON.parse(readFileSync(path.resolve(reportPath), 'utf8'));
+      const result = recordReviewDecision({ projectDir: project, packetDir: packet, report, outFile: option('-o', option('--out', null)) });
+      if (json) console.log(JSON.stringify(result, null, 2));
+      else console.log(`\n✓ recorded review (${result.review.verdict}) → ${path.relative(path.resolve(project), result.file)} · evidence ${result.evidenceHash.slice(0, 12)}\n`);
+      return;
+    }
+    fail('Usage: vld review <prepare|verify|record> [--packet <dir>] [--project <dir>] [--report <review.json>] [--json]');
+  } catch (error) {
+    fail(error.message);
+  }
+}
+
+function runDriftCommand() {
+  const [sub = 'check'] = positional;
+  const project = option('--project', '.');
+  const packet = option('--packet', 'specs');
+  const json = hasFlag('--json');
+  try {
+    if (sub === 'check') {
+      const result = detectSpecDrift({
+        projectDir: project,
+        packetDir: packet,
+        profileFile: option('--profile', null),
+        baseRef: option('--base-ref', null),
+        headRef: option('--head-ref', 'HEAD'),
+        requireAssertions: true,
+        record: hasFlag('--record')
+      });
+      if (json) console.log(JSON.stringify(result, null, 2));
+      else {
+        console.log(`\ndrift check · ${result.packetDir}\n`);
+        for (const f of result.findings) console.log(`  ${f.severity === 'high' ? '✗' : '!'} [${f.kind}] ${f.detail}`);
+        if (result.findings.length === 0) console.log('  ✓ zero drift findings');
+        console.log(`\n${result.ok ? 'PASS' : 'FAIL'} · ${result.findingCount} finding(s) (${result.blockingCount} blocking)\n`);
+      }
+      process.exit(result.ok ? 0 : 1);
+    }
+    if (sub === 'init-workflow') {
+      const result = scaffoldDriftWorkflow({
+        projectDir: project,
+        packetDir: packet,
+        nodeVersion: option('--node', '22.x'),
+        cron: option('--cron', '0 6 * * 1'),
+        outFile: option('-o', option('--out', '.github/workflows/vld-drift.yml')),
+        force: hasFlag('--force')
+      });
+      console.log(json ? JSON.stringify(result, null, 2) : `\n✓ wrote ${path.relative(path.resolve(project), result.file)}\n`);
+      return;
+    }
+    if (sub === 'init-oracles') {
+      const result = initSemanticOracles({ projectDir: project, packetDir: packet, force: hasFlag('--force') });
+      console.log(json ? JSON.stringify(result, null, 2) : `\n✓ wrote semantic-oracles.json (${result.count} oracle(s) · stack ${result.stack} · ${result.mutationRunner.tool})\n`);
+      return;
+    }
+    fail('Usage: vld drift <check|init-workflow|init-oracles> [--packet <dir>] [--project <dir>] [--base-ref <ref>] [--record] [--json]');
+  } catch (error) {
+    fail(error.message);
+  }
+}
+
+function runEvidenceCommand() {
+  const [sub = 'verify'] = positional;
+  const project = option('--project', '.');
+  const json = hasFlag('--json');
+  try {
+    if (sub === 'verify') {
+      const result = verifyEvidenceChain({ projectDir: project });
+      if (json) console.log(JSON.stringify(result, null, 2));
+      else {
+        console.log(`\nevidence chain · ${result.ok ? 'VERIFIED' : 'TAMPERED'} · ${result.entries} entry/entries · head ${result.headHash.slice(0, 16)}\n`);
+        for (const err of result.errors) console.log(`  ✗ ${err}`);
+      }
+      process.exit(result.ok ? 0 : 1);
+    }
+    if (sub === 'export') {
+      const format = option('--format', 'json');
+      const output = exportEvidenceBundle({ projectDir: project, format });
+      const out = option('-o', option('--out', null));
+      if (out) {
+        mkdirSync(path.dirname(path.resolve(project, out)), { recursive: true });
+        writeFileSync(path.resolve(project, out), output, 'utf8');
+        console.log(`\n✓ exported evidence bundle (${format}) → ${out}\n`);
+      } else {
+        process.stdout.write(output);
+      }
+      return;
+    }
+    if (sub === 'append') {
+      const kind = option('--kind', 'verify');
+      const appended = appendEvidence({
+        projectDir: project,
+        kind,
+        actor: option('--from', 'operator:local'),
+        subject: option('--subject', 'project'),
+        payload: { note: option('--reason', '') }
+      });
+      console.log(json ? JSON.stringify(appended, null, 2) : `\n✓ appended evidence seq ${appended.entry.seq} (${appended.entry.hash.slice(0, 16)})\n`);
+      return;
+    }
+    fail('Usage: vld evidence <verify|export|append> [--project <dir>] [--format json|markdown] [-o <file>] [--json]');
+  } catch (error) {
+    fail(error.message);
+  }
+}
+
+function runTelemetryCommand() {
+  const [sub = 'status'] = positional;
+  const project = option('--project', '.');
+  const json = hasFlag('--json');
+  try {
+    if (sub === 'status') {
+      const status = telemetryStatus({ projectDir: project });
+      console.log(json ? JSON.stringify(status, null, 2) : `\ntelemetry · ${status.enabled ? 'ENABLED (opt-in local)' : 'DISABLED (default)'} · ${status.recordedEvents} event(s) · network: ${status.networkTransmission}\n`);
+      return;
+    }
+    if (sub === 'enable' || sub === 'disable') {
+      const status = configureTelemetry({ projectDir: project, enabled: sub === 'enable' });
+      console.log(json ? JSON.stringify(status, null, 2) : `\n✓ telemetry ${status.enabled ? 'enabled (local anonymous counters only; zero automatic network calls)' : 'disabled'}\n`);
+      return;
+    }
+    if (sub === 'purge') {
+      const status = purgeTelemetry({ projectDir: project });
+      console.log(json ? JSON.stringify(status, null, 2) : `\n✓ purged local telemetry (${status.recordedEvents} remaining)\n`);
+      return;
+    }
+    fail('Usage: vld telemetry <status|enable|disable|purge> [--project <dir>] [--json]');
+  } catch (error) {
+    fail(error.message);
+  }
+}
+
+const EXPERIMENTAL = new Set(['runtime', 'workspace', 'mission', 'workflow', 'agent', 'studio', 'sandbox', 'build']);
 function experimentalGate() {
   if (command === 'experimental') {
     const requested = rest.find((item) => !item.startsWith('-'));
-    if (!requested) fail('Usage: vld experimental <runtime|workspace|mission|workflow|agent|studio> … — see docs/EXPERIMENTAL.md');
+    if (!requested) fail('Usage: vld experimental <runtime|workspace|mission|workflow|agent|studio|sandbox|build> … — see docs/EXPERIMENTAL.md');
     if (!EXPERIMENTAL.has(requested)) {
       fail(`"${requested}" is not an experimental runtime command. One of: ${[...EXPERIMENTAL].join(', ')}.`);
     }
@@ -1799,12 +2321,9 @@ function experimentalGate() {
     return;
   }
   if (!EXPERIMENTAL.has(command)) return;
-  // The bare spelling still works: it is in the published CLI contract and a hard
-  // rename would break every script and test that calls it. What changes is that the
-  // boundary is now visible — the command says which part of the tool it belongs to
-  // and that part is not the compiler's promise. Silence is what let a 3.7k-line
-  // host-process runner read as supported.
-  if (!hasFlag('--json')) {
+  // The bare spelling still works; print the experimental boundary notice once per
+  // interactive/labelled session so onboarding is clear without spamming every call.
+  if (!hasFlag('--json') && shouldPrintExperimentalNotice()) {
     console.error(
       `note: \`vld ${command}\` is the experimental runtime, not the compiler. ` +
         'It starts unconfined same-user processes; see docs/EXPERIMENTAL.md. ' +
@@ -1819,7 +2338,13 @@ validateTopLevelFlags();
 
 switch (command) {
   case 'init':
-    runInit(positional[0]);
+    runInit(positional[0]).catch((error) => fail(error.message));
+    break;
+  case 'doctor':
+    runDoctorCommand();
+    break;
+  case 'migrate':
+    runMigrateCommand();
     break;
   case 'adopt':
     runAdopt(positional[0]);
@@ -1868,6 +2393,24 @@ switch (command) {
     break;
   case 'studio':
     runStudio();
+    break;
+  case 'sandbox':
+    runSandboxCommand().catch((error) => fail(error.message));
+    break;
+  case 'build':
+    runBuildCommand().catch((error) => fail(error.message));
+    break;
+  case 'review':
+    runReviewCommand();
+    break;
+  case 'drift':
+    runDriftCommand();
+    break;
+  case 'evidence':
+    runEvidenceCommand();
+    break;
+  case 'telemetry':
+    runTelemetryCommand();
     break;
   case 'mcp':
     runMcp();

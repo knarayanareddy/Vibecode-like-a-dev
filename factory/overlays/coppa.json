@@ -1,0 +1,70 @@
+{
+  "id": "coppa",
+  "layer": "domain",
+  "title": "COPPA children's online privacy rule",
+  "why": "Products directed at children under thirteen cannot rely on self-asserted consent or ordinary analytics defaults: verifiable parental consent must precede collection, behavioural advertising and unnecessary trackers are prohibited, and a parent must be able to inspect, revoke and erase their child's records at any time.",
+  "addRequirements": [
+    {
+      "key": "privacy.parental-consent",
+      "title": "Verifiable parental consent precedes child data collection",
+      "area": "security",
+      "statement": "When an account or {primary} is created for a child under thirteen, the application shall obtain and record verifiable parental consent before storing or sharing personal information beyond the one-time parent contact needed to request consent.",
+      "definition": "A child cannot enter persistent personal data until a verified parent or guardian grants consent tied to the operator's direct privacy notice.",
+      "failurePath": "If parental consent is declined, unverified or does not arrive within the verification window, the pending parent contact and any provisional child state are deleted automatically.",
+      "acceptance": [
+        "Given an unverified child signup, when personal information is submitted, then the application refuses persistence and prompts the parental-consent flow.",
+        "Given a pending consent request past its expiry window, when the cleanup job runs, then the parent contact record is purged.",
+        "Given a verified consent grant, when the consent record is inspected, then it captures method, notice version, parent identifier and timestamp."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "privacy.parent-review-and-erasure",
+      "title": "Parents can inspect, revoke consent for and erase child records",
+      "area": "data",
+      "statement": "When a verified parent requests review, consent revocation or deletion of a child's data, the application shall disclose every stored child field, stop further collection immediately and erase the child's personal data across primary storage and processors.",
+      "definition": "Parental control outlives onboarding: revoking consent halts future collection and deletes existing child data without requiring closure of unrelated sibling accounts.",
+      "failurePath": "If a downstream processor deletion fails, the application locks the child record from read and collection, queues retried erasure and surfaces the failure to an operator.",
+      "acceptance": [
+        "Given a verified parent, when they request their child's record, then the response returns every personal field collected for that child and no other child's data.",
+        "Given a consent revocation, when the child session next attempts a write, then collection is refused immediately.",
+        "Given a parental deletion request, when erasure completes, then no personal field for that child remains queryable."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "privacy.child-data-minimisation",
+      "title": "Child sessions collect the minimum needed and forbid behavioural tracking",
+      "area": "security",
+      "statement": "The application shall restrict child data collection to fields required to participate in the {primary} activity and forbid behavioural advertising identifiers, third-party ad pixels or unconsented geolocation on child accounts.",
+      "definition": "Participation cannot be conditioned on disclosing extra personal data, and persistent identifiers are limited to support for internal operations.",
+      "failurePath": "If an optional tracker, ad SDK or precise-location field is supplied on a child route, the application strips or rejects it and logs a policy violation.",
+      "acceptance": [
+        "Given a child session, when outbound payloads and rendered pages are inspected, then no third-party advertising tracker or behavioural profile identifier is present.",
+        "Given a submission containing extra personal fields or precise geolocation not required by the activity, when validated, then those fields are rejected.",
+        "Given a retention policy check, when a child record is no longer needed for the activity, then personal fields are deleted on schedule."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "privacy.child-operator-inventory",
+      "title": "Direct notice and child-data third-party operators are inventoried",
+      "area": "core",
+      "statement": "The application shall publish a direct notice naming every operator or processor that receives child data and refuse outbound child-data calls to any destination absent from the approved inventory.",
+      "definition": "Parents can see who handles their child's data before consenting, and code enforces the same list.",
+      "failurePath": "If an unapproved vendor endpoint is configured for a child workflow, the outbound call is refused and logged rather than sent.",
+      "acceptance": [
+        "Given an outbound child-data integration not in the approved operator list, when invoked, then the call is blocked and recorded.",
+        "Given a material change to the operator inventory, when published, then affected child accounts require renewed parental consent before new sharing occurs."
+      ],
+      "verify": "automated"
+    }
+  ],
+  "addGates": [
+    {
+      "id": "G3-PARENTAL-CONSENT",
+      "tier": 3,
+      "statement": "Unverified child collection is refused, behavioural tracking is absent, and parental revocation/erasure is proven by automated tests."
+    }
+  ]
+}

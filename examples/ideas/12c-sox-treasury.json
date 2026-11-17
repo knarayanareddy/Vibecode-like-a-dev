@@ -1,0 +1,11 @@
+{
+  "name": "sox-treasury",
+  "idea": "A multi-entity corporate treasury and general-ledger settlement API for regulated financial institutions. Journal entries are immutable after posting, adjustments over $10,000 must receive dual controller approval, and major ICT outages must trigger regulator reporting within 4 hours.",
+  "kind": "api",
+  "stage": "production",
+  "users": { "scale": "large" },
+  "traits": ["auth", "persistence", "payments", "webhooks"],
+  "risks": { "money": true, "multiTenant": true, "regulated": true, "destructiveWrites": true },
+  "regulation": ["sox", "dora"],
+  "constraints": { "team": 8, "weeks": 16, "stack": "dotnet" }
+}

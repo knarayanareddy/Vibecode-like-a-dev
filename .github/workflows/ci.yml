@@ -72,6 +72,15 @@ jobs:
       - name: Generated packets are recursively in sync with the generator
         run: node scripts/check-packet-sync.mjs
 
+      - name: README metrics and line budget match source data
+        run: npm run readme-check
+
+      - name: CycloneDX SBOM is current and zero-dependency
+        run: npm run sbom -- --check
+
+      - name: Environment and self-packet doctor passes
+        run: node factory/cli.mjs doctor
+
       # The packet ships a gate runner. Dogfooding it against this repository is the
       # only check that proves the generated file executes at all.
       - name: Self-spec gates pass
@@ -346,6 +355,8 @@ jobs:
             command: node scripts/eval-specificity.mjs
           - label: MCP routing
             command: node scripts/eval-routing.mjs
+          - label: business-rule extraction
+            command: node scripts/eval-rules.mjs
           - label: deterministic outcome calibration
             command: node scripts/eval-outcome.mjs
     steps:

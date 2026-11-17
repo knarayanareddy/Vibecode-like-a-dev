@@ -10,7 +10,7 @@
  */
 
 import { gateMechanism, RUNNER, RUNNER_COMMAND } from '../enforcement.mjs';
-import { FACTORY_VERSION, bullets, sanitizeQuoted, checkboxes, code, commandsFor, gateReading, heading, inline, ordered, quote, table, titleize } from './derive.mjs';
+import { FACTORY_VERSION, bullets, sanitizeQuoted, checkboxes, code, commandsFor, gateReading, heading, inline, ordered, quote, renderAnchorExample, ruleTestStub, table, titleize } from './derive.mjs';
 
 const h1 = (text) => heading(1, text);
 const h2 = (text) => heading(2, text);
@@ -337,13 +337,49 @@ export function productBrief(plan, d) {
 // ------------------------------------------------------------------- domain
 
 export function domainModel(plan, d) {
-  const ideaTerms = d.nouns.map((entry) => {
-    const word = typeof entry === 'string' ? entry : entry.word;
-    return [`**${word}**`, `from your idea — confirm the exact meaning of ${word} before it appears in code`, 'the idea', 'no'];
-  });
+  // Roadmap 1.3 (F-13): case-insensitive glossary deduplication & disambiguation.
+  // When an idea noun collides with a technical catalog term (e.g. therapy `session`
+  // vs auth `Session`, domain `account` vs identity `Account`), disambiguate both
+  // rows explicitly so code never collapses two meanings into one type or table.
+  const systemKeys = new Set(d.terms.map((term) => String(term.term).trim().toLowerCase()));
+  const seenIdea = new Set();
+  const collidedKeys = new Set();
+  const ideaTerms = [];
+  for (const entry of d.nouns) {
+    const word = String(typeof entry === 'string' ? entry : entry.word).trim();
+    const key = word.toLowerCase();
+    if (!key || seenIdea.has(key)) continue;
+    seenIdea.add(key);
+    if (systemKeys.has(key)) {
+      collidedKeys.add(key);
+      ideaTerms.push([
+        `**${word} (domain)**`,
+        `product concept from your idea — confirm its domain meaning and keep its type distinct from system \`${titleize(word)}\``,
+        'the idea',
+        'no'
+      ]);
+    } else {
+      ideaTerms.push([`**${word}**`, `from your idea — confirm the exact meaning of ${word} before it appears in code`, 'the idea', 'no']);
+    }
+  }
 
+  const seenSystem = new Set();
   const languageRows = d.terms.length
-    ? d.terms.map((term) => [`**${term.term}**`, term.definition, term.source, 'no'])
+    ? d.terms
+        .filter((term) => {
+          const key = String(term.term).trim().toLowerCase();
+          if (!key || seenSystem.has(key)) return false;
+          seenSystem.add(key);
+          return true;
+        })
+        .map((term) => {
+          const key = String(term.term).trim().toLowerCase();
+          const label = collidedKeys.has(key) ? `**${term.term} (system)**` : `**${term.term}**`;
+          const def = collidedKeys.has(key)
+            ? `${term.definition} Keep named distinctly from domain \`${key}\`.`
+            : term.definition;
+          return [label, def, term.source, 'no'];
+        })
     : [['_(none yet)_', 'Confirm the core nouns of the product before writing code.', '—', 'no']];
 
   const contextRows = d.contexts.map((context) => [
@@ -408,13 +444,13 @@ export function domainModel(plan, d) {
                       ? `${group.rules.length} variants that differ only in their numbers. e.g. "${group.shape}"`
                       : `"${group.shape}"`,
                     String(group.rules.length),
-                    'a test that fails before the rule is implemented'
+                    ruleTestStub(group.shape)
                   ])
                 )
               ]
             // `ordered` returns one string, not an array: spreading it would split
             // the document into one character per line.
-            : [ordered(d.ownRules.map((rule) => `"${rule.replace(/\.$/, '')}" — the test that would catch a violation goes beside the thing it protects, and it must fail before the rule is implemented.`))]),
+            : [ordered(d.ownRules.map((rule) => `"${rule.replace(/\.$/, '')}" — verify with a ${ruleTestStub(rule)}.`))]),
           ''
         ]
       : []),
@@ -529,7 +565,7 @@ export function architecture(plan, d) {
     ['Module boundaries', `The ${d.contexts.length} contexts import only their own domain and the shared kernel`, 'import-boundary rule', 'A cross-context import appears'],
     ...(hasUi ? [['Token usage', 'No raw colour or spacing literal in a component', 'token lint', 'A hex colour appears in a component']] : []),
     ['Contract agreement', 'Implementation matches the shapes in 04-contracts.md', 'contract test', 'A response field is added or removed silently'],
-    ['Requirement coverage', `${plan.requirements.filter((requirement) => requirement.verify === 'automated').length} anchored requirements have a passing test`, '`node ' + d.packetDir + '/spec-check.mjs`', 'A test is deleted or renamed'],
+    ['Requirement coverage', `${plan.requirements.filter((requirement) => requirement.verify === 'automated').length} anchored requirements have a passing test`, '`node ./spec-check.mjs`', 'A test is deleted or renamed'],
     [d.contract.selectedPracticeIds.includes('testing.mutation-testing') ? 'Test quality' : 'Assertion density', d.contract.selectedPracticeIds.includes('testing.mutation-testing') ? 'Mutation score on the domain layer' : 'Every test asserts an outcome, not just absence of a throw', d.contract.selectedPracticeIds.includes('testing.mutation-testing') ? 'mutation run in CI' : 'review', 'A test would pass if the behaviour were wrong']
   ];
 
@@ -792,34 +828,23 @@ export function verification(plan, d) {
   const startAc = d.start?.acceptance?.[0]?.text ?? `the behaviour of ${d.primary}`;
   const startAcId = d.start?.acceptance?.[0]?.id ?? 'AC-01';
   const startSlug = d.start?.title ? d.start.title.toLowerCase() : d.primary;
-  const anchorExample = d.contract.stack.kind === 'unsupported'
+  const startHint = startAc.replace(/^Given |, when |, then /g, (m) => m.trim() + ' ').slice(0, 150);
+  const renderedExample = d.stack.profile
+    ? renderAnchorExample(d.stack.profile, {
+        reqId: d.start.id,
+        title: `${startSlug} ${startAcId}`,
+        bodyHint: startHint
+      })
+    : null;
+  const anchorExample = d.contract.stack.kind === 'unsupported' || !renderedExample
     ? [
-        `No test syntax is suggested for the unrecognised stack \`${plan.profile.constraints.stack}\`.`,
+        `No test syntax is suggested for the unrecognised stack \`${plan.config.stack}\`.`,
         `Choose and record its test runner, test-file path, and comment syntax in an ADR first.`,
         `Then place @req ${d.start.id} on the same line as a real test using that language's comment form.`
       ]
-    : d.contract.stack.kind === 'python'
-    ? [
-        `# @req ${d.start.id}  # @req-ignore: example inside a spec document`,
-        `def test_${startSlug.toLowerCase().replace(/[^a-z0-9]+/g, '_')}_${startAcId.toLowerCase().replace(/[^a-z0-9]+/g, '_')}():`,
-        `    # ${startAc.replace(/^Given |, when |, then /g, (m) => m.trim() + ' ').slice(0, 150)}`,
-        '    assert outcome_is_observable'
-      ]
-    : d.contract.stack.kind === 'go'
-      ? [
-          `// @req ${d.start.id}  // @req-ignore: example inside a spec document`,
-          `func Test${titleize(startSlug).replace(/[^A-Za-z0-9]/g, '')}${startAcId.replace(/[^A-Za-z0-9]/g, '')}(t *testing.T) {`,
-          `  // ${startAc.replace(/^Given |, when |, then /g, (m) => m.trim() + ' ').slice(0, 150)}`,
-          '  if !outcomeIsObservable { t.Fatal("expected observable outcome") }',
-          '}'
-        ]
-      : [
-          `// @req ${d.start.id}  // @req-ignore: example inside a spec document`,
-          `test('${startSlug} (${startAcId})', async () => {`,
-          `  // ${startAc.replace(/^Given |, when |, then /g, (m) => m.trim() + ' ').slice(0, 150)}`,
-          '  expect(outcome).toBeDefined();',
-          '});'
-        ];
+    : renderedExample.split('\n').map((line, index) =>
+        index === 0 ? `${line}  ${d.contract.stack.anchorComment} @req-ignore: example inside a spec document` : line
+      );
 
   const ciYaml = [
     'name: spec',
@@ -831,8 +856,11 @@ export function verification(plan, d) {
     '      - uses: actions/checkout@v4',
     '      - uses: actions/setup-node@v4',
     '        with: { node-version: 22 }',
-    `      - run: node ${d.packetDir}/spec-check.mjs`,
-    `      - run: node ${d.packetDir}/enforcement/gates.mjs`
+    '      - name: Run packet drift guard and gates',
+    '        run: |',
+    '          PACKET_DIR="$(dirname "$(git ls-files \'*/spec-check.mjs\' \'spec-check.mjs\' | head -n1)")"',
+    '          node "$PACKET_DIR/spec-check.mjs" --repo . --strict --require-assertions',
+    '          node "$PACKET_DIR/enforcement/gates.mjs" --repo . --strict'
   ].join('\n');
 
   const n = { mutation: mutation ? 6 : null };
@@ -860,7 +888,7 @@ export function verification(plan, d) {
         hasUi
           ? ['Journey', 'The primary user path in a real browser', 'Playwright', 'one, maybe two']
           : ['Journey', 'Not applicable: this product has no browser interface, so the acceptance layer carries the end-to-end claim', 'n/a', 'none'],
-        ['Property', 'Invariants across generated inputs', d.contract.selectedPracticeIds.includes('testing.property-based-testing') ? 'fast-check / hypothesis' : 'deferred', d.contract.selectedPracticeIds.includes('testing.property-based-testing') ? 'per core invariant' : 'n/a']
+        ['Property', 'Invariants across generated inputs', d.contract.selectedPracticeIds.includes('testing.property-based-testing') ? (d.contract.stack.propertyLibrary ?? 'property runner') : 'deferred', d.contract.selectedPracticeIds.includes('testing.property-based-testing') ? 'per core invariant' : 'n/a']
       ]
     ),
     '',
@@ -899,19 +927,21 @@ export function verification(plan, d) {
     '',
     code('yaml', ciYaml),
     '',
-    `Run it locally with \`node ${d.packetDir}/spec-check.mjs --repo .\`; add \`--strict\` in release CI so pending requirements cannot ship silently.`,
+    `Run it locally from this packet folder with \`node ./spec-check.mjs\` (pass \`--repo <root>\` from elsewhere); add \`--strict --require-assertions\` in release CI so pending requirements and hollow tests cannot ship silently.`,
     '',
 
     `What it fails on: a missing document, one of the ${automated.length} automated requirements without an anchor, an anchor naming a requirement that does not exist, a requirement with no criteria, and a practice reference that has disappeared.`,
     '',
-    `The gates in section 4 are also a command: \`node ${d.packetDir}/enforcement/gates.mjs\`, generated from this packet, ${plan.gates.length} checks, no dependencies. It is deliberately blunt — it proves a runbook exists and names an owner, not that the owner knows the product — and every check prints what it cannot see. \`enforcement/README.md\` is the table.`,
+    `The gates in section 4 are also a command: \`node ./enforcement/gates.mjs\`, generated from this packet, ${plan.gates.length} checks, no dependencies. It is deliberately blunt — it proves a runbook exists and names an owner, not that the owner knows the product — and every check prints what it cannot see. \`enforcement/README.md\` is the table.`,
     '',
     mutation
       ? [
           h2(`${n.mutation}. Mutation testing`),
           '',
           bullets([
-            'Run mutation testing on the domain layer only. Transport and adapter code produces noise, not signal.',
+            d.contract.stack.mutation
+              ? `Run ${d.contract.stack.mutation.tool} (\`${d.contract.stack.mutation.command}\`, configured in \`${d.contract.stack.mutation.configFile}\`) on the domain layer only. Transport and adapter code produces noise, not signal.`
+              : 'Run mutation testing on the domain layer only. Transport and adapter code produces noise, not signal.',
             'Start from the current score and ratchet: the CI threshold only moves up.',
             'An equivalent mutant is suppressed in configuration with a one-line comment explaining why it is equivalent.',
             'A surviving mutant in an invariant means the test asserts the wrong thing. Fix the test, not the mutant.'
@@ -1178,7 +1208,7 @@ export function singleFileSpec(plan, d) {
     '',
     quote('Tier 0 packet: one file, because a sketch does not deserve a binder. Promote to a full packet when the stage moves past prototype.'),
     '',
-    `**Stack:** ${d.stack.stack.language} · ${d.stack.stack.unitRunner} for tests.${d.stack.recognised ? '' : ` The declared stack (${plan.profile.constraints.stack}) is not one this packet knows: replace this line and record the decision, because the requirements below are language-neutral but the commands are not.`}`,
+    `**Stack:** ${d.stack.stack.language} · ${d.stack.stack.unitRunner} for tests.${d.stack.recognised ? '' : ` The declared stack (${plan.config.stack}) is not one this packet knows: replace this line and record the decision, because the requirements below are language-neutral but the commands are not.`}`,
     '',
     commandsFor(plan.profile)
       ? `**Build and test:** \`${commandsFor(plan.profile).join(' && ')}\``
@@ -1218,7 +1248,7 @@ export function singleFileSpec(plan, d) {
       'Domain rules first, with tests, in code that imports no framework.',
       'One vertical slice: storage, operation, interface, one test per criterion.',
       'Deploy it. Then add the next requirement.',
-      `Run \`node ${d.packetDir}/spec-check.mjs\` before calling anything done.`
+      'Run `node ./spec-check.mjs` (from this packet directory) before calling anything done.'
     ]),
     '',
     h2('7. Practices, and what they oblige here'),
@@ -1245,10 +1275,13 @@ export function singleFileSpec(plan, d) {
 export function agentsMd(plan, d, { lean = false } = {}) {
   const single = plan.packet === 'single-file';
   const resolved = commandsFor(plan.profile);
+  const serviceLines = d.contract.stack.isMultiService
+    ? (resolved ?? ['# record build and test commands per service'])
+    : [resolved ? resolved.join(' && ') : '# the real build and test commands go here — this stack has no built-in profile'];
   const commands = [
-    resolved ? resolved.join(' && ') : '# the real build and test commands go here — this stack has no built-in profile',
-    `node ${d.packetDir}/spec-check.mjs --repo .`,
-    `node ${d.packetDir}/enforcement/gates.mjs --repo .`
+    ...serviceLines,
+    'node ./spec-check.mjs',
+    'node ./enforcement/gates.mjs'
   ];
   const start = d.start;
   const automated = plan.requirements.filter((requirement) => requirement.verify === 'automated');
@@ -1336,7 +1369,7 @@ export function agentsMd(plan, d, { lean = false } = {}) {
     '',
     bullets([
       `The criteria of your ${d.primary} requirement have passing assertions, not just a green run.`,
-      `\`node ${d.packetDir}/spec-check.mjs\` passes against ${automated.length} anchored requirements in this packet.`,
+      `\`node ./spec-check.mjs\` passes against ${automated.length} anchored requirements in this packet.`,
       single ? `The anchor in \`spec.json\` names \`${d.anchors.get(d.start.id) ?? 'tests/'}\`.` : `The traceability row in \`05-verification.md\` names your file, and \`${d.anchors.get(d.start.id) ?? 'tests/'}\` exists.`,
       `You reported what changed on the ${d.primary}, what you are unsure about, and stopped.`
     ]),
@@ -1420,11 +1453,11 @@ export function manifest(plan, d, { lean = false } = {}) {
       },
       anchorConvention: {
         marker: '@req',
-        syntax: d.contract.stack.kind === 'unsupported'
-          ? 'choose the stack comment syntax and test path in an ADR before adding @req markers'
-          : d.contract.stack.kind === 'python' ? '# @req REQ-xxx' : '// @req REQ-xxx',
-        countedIn: ['tests/**'],
-        check: `node ${d.packetDir}/spec-check.mjs --repo .`
+        syntax: d.contract.stack.anchorComment
+          ? `${d.contract.stack.anchorComment} @req REQ-xxx`
+          : 'choose the stack comment syntax and test path in an ADR before adding @req markers',
+        countedIn: d.contract.stack.countedIn ?? ['tests/**'],
+        check: 'node ./spec-check.mjs'
       },
       // Where every obligation came from. A reviewer reading spec.json can tell a
       // catalog baseline from an organisation's overlay without opening either file.

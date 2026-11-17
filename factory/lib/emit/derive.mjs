@@ -6,6 +6,7 @@
  */
 
 import { aggregatesFor, contextsFor, termsFor } from '../domain-hints.mjs';
+import { formatAnchorPath, isAnchorDiscoverable, renderAnchorExample, resolveProfileStacks, stackCommandList } from '../stacks.mjs';
 import { PACKAGE_VERSION } from '../version.mjs';
 import { articleFor, ideaNouns, pluralOf, singularOf, vocabularyFor } from './vocabulary.mjs';
 
@@ -46,34 +47,6 @@ export const quote = (text) => String(text).split('\n').map((line) => `> ${line}
 
 // ---------- stack ----------
 
-const TS_STACK = {
-  language: 'TypeScript (strict)',
-  runtime: 'Node.js 22 LTS',
-  ui: 'React + Vite (only if a UI is in scope)',
-  http: 'Hono or Fastify, typed handlers',
-  db: 'PostgreSQL + Drizzle (forward-only SQL migrations)',
-  validation: 'Zod at every boundary (input, env, external API)',
-  unitRunner: 'Vitest',
-  tests: 'Vitest for unit and integration, Playwright for the primary journey',
-  lint: 'ESLint + Prettier, typecheck in CI',
-  logs: 'pino with a correlation ID field',
-  ci: 'GitHub Actions'
-};
-
-const PY_STACK = {
-  language: 'Python 3.12',
-  runtime: 'CPython',
-  ui: 'HTMX or a thin React island only if a UI is in scope',
-  http: 'FastAPI with Pydantic models at the boundary',
-  db: 'PostgreSQL + SQLAlchemy Core/Alembic (forward-only migrations)',
-  validation: 'Pydantic at every boundary (input, env, external API)',
-  unitRunner: 'pytest',
-  tests: 'pytest for unit and integration, Playwright for the primary journey',
-  lint: 'ruff + mypy, both blocking in CI',
-  logs: 'structlog with a correlation ID field',
-  ci: 'GitHub Actions'
-};
-
 const UNKNOWN_STACK = {
   language: 'Unrecognised stack (decision required)',
   runtime: 'record the supported runtime',
@@ -88,48 +61,58 @@ const UNKNOWN_STACK = {
   ci: 'record the CI provider and commands'
 };
 
-const GO_STACK = {
-  language: 'Go 1.23',
-  runtime: 'the Go toolchain, shipped as a single static binary',
-  ui: 'templ + HTMX only if a UI is in scope',
-  http: 'net/http with chi, typed handlers and explicit error returns',
-  db: 'PostgreSQL + pgx, forward-only migrations with goose',
-  validation: 'explicit decode and validation at the boundary (no reflection magic)',
-  unitRunner: 'go test',
-  tests: 'go test for unit and integration, chromedp only if a UI exists',
-  lint: 'golangci-lint + go vet, both blocking in CI',
-  logs: 'slog with a correlation ID field',
-  ci: 'GitHub Actions'
-};
-
-const PYTHONISH = /python|fastapi|django|flask|pytest|poetry|uv/;
-const GOISH = /(^|[^a-z])go([^a-z]|$)|golang|go 1\./;
+const STACK_LAYERS = ['language', 'runtime', 'ui', 'http', 'db', 'validation', 'tests', 'lint', 'logs', 'ci'];
 
 export function isPythonStack(profile) {
-  return PYTHONISH.test(String(profile.constraints?.stack ?? '').toLowerCase());
+  return resolveProfileStacks(profile).primary?.id === 'python';
 }
 
 export function isGoStack(profile) {
-  return GOISH.test(String(profile.constraints?.stack ?? '').toLowerCase());
+  return resolveProfileStacks(profile).primary?.id === 'go';
 }
 
-const TSISH = /typescript|node|react|vite|javascript|undecided|^$/;
-
 export function recognisesStack(profile) {
-  const declared = String(profile.constraints?.stack ?? 'undecided').toLowerCase();
-  return isGoStack(profile) || isPythonStack(profile) || TSISH.test(declared);
+  return resolveProfileStacks(profile).recognised;
+}
+
+/** Per-service command blocks for multi-service repositories, or one block for single-stack. */
+export function serviceCommandBlocks(profile) {
+  const resolved = resolveProfileStacks(profile);
+  if (resolved.isMultiService) {
+    return resolved.services.map((entry) => ({
+      service: entry.service,
+      declared: entry.declared,
+      stackId: entry.profile?.id ?? 'unsupported',
+      commands: stackCommandList(entry.profile)
+    }));
+  }
+  return [
+    {
+      service: null,
+      declared: resolved.declaredLabel,
+      stackId: resolved.primary?.id ?? 'unsupported',
+      commands: stackCommandList(resolved.primary)
+    }
+  ];
 }
 
 /**
  * The commands an agent must be able to run, derived from the declared stack.
- * A stack this tool has no profile for gets `null`, not a TypeScript default: an
- * invented command is worse than an honest gap, because the agent will run it.
+ * Supports single-stack strings across all 10 built-in stack profiles and
+ * per-service stack maps ({ backend: 'python', frontend: 'typescript' }).
  */
 export function commandsFor(profile) {
-  if (isGoStack(profile)) return ['go build ./...', 'go vet ./...', 'go test ./...'];
-  if (isPythonStack(profile)) return ['ruff check .', 'mypy .', 'pytest'];
-  if (TSISH.test(String(profile.constraints?.stack ?? 'undecided').toLowerCase())) return ['npm run lint', 'npm run typecheck', 'npm test'];
-  return null;
+  const resolved = resolveProfileStacks(profile);
+  if (resolved.isMultiService) {
+    if (!resolved.services.some((entry) => entry.profile)) return null;
+    return resolved.services.map((entry) => {
+      const cmds = stackCommandList(entry.profile);
+      return cmds
+        ? `(cd ${entry.service} && ${cmds.join(' && ')})`
+        : `# ${entry.service}: choose lint/typecheck/test commands for ${entry.declared}`;
+    });
+  }
+  return stackCommandList(resolved.primary);
 }
 
 const UNKNOWN_COMMANDS = 'record the real build and test commands here and in the README before implementation starts';
@@ -196,19 +179,37 @@ export function inline(text, limit = 600) {
 }
 
 export function stackFor(profile) {
-  const declared = String(profile.constraints.stack || 'undecided').toLowerCase();
-  const pythonish = PYTHONISH.test(declared);
-  const goish = !pythonish && GOISH.test(declared);
-  const recognised = declared === 'undecided' || pythonish || goish || /typescript|node|react|vite|javascript/.test(declared);
-  const base = pythonish ? PY_STACK : goish ? GO_STACK : recognised ? TS_STACK : UNKNOWN_STACK;
+  const resolved = resolveProfileStacks(profile);
+  const recognised = resolved.recognised;
+  const primary = resolved.primary;
+  const base = primary
+    ? {
+        language: resolved.isMultiService
+          ? resolved.services.map((entry) => `${entry.service}: ${entry.profile?.language ?? entry.declared}`).join(' · ')
+          : primary.language,
+        runtime: primary.runtime,
+        ui: resolved.frontend ? `${resolved.frontendService}: ${resolved.frontend.ui}` : primary.ui,
+        http: primary.http,
+        db: primary.db,
+        validation: primary.validation,
+        unitRunner: resolved.isMultiService
+          ? resolved.services.map((entry) => `${entry.service}: ${entry.profile?.unitRunner ?? 'choose runner'}`).join(' · ')
+          : primary.unitRunner,
+        tests: resolved.isMultiService
+          ? resolved.services.map((entry) => `${entry.service}: ${entry.profile?.unitRunner ?? 'record runner'}`).join('; ')
+          : primary.tests,
+        lint: resolved.isMultiService
+          ? resolved.services.map((entry) => `${entry.service}: ${entry.profile?.commands?.lint ?? 'record lint'}`).join('; ')
+          : primary.lint,
+        logs: primary.logs,
+        ci: primary.ci
+      }
+    : UNKNOWN_STACK;
   const mustUse = profile.constraints.mustUse ?? [];
 
-  // unitRunner is an implementation detail of the `tests` row, not a layer.
-  const rows = Object.entries(base)
-    .filter(([layer]) => layer !== 'unitRunner')
-    .map(([layer, choice]) => [
+  const rows = STACK_LAYERS.map((layer) => [
     layer,
-    choice,
+    base[layer],
     layer === 'db'
       ? 'Boring and relational beats novel and eventual for a first version.'
       : layer === 'tests'
@@ -218,11 +219,14 @@ export function stackFor(profile) {
 
   return {
     stack: base,
+    profile: primary,
+    services: resolved.services,
+    isMultiService: resolved.isMultiService,
     rows,
     mustUse,
     recognised,
     note: !recognised
-      ? `The declared stack (${declared}) is not one this packet knows. No substitute language, command, or test runner is assumed: record an ADR that names the real language, test runner and migration tool before implementation starts; the requirements and gates are language-neutral and do not change.`
+      ? `The declared stack (${resolved.declaredLabel}) is not one this packet knows. No substitute language, command, or test runner is assumed: record an ADR that names the real language, test runner and migration tool before implementation starts; the requirements and gates are language-neutral and do not change.`
       : mustUse.length > 0
         ? `Declared constraints: ${mustUse.join(', ')}. Keep them; record an ADR explaining how they fit, and do not add a second framework that duplicates their job.`
         : 'This is the default. Override it only through an ADR that names the trade-off; the tests and gates do not depend on any specific framework.'
@@ -261,15 +265,26 @@ export function groupRequirements(requirements) {
  * call a Python test TypeScript merely because it arrived over a different API.
  */
 export function stackContract(profile) {
-  const stack = stackFor(profile);
-  const kind = !stack.recognised ? 'unsupported' : isPythonStack(profile) ? 'python' : isGoStack(profile) ? 'go' : 'typescript';
+  const resolved = resolveProfileStacks(profile);
+  const primary = resolved.primary;
+  const kind = primary ? primary.id : 'unsupported';
+  const countedIn = resolved.isMultiService
+    ? [...new Set(resolved.services.flatMap((entry) => (entry.profile?.countedIn ?? ['tests/**']).map((glob) => `${entry.service}/${glob}`)))]
+    : (primary?.countedIn ?? ['tests/**']);
   return {
     kind,
-    language: stack.stack.language,
-    fenceLanguage: kind === 'python' ? 'python' : kind === 'go' ? 'go' : kind === 'typescript' ? 'ts' : 'text',
-    testExtension: kind === 'python' ? 'py' : kind === 'go' ? 'go' : kind === 'typescript' ? 'ts' : null,
-    anchorComment: kind === 'python' ? '#' : kind === 'unsupported' ? null : '//',
-    recognised: stack.recognised,
+    language: primary ? primary.language : UNKNOWN_STACK.language,
+    fenceLanguage: primary?.fenceLanguage ?? 'text',
+    testExtension: primary?.testExtension ?? null,
+    anchorComment: primary?.anchorComment ?? null,
+    anchorPattern: primary?.anchorPattern ?? null,
+    defaultTestGlobs: primary?.defaultTestGlobs ?? [],
+    countedIn,
+    mutation: primary?.mutation ?? null,
+    propertyLibrary: primary?.propertyLibrary ?? null,
+    isMultiService: resolved.isMultiService,
+    services: serviceCommandBlocks(profile),
+    recognised: resolved.recognised,
     commands: commandsFor(profile)
   };
 }
@@ -289,13 +304,18 @@ export function planContract(plan) {
 }
 
 export function anchorPath(profile, requirement) {
-  const contract = stackContract(profile);
-  const name = slugOf(requirement.key);
-  // This is a deliberately visible placeholder path, not a TypeScript fallback.
-  // The author must replace it after choosing a runner in the required ADR.
-  if (!contract.testExtension) return `tests/choose-runner/${name}.test`;
-  return `tests/${requirement.render}/${name}.test.${contract.testExtension}`;
+  const resolved = resolveProfileStacks(profile);
+  const name = slugOf(requirement.key ?? requirement.id ?? requirement.title ?? 'requirement');
+  if (resolved.isMultiService) {
+    const useFrontend = requirement.render === 'frontend' && resolved.frontend;
+    const targetProfile = useFrontend ? resolved.frontend : resolved.primary;
+    const targetService = useFrontend ? resolved.frontendService : resolved.primaryService;
+    return formatAnchorPath(targetProfile, name, { servicePrefix: targetService });
+  }
+  return formatAnchorPath(resolved.primary, name);
 }
+
+export { isAnchorDiscoverable, renderAnchorExample };
 
 // ---------- non-goals and questions ----------
 
@@ -470,24 +490,24 @@ export function copyBrief(plan, packetDir = 'specs') {
   // instruction to read them is an instruction to read a missing file.
   const single = plan.packet === 'single-file';
   const readFirst = single
-    ? `1. Read ${packetDir}/AGENTS.md first, then spec.md (this file). The whole specification is those two.`
-    : `1. Read ${packetDir}/AGENTS.md first, then ${packetDir}/07-agent-handoff.md. Follow the loop there.`;
+    ? '1. Read ./AGENTS.md first, then ./spec.md (this file). The whole specification is those two.'
+    : '1. Read ./AGENTS.md first, then ./07-agent-handoff.md (paths relative to this packet directory). Follow the loop there.';
   const adrRule = single
     ? '4. Do not add a dependency without writing down what it replaces and what breaks without it.'
-    : `4. Do not add a dependency without an ADR entry in ${packetDir}/03-architecture.md.`;
+    : '4. Do not add a dependency without an ADR entry in ./03-architecture.md.';
   const outOfScope = single
     ? 'Out of scope: anything not listed above or in the non-goals above.'
-    : `Out of scope: anything not listed above, plus the non-goals in ${packetDir}/01-product-brief.md.`;
+    : 'Out of scope: anything not listed above, plus the non-goals in ./01-product-brief.md.';
   const gates = single
     ? `Rigor tier: ${rigor.tier} (${rigor.label}) — the gates in section 5 are the definition of done.`
-    : `Rigor tier: ${rigor.tier} (${rigor.label}) — gates in ${packetDir}/05-verification.md are the definition of done.`;
+    : `Rigor tier: ${rigor.tier} (${rigor.label}) — gates in ./05-verification.md are the definition of done.`;
 
   return [
     `Build "${titleize(profile.name)}": ${inline(profile.idea, 400)}`,
     '',
     `Non-negotiable rules for this build:`,
     readFirst,
-    `2. Implement only what ${packetDir}/spec.json lists as requirements. No extra endpoints, screens or abstractions.`,
+    `2. Implement only what ./spec.json lists as requirements. No extra endpoints, screens or abstractions.`,
     `3. Write a failing test before the behaviour, and add an @req anchor to every automated requirement.`,
     adrRule,
     `5. Do not delete or weaken a test to make something pass. Stop and report instead.`,
@@ -504,7 +524,8 @@ export function copyBrief(plan, packetDir = 'specs') {
 
 // ---------- obligations the catalog cannot see ----------
 
-const NORMATIVE = /\b(must|must not|cannot|can never|never|always|only|at most|at least|no more than|has to|have to|is required to|are required to)\b/i;
+const NORMATIVE =
+  /\b(must|must not|shall|shall not|may not|may only|cannot|can ?not|can never|will never|never|always|only|at most|at least|no more than|no later than|within\s+\d+|after\s+\d+|older\s+than\s+\d+|exceeds?|has to|have to|is required to|are required to|prohibited|forbidden|disallowed|immutable|append-only|idempotent|read-only|single-use|forward-only)\b/i;
 const OBLIGATION_STOP = new Set([
   'must', 'never', 'always', 'only', 'that', 'this', 'with', 'from', 'into', 'they', 'their', 'them',
   'then', 'than', 'when', 'what', 'which', 'while', 'have', 'has', 'been', 'being', 'each', 'every',
@@ -632,14 +653,22 @@ export function obligationCoverage(profile, requirements, domainText = '') {
   // as such rather than being blended into every requirement.
   const domainNouns = nounsOf(domainText);
 
-  const sentences = String(profile.idea ?? '')
-    .split(/(?<=[.!?;])\s+/)
-    .map((sentence) => sentence.trim())
-    .filter((sentence) => sentence.length >= 25 && NORMATIVE.test(sentence));
+  const sentences = splitRuleClauses(profile.idea)
+    .filter((sentence) => sentence.length >= 20 && NORMATIVE.test(sentence));
+
+  const areaForRule = (text) => {
+    if (/\b(?:auth|permission|role|tenant|clinic|school|encrypt|secret|token|consent|approv|access|deny|isolat|redact|audit)\b/i.test(text)) return 'security';
+    if (/\b(?:charge|payment|payout|refund|ledger|settlement|invoice|escrow|balance|fee|currency)\b/i.test(text)) return 'payments';
+    if (/\b(?:retain|retention|delet|eras|purge|backup|migrat|immutable|append-only|period|schema|record)\b/i.test(text)) return 'data';
+    if (/\b(?:model|prompt|agent|tool|allowlist|kill[- ]switch|token budget|inference)\b/i.test(text)) return 'ai';
+    if (/\b(?:retry|retries|timeout|rate[- ]limit|webhook|idempoten|queue|dead[- ]letter|incident|within \d+)\b/i.test(text)) return 'reliability';
+    return 'core';
+  };
 
   return sentences.map((sentence) => {
     const own = nounsOf(sentence);
     const verbs = verbKinds(sentence);
+    const ruleArea = areaForRule(sentence);
     let best = null;
     let closestAudit = null;
     for (const requirement of requirementIndex) {
@@ -652,11 +681,17 @@ export function obligationCoverage(profile, requirements, domainText = '') {
         requirement.verbs.has('audit') &&
         (verbs.has('read') !== requirement.verbs.has('read') || verbs.has('change') !== requirement.verbs.has('change'));
       const nounScore = own.size === 0 ? 0 : shared.length / own.size;
-      // A rule with no verb at all ("A clinic must never see another clinic's
-      // patients") is a prohibition: any requirement that speaks about the same
-      // object, in the same tenant sense, covers it. Score the nouns fully then.
       const verbScore = verbs.size === 0 ? (shared.length > 0 ? 1 : 0.5) : verbMatch.length / verbs.size;
-      let score = nounScore * 0.6 + verbScore * 0.4;
+      const areaBonus =
+        shared.length > 0 &&
+        ((ruleArea === 'payments' && requirement.key.startsWith('payments.')) ||
+          (ruleArea === 'security' && /^(?:auth|security|privacy|education|finance)\./.test(requirement.key)) ||
+          (ruleArea === 'ai' && /^(?:ai|agent)\./.test(requirement.key)) ||
+          (ruleArea === 'data' && /^(?:data|finance|privacy)\./.test(requirement.key)) ||
+          (ruleArea === 'reliability' && /^(?:integration|ops|delivery|pipeline|resilience)\./.test(requirement.key)))
+          ? 0.08
+          : 0;
+      let score = Math.min(1, nounScore * 0.6 + verbScore * 0.4 + areaBonus);
       if (auditMismatch) score = Math.min(score, 0.45);
       if (!best || score > best.score) best = { requirement, score, shared, verbMatch, auditMismatch };
       if (auditMismatch && (!closestAudit || shared.length > closestAudit.shared.length)) {
@@ -671,7 +706,8 @@ export function obligationCoverage(profile, requirements, domainText = '') {
     // Guard against self-coverage: callers have passed text derived from the idea
     // back in as "domain invariants", which made every rule look covered by the idea
     // itself. A sentence that appears verbatim in the domain text proves nothing.
-    const isSelfQuote = domainText && String(domainText).includes(sentence);
+    const bareClause = sentence.replace(/[.!?]+$/, '').trim().toLowerCase();
+    const isSelfQuote = domainText && bareClause.length > 0 && String(domainText).toLowerCase().includes(bareClause);
     if (!isSelfQuote && domainShared.length >= Math.max(2, Math.ceil(own.size * 0.5)) && verbs.size === 0) {
       return { sentence, state: 'covered', by: 'domain model', why: 'stated as a domain invariant' };
     }
@@ -706,13 +742,22 @@ export function obligationCoverage(profile, requirements, domainText = '') {
  * Apply the author's explicit pinning before the heuristic is asked anything.
  * A pinned rule is covered by the requirement it names, and says so.
  */
-export function applyPinnedRules(profile, coverage) {
-  const pins = Array.isArray(profile?.rules) ? profile.rules : [];
+export function applyPinnedRules(profile, coverage, extraPins = []) {
+  const rawRules = Array.isArray(profile?.rules) ? profile.rules : [];
+  const profilePins = rawRules
+    .filter((rule) => rule && typeof rule === 'object' && rule.covers && rule.text)
+    .map((rule) => ({ text: String(rule.text).trim(), covers: rule.covers, why: 'pinned by the author in profile.rules' }));
+  const pins = [...extraPins, ...profilePins];
   if (pins.length === 0) return coverage;
+  const norm = (s) => String(s ?? '').trim().toLowerCase().replace(/[.!?;]+$/, '');
   return coverage.map((entry) => {
-    const pin = pins.find((rule) => String(rule.text).trim() === entry.sentence || entry.sentence.includes(String(rule.text).trim()));
+    const entryNorm = norm(entry.sentence);
+    const pin = pins.find((rule) => {
+      const pinNorm = norm(rule.text);
+      return pinNorm.length >= 10 && (pinNorm === entryNorm || entryNorm.includes(pinNorm) || pinNorm.includes(entryNorm));
+    });
     if (!pin) return entry;
-    return { ...entry, state: 'covered', by: pin.covers, why: 'pinned by the author in profile.rules' };
+    return { ...entry, state: 'covered', by: pin.covers, why: pin.why ?? 'pinned by the author in profile.rules' };
   });
 }
 
@@ -882,15 +927,43 @@ export function ownRulesFor(profile) {
  * group records every original, so nothing is lost: the document prints the shape once
  * and names the rest.
  */
-export function ownRuleGroups(profile) {
-  const idea = String(profile.idea ?? '');
-  const sentences = idea
+/**
+ * Split idea text into individual candidate rule clauses (roadmap 1.5, F-04).
+ *
+ * Beyond sentence punctuation (`.`, `!`, `?`, `;`) and newlines, splits compound
+ * clauses joined by `, and` / `, while` / `, whereas` / `, but` when BOTH sides
+ * carry an independent subject and rule signal (e.g. "Refunds over $500 must be
+ * approved by two managers, and audit entries can never be deleted").
+ */
+const COMPOUND_CONJUNCTION = /,\s+(?:and|while|whereas|but)\s+(?=(?:every|each|all|no|any|a|an|the|[a-z][a-z0-9-]{2,}s)\s+[a-z0-9\s,'$-]{0,45}\b(?:must|shall|cannot|can ?not|may not|may only|never|always|is|are|requires?|rejects?|refuses?|expires?|blocks?)\b)/i;
+
+export function splitRuleClauses(idea) {
+  const baseSentences = String(idea ?? '')
     .split(/(?<=[.!?;])\s+|\n+/)
-    .map((sentence) => sentence.trim().replace(/^[-*\d.\s]+/, ''))
-    .filter((sentence) => sentence.length > 20 && isRuleSentence(sentence));
+    .map((sentence) => sentence.trim().replace(/^[-*•\d.)\s]+/, '').replace(/;$/, '').trim())
+    .filter(Boolean);
+
+  const clauses = [];
+  for (const sentence of baseSentences) {
+    const parts = sentence.split(COMPOUND_CONJUNCTION).map((part) => part.trim()).filter(Boolean);
+    if (parts.length > 1 && parts.every((part) => part.length >= 18 && isRuleSentence(part))) {
+      for (const part of parts) {
+        const formatted = part.charAt(0).toUpperCase() + part.slice(1);
+        clauses.push(/[.!?]$/.test(formatted) ? formatted : `${formatted}.`);
+      }
+    } else {
+      clauses.push(sentence);
+    }
+  }
+  return clauses;
+}
+
+export function ownRuleGroups(profile) {
+  const clauses = splitRuleClauses(profile?.idea)
+    .filter((sentence) => sentence.length >= 18 && isRuleSentence(sentence));
 
   const groups = new Map();
-  for (const rule of new Set(sentences)) {
+  for (const rule of new Set(clauses)) {
     const shape = rule.replace(/\d+/g, '#');
     if (!groups.has(shape)) groups.set(shape, []);
     groups.get(shape).push(rule);
@@ -898,27 +971,59 @@ export function ownRuleGroups(profile) {
   return [...groups.values()].map((rules) => ({ shape: rules[0], rules }));
 }
 
-/**
- * A sentence that states behaviour, not background.
- *
- * The modal test alone missed rules written in the present tense — "Refunds are
- * issued as a compensating ledger entry" is an obligation the product must honour,
- * and dropping it meant the packet silently listed two of an idea's five rules.
- * A behavioural verb is the second signal; the first sentence of an idea is
- * usually the framing ("A marketplace where patients book…") and is not a rule,
- * which is why position is excluded rather than relied on.
- */
-const BEHAVIOURAL_VERB =
-  /\b(?:issues?|issued|records?|recorded|redacts?|encrypts?|validates?|rejects?|acknowledges?|retries|quarantines?|deduplicates?|persists?|enforces?|stores?|stored|sends?|notifies?|charges?|refunds?|calculates?|derives?|keeps?|requires?|allows?|blocks?|escalates?)\b/i;
+const STRONG_RULE_CUE =
+  /\b(?:must|must not|shall|shall not|may not|may only|cannot|can ?not|can never|will never|never|always|at most|at least|no more than|no later than|no fewer than|within\s+\d+\s+(?:ms|milliseconds?|seconds?|minutes?|hours?|days?|weeks?|months?|years?)|after\s+\d+\s+(?:failed|attempts?|minutes?|hours?|days?|years?)|older\s+than\s+\d+|has to|have to|is required to|are required to|prohibited|forbidden|disallowed|immutable|append-only|idempotent|read-only|single-use|forward-only|two-person|dual\s+approval|segregation\s+of\s+duties)\b/i;
 
-// Passive voice is the other way an obligation is written: "Settlement is
-// reconciled nightly", "Access is denied by default". A verb list cannot enumerate
-// every verb, but the `is/are <verb>ed` shape is regular enough to recognise.
-const PASSIVE_OBLIGATION = /\b(?:is|are|was|were)\s+(?:not\s+)?[a-z]+ed\b/i;
+const BEHAVIOURAL_VERB =
+  /\b(?:issues?|issued|records?|recorded|redacts?|encrypts?|validates?|rejects?|refuses?|denies?|acknowledges?|retries|quarantines?|deduplicates?|persists?|enforces?|notifies?|charges?|refunds?|calculates?|derives?|requires?|blocks?|escalates?|expires?|locks?|revokes?|verifies?|reconciles?|halts?|pauses?|archives?|purges?|erases?)\b/i;
+
+const PASSIVE_OBLIGATION = /\b(?:is|are)\s+(?:not\s+|never\s+|always\s+|automatically\s+)?[a-z]{3,}ed\b/i;
+
+// Framing/marketing/stack sentences ("A web app for small clinics that replaces
+// spreadsheets", "Built with Rust and PostgreSQL") are context, not invariants.
+const FRAMING_SENTENCE =
+  /^(?:(?:a|an|the)\s+(?:[a-z0-9-]+\s+){0,4}(?:app|application|platform|service|system|tool|cli|sdk|library|portal|website|marketplace|dashboard|assistant|agent|bot|pipeline|template|workspace|directory)\s+(?:for|where|that\s+(?:helps|lets|allows|enables|makes|replaces|connects|gives|brings)|to\s+(?:help|let|manage|track|organise|organize|simplify))|(?:built|written|implemented|deployed|hosted|designed|made|aimed|targeted)\s+(?:with|in|on|for|using)|(?:target\s+users?|today\s+teams?|teams?\s+currently|replaces?\s+spreadsheets?|used\s+by\s+(?:small|large|internal|local)))\b/i;
+
+const PITCH_ONLY =
+  /^(?:it\s+should\s+feel|users?\s+(?:love|enjoy|want|prefer|can\s+browse|can\s+view\s+a\s+dashboard)|designed\s+to\s+be\s+(?:fast|simple|clean|modern|easy)|keeps?\s+everyone\s+on\s+the\s+same\s+page)\b/i;
 
 export function isRuleSentence(sentence) {
-  if (/\b(must|never|only|cannot|can ?not|always|at most|at least|no more than)\b/i.test(sentence)) return true;
-  return BEHAVIOURAL_VERB.test(sentence) || PASSIVE_OBLIGATION.test(sentence);
+  const clean = String(sentence ?? '').trim();
+  if (clean.length < 18) return false;
+  if (/^TODO\b/i.test(clean)) return false;
+  if (PITCH_ONLY.test(clean)) return false;
+  if (STRONG_RULE_CUE.test(clean)) return true;
+  if (/\bonly\s+(?:when|if|after|with|by|to|for|within|authorised|authorized|verified|approved)\b/i.test(clean)) return true;
+  if (/^(?:only|every|each|no)\s+[a-z]/i.test(clean) && (BEHAVIOURAL_VERB.test(clean) || PASSIVE_OBLIGATION.test(clean))) return true;
+  if (/^(?:when|if|once|whenever|unless|before)\s+/i.test(clean) && (BEHAVIOURAL_VERB.test(clean) || PASSIVE_OBLIGATION.test(clean))) return true;
+  if (FRAMING_SENTENCE.test(clean)) return false;
+  return BEHAVIOURAL_VERB.test(clean) || PASSIVE_OBLIGATION.test(clean);
+}
+
+/**
+ * Derive a concrete failing-test prompt for a single extracted domain rule so
+ * 02-domain-model.md tells the author what to assert rather than repeating one
+ * generic sentence on every rule (roadmap 1.5).
+ */
+export function ruleTestStub(rule) {
+  const clean = String(rule ?? '').trim().replace(/[.!?]+$/, '');
+  const threshold = clean.match(/\b(within\s+\d+\s+\w+|at\s+(?:most|least)\s+[\w$%.-]+(?:\s+\w+)?|no\s+(?:more|later|fewer)\s+than\s+[\w$%.-]+(?:\s+\w+)?|over\s+\$?\d[\d,.]*|after\s+\d+\s+\w+|older\s+than\s+\d+\s+\w+)\b/i);
+  if (threshold) {
+    return `boundary test around "${threshold[1]}" asserting exact pass at the limit and rejection past it`;
+  }
+  if (/\b(?:must not|shall not|may not|cannot|can ?not|never|prohibited|forbidden|disallowed)\b/i.test(clean)) {
+    return 'negative test attempting the forbidden action and asserting a typed denial with zero state change';
+  }
+  if (/\b(?:immutable|append-only|forward-only)\b/i.test(clean)) {
+    return 'immutability test attempting an update and a delete on a committed entry and asserting both fail';
+  }
+  if (/\b(?:idempotent|duplicate|deduplicat|twice|replay)\b/i.test(clean)) {
+    return 'replay test submitting the identical operation twice and asserting one effect and a matching response';
+  }
+  if (/\b(?:approv|confirm|consent|two-person)\b/i.test(clean)) {
+    return 'authorization test proving unapproved or self-approved execution is blocked before side effects run';
+  }
+  return 'unit test on the domain invariant that rejects a violating input before any adapter write';
 }
 
 export function surfacesFor(plan) {
@@ -1012,8 +1117,14 @@ export function gateReading(gate, plan, words) {
     'G1-AC-TRACE': `${automated} automated requirements, ${manual} manual — anchor in the test file, not the doc`,
     'G2-CONTRACTS': `${plan.requirements.filter((requirement) => ['api', 'data'].includes(requirement.render)).length} interface requirements, shapes fixed in 04-contracts.md`,
     'G2-MIGRATIONS': `forward-only ${db} migration plus the restore step you actually ran`,
+    'G2-AUTONOMY': `typed tool allowlist, human-approval pause, and budget kill-switch tests for the ${primary} agent`,
     'G3-MUTATION': `score recorded against the ${primary} domain layer, ratcheted in CI`,
-    'G3-PROPERTY': `the ${primary} invariants, generated inputs rather than hand-picked examples`
+    'G3-PROPERTY': `the ${primary} invariants, generated inputs rather than hand-picked examples`,
+    'G3-PARENTAL-CONSENT': `verified parental-consent and under-13 deletion tests against the ${primary} record`,
+    'G3-FERPA-DISCLOSURE': `educational role-gate and disclosure-ledger tests for each ${primary} query`,
+    'G3-SOX-CONTROLS': `immutable double-entry ledger, segregation-of-duties, and reconciliation tests`,
+    'G3-DORA-RESILIENCE': `ICT incident-reporting, operational resilience, and third-party failover tests`,
+    'G3-AI-OVERSIGHT': `human-override, risk-management logging, and decision-transparency tests`
   }[gate.id];
 }
 
@@ -1158,10 +1269,12 @@ export function derive(plan, { packetDir = 'specs' } = {}) {
     cards: practiceCards(plan, phrases),
     phrases,
     start: firstOpenRequirement(plan),
-    unmapped: unmappedObligations(plan.profile, plan.requirements, domainText),
+    unmapped: applyPinnedRules(plan.profile, obligationCoverage(plan.profile, plan.requirements, domainText), plan.customRules ?? [])
+      .filter((entry) => entry.state === 'unmapped')
+      .map((entry) => entry.sentence),
     // Three-state mapping with the requirement that covers each rule, so the author
     // can disagree with the detector instead of guessing why it stayed quiet.
-    coverage: applyPinnedRules(plan.profile, obligationCoverage(plan.profile, plan.requirements, domainText)),
+    coverage: applyPinnedRules(plan.profile, obligationCoverage(plan.profile, plan.requirements, domainText), plan.customRules ?? []),
     anchors: new Map(plan.requirements.map((requirement) => [requirement.id, anchorPath(plan.profile, requirement)]))
   };
 }

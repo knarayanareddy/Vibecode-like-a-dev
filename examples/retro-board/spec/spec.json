@@ -3,7 +3,7 @@
   "schemaVersion": 1,
   "generatedWith": {
     "tool": "vibecode-like-a-dev",
-    "version": "0.19.0"
+    "version": "0.20.0"
   },
   "project": {
     "name": "retro-board",
@@ -67,7 +67,7 @@
     "countedIn": [
       "tests/**"
     ],
-    "check": "node examples/retro-board/spec/spec-check.mjs --repo ."
+    "check": "node ./spec-check.mjs"
   },
   "overlays": [],
   "primitives": [
@@ -374,6 +374,12 @@
       "detail": "requires tier 2, project is tier 1"
     },
     {
+      "id": "agent.autonomy-limits",
+      "title": "Agent autonomy limits and action boundaries",
+      "reason": "predicate",
+      "detail": "not applicable: (kind eq \"agent\" OR kind eq \"automation\" AND traits includes \"ai\" OR traits includes \"ai\" AND risks.destructiveWrites eq true)"
+    },
+    {
       "id": "agent.spec-drift-guard",
       "title": "Spec drift guard",
       "reason": "tier",
@@ -420,7 +426,7 @@
       ],
       "verify": "automated",
       "traits": [],
-      "anchor": "tests/core/core-primary-journey.test.ts",
+      "anchor": "tests/core-primary-journey.test.ts",
       "status": "todo"
     },
     {
@@ -464,7 +470,7 @@
       "traits": [
         "persistence"
       ],
-      "anchor": "tests/data/data-persistence.test.ts",
+      "anchor": "tests/data-persistence.test.ts",
       "status": "todo"
     },
     {
@@ -493,7 +499,7 @@
       "traits": [
         "auth"
       ],
-      "anchor": "tests/security/auth-identity.test.ts",
+      "anchor": "tests/auth-identity.test.ts",
       "status": "todo"
     },
     {
@@ -519,7 +525,7 @@
         "admin",
         "auth"
       ],
-      "anchor": "tests/security/auth-authorization.test.ts",
+      "anchor": "tests/auth-authorization.test.ts",
       "status": "todo"
     },
     {
@@ -588,7 +594,7 @@
       ],
       "verify": "automated",
       "traits": [],
-      "anchor": "tests/frontend/ui-design-tokens.test.ts",
+      "anchor": "tests/ui-design-tokens.test.ts",
       "status": "todo"
     },
     {
@@ -607,7 +613,7 @@
       ],
       "verify": "automated",
       "traits": [],
-      "anchor": "tests/frontend/ux-error-taxonomy.test.ts",
+      "anchor": "tests/ux-error-taxonomy.test.ts",
       "status": "todo"
     },
     {
@@ -630,7 +636,7 @@
       ],
       "verify": "automated",
       "traits": [],
-      "anchor": "tests/api/api-contract.test.ts",
+      "anchor": "tests/api-contract.test.ts",
       "status": "todo"
     },
     {
@@ -649,7 +655,7 @@
       ],
       "verify": "automated",
       "traits": [],
-      "anchor": "tests/api/api-error-envelope.test.ts",
+      "anchor": "tests/api-error-envelope.test.ts",
       "status": "todo"
     },
     {
@@ -668,7 +674,7 @@
       ],
       "verify": "automated",
       "traits": [],
-      "anchor": "tests/security/ops-rate-limits.test.ts",
+      "anchor": "tests/ops-rate-limits.test.ts",
       "status": "todo"
     },
     {
@@ -691,7 +697,7 @@
       ],
       "verify": "automated",
       "traits": [],
-      "anchor": "tests/core/core-domain-invariants.test.ts",
+      "anchor": "tests/core-domain-invariants.test.ts",
       "status": "todo"
     },
     {
@@ -716,7 +722,7 @@
       "traits": [
         "realtime"
       ],
-      "anchor": "tests/reliability/realtime-channel-authorization.test.ts",
+      "anchor": "tests/realtime-channel-authorization.test.ts",
       "status": "todo"
     },
     {
@@ -741,7 +747,7 @@
       "traits": [
         "realtime"
       ],
-      "anchor": "tests/reliability/realtime-backpressure.test.ts",
+      "anchor": "tests/realtime-backpressure.test.ts",
       "status": "todo"
     }
   ],
@@ -869,10 +875,11 @@
   "stats": {
     "primitives": 22,
     "requirements": 16,
+    "customRequirements": 0,
     "acceptanceCriteria": 28,
     "automated": 12,
     "gates": 8,
     "deferred": 2,
-    "skipped": 10
+    "skipped": 11
   }
 }

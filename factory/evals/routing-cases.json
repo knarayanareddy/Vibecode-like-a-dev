@@ -457,6 +457,18 @@
       "kind": "colloquial",
       "prompt": "Add a new nullable column to the high-volume telemetry table without locking writes during a live grid dispatch event.",
       "expected": ["data.schema-and-migrations"]
+    },
+    {
+      "id": "rt-75-agent-autonomy-killswitch",
+      "kind": "direct",
+      "prompt": "Bound an autonomous agent with a closed tool allowlist, human confirmation before destructive actions, a step budget and a live kill switch.",
+      "expected": ["agent.autonomy-limits"]
+    },
+    {
+      "id": "rt-76-colloq-runaway-agent-action-log",
+      "kind": "colloquial",
+      "prompt": "Stop a runaway agent loop from executing unapproved shell tools after prompt injection and record every tool call in an append-only action log.",
+      "expected": ["agent.autonomy-limits"]
     }
   ]
 }

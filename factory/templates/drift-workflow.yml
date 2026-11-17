@@ -1,0 +1,32 @@
+name: vld-spec-drift
+
+# Continuous specification-to-code drift and gate enforcement (ADR 0012).
+# Minimal read-only permissions; pinned third-party action commit SHAs.
+permissions:
+  contents: read
+
+on:
+  pull_request:
+  schedule:
+    - cron: '{{CRON_SCHEDULE}}'
+  workflow_dispatch:
+
+jobs:
+  drift:
+    name: Continuous spec drift and gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '{{NODE_VERSION}}'
+
+      - name: Drift guard (strict assertions)
+        run: node {{PACKET_DIR}}/spec-check.mjs --repo . --strict --require-assertions
+
+      - name: Quality and regulatory gates
+        run: node {{PACKET_DIR}}/enforcement/gates.mjs --repo . --strict

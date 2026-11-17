@@ -1,0 +1,151 @@
+{
+  "schemaVersion": 1,
+  "$comment": "Copy this file to the repository root as semantic-oracles.json. For every automated requirement, name an independently reviewed black-box/property test under tests/semantic-oracles/. Do not point at the ordinary implementation unit test.",
+  "oracles": [
+    {
+      "id": "REQ-002",
+      "test": "tests/semantic-oracles/req-002.test.mjs",
+      "purpose": "Given a new user and empty storage, when they complete the primary journey using only the documented interface, then the outcome named in the brief exists and is readable on a second visit."
+    },
+    {
+      "id": "REQ-004",
+      "test": "tests/semantic-oracles/req-004.test.mjs",
+      "purpose": "Given a database at the previous schema version with representative rows, when the migration runs, then all rows remain readable and no column required by the new code is null."
+    },
+    {
+      "id": "REQ-005",
+      "test": "tests/semantic-oracles/req-005.test.mjs",
+      "purpose": "Given a subject with records in every table, when deletion runs, then a query for that subject across all tables returns zero rows."
+    },
+    {
+      "id": "REQ-006",
+      "test": "tests/semantic-oracles/req-006.test.mjs",
+      "purpose": "Given valid credentials, when the user signs in, then a session is issued and the identifier is not placed in a URL."
+    },
+    {
+      "id": "REQ-007",
+      "test": "tests/semantic-oracles/req-007.test.mjs",
+      "purpose": "Given a user without the required role, when the operation is attempted directly against the API, then it is refused even if the UI hides the control."
+    },
+    {
+      "id": "REQ-008",
+      "test": "tests/semantic-oracles/req-008.test.mjs",
+      "purpose": "Given two tenants with records, when tenant A lists records, then no tenant B identifier appears."
+    },
+    {
+      "id": "REQ-009",
+      "test": "tests/semantic-oracles/req-009.test.mjs",
+      "purpose": "Given a model returning text outside the expected schema, when the response is processed, then it is rejected, logged and not shown to the user verbatim."
+    },
+    {
+      "id": "REQ-010",
+      "test": "tests/semantic-oracles/req-010.test.mjs",
+      "purpose": "Given a model proposing an unregistered tool or invalid parameters, when the dispatcher evaluates it, then execution is refused and the denial is recorded in the action log."
+    },
+    {
+      "id": "REQ-011",
+      "test": "tests/semantic-oracles/req-011.test.mjs",
+      "purpose": "Given a tool classified as destructive or external, when invoked without a valid human approval token, then the dispatcher halts and performs zero side effects."
+    },
+    {
+      "id": "REQ-012",
+      "test": "tests/semantic-oracles/req-012.test.mjs",
+      "purpose": "Given an agent loop exceeding its maximum step count or cost ceiling, when the next step is requested, then execution stops cleanly and records the exceeded limit."
+    },
+    {
+      "id": "REQ-013",
+      "test": "tests/semantic-oracles/req-013.test.mjs",
+      "purpose": "Given a failing dependency, when a request is traced, then its log lines share one correlation ID and include the dependency name and outcome."
+    },
+    {
+      "id": "REQ-014",
+      "test": "tests/semantic-oracles/req-014.test.mjs",
+      "purpose": "Given N+1 requests within the window, when the last is made, then it is refused with 429 and no state change occurred."
+    },
+    {
+      "id": "REQ-015",
+      "test": "tests/semantic-oracles/req-015.test.mjs",
+      "purpose": "Given a privileged action, when it completes or fails, then exactly one audit record exists and the application user has no update or delete grant on that table."
+    },
+    {
+      "id": "REQ-016",
+      "test": "tests/semantic-oracles/req-016.test.mjs",
+      "purpose": "Given a requirement anchored to a deleted test, when CI runs, then it fails and names the requirement."
+    },
+    {
+      "id": "REQ-017",
+      "test": "tests/semantic-oracles/req-017.test.mjs",
+      "purpose": "Given the invariants listed in the domain model, when the suite runs, then each invariant is covered by a test that fails if its rule is inverted."
+    },
+    {
+      "id": "REQ-018",
+      "test": "tests/semantic-oracles/req-018.test.mjs",
+      "purpose": "Given a stored PHI record, when the underlying storage is read directly, then no field of it is readable plaintext."
+    },
+    {
+      "id": "REQ-019",
+      "test": "tests/semantic-oracles/req-019.test.mjs",
+      "purpose": "Given two roles with different declared field sets, when each reads the same record, then each response contains only its own fields."
+    },
+    {
+      "id": "REQ-020",
+      "test": "tests/semantic-oracles/req-020.test.mjs",
+      "purpose": "Given a normal user, when they attempt a break-glass read, then they must supply a reason and the grant is time-boxed."
+    },
+    {
+      "id": "REQ-021",
+      "test": "tests/semantic-oracles/req-021.test.mjs",
+      "purpose": "Given a PHI change, when the audit sink is unavailable, then the change is refused and the failure is reported."
+    },
+    {
+      "id": "REQ-022",
+      "test": "tests/semantic-oracles/req-022.test.mjs",
+      "purpose": "Given a configured destination with no recorded agreement, when PHI would be sent to it, then the send is refused and logged."
+    },
+    {
+      "id": "REQ-023",
+      "test": "tests/semantic-oracles/req-023.test.mjs",
+      "purpose": "Given the runbook, when a reviewer reads it, then it names an owner, the notification deadlines and where the decision log lives."
+    },
+    {
+      "id": "REQ-024",
+      "test": "tests/semantic-oracles/req-024.test.mjs",
+      "purpose": "Given a field with no recorded basis, when it is written, then the write is refused with a stable code."
+    },
+    {
+      "id": "REQ-025",
+      "test": "tests/semantic-oracles/req-025.test.mjs",
+      "purpose": "Given a subject with records in every store, when they request an export, then each store's records appear in the file."
+    },
+    {
+      "id": "REQ-026",
+      "test": "tests/semantic-oracles/req-026.test.mjs",
+      "purpose": "Given a subject with a legal hold, when erasure is requested, then it is refused with the hold named."
+    },
+    {
+      "id": "REQ-027",
+      "test": "tests/semantic-oracles/req-027.test.mjs",
+      "purpose": "Given a new purpose in code, when the register is not updated, then the check fails and names the purpose."
+    },
+    {
+      "id": "REQ-028",
+      "test": "tests/semantic-oracles/req-028.test.mjs",
+      "purpose": "Given any AI-generated response or recommendation, when returned via API or UI, then it carries an explicit machine-generated disclosure and model version field."
+    },
+    {
+      "id": "REQ-029",
+      "test": "tests/semantic-oracles/req-029.test.mjs",
+      "purpose": "Given a consequential AI recommendation, when produced, then no final state transition executes until a human reviewer records an explicit approve or override decision."
+    },
+    {
+      "id": "REQ-030",
+      "test": "tests/semantic-oracles/req-030.test.mjs",
+      "purpose": "Given a consequential AI run, when completed or overridden, then an immutable log entry records model version, input digest, output classification and reviewer outcome."
+    },
+    {
+      "id": "REQ-C01",
+      "test": "tests/semantic-oracles/req-c01.test.mjs",
+      "purpose": "Given an operation governed by the rule that when the triage model classifies an intake as urgent, the service shall require explicit clinician confirmation before releasing the disposition, when executed on both compliant and violating inputs, then compliant inputs succeed and violating inputs are rejected."
+    }
+  ]
+}

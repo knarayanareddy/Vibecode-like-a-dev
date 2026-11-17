@@ -60,6 +60,17 @@ export const TERM_HINTS = {
     { term: 'Prompt contract', definition: 'The declared input schema and output schema for a model call.' },
     { term: 'Evaluation set', definition: 'A versioned set of inputs with expected properties used to judge a prompt change.' }
   ],
+  'agent.action-boundaries': [
+    { term: 'Tool allowlist', definition: 'The closed set of registered tools and parameter schemas a run is permitted to invoke.' },
+    { term: 'Action log', definition: 'An append-only record of every proposed, approved, denied and executed tool call.' }
+  ],
+  'agent.approval-gate': [
+    { term: 'Approval token', definition: 'A single-use human confirmation bound to the digest of a destructive or external action payload.' }
+  ],
+  'agent.budget-and-killswitch': [
+    { term: 'Run budget', definition: 'Hard ceilings on steps, tokens, elapsed time and spend that halt an autonomous loop.' },
+    { term: 'Kill switch', definition: 'An operator control that immediately stops active tool loops and cancels pending actions.' }
+  ],
   'ops.observability': [
     { term: 'Correlation ID', definition: 'An identifier propagated across a request\'s logs and outbound calls.' },
     { term: 'SLO', definition: 'A target for a measurable reliability property, with an error budget.' }
@@ -101,6 +112,9 @@ export const AGGREGATE_HINTS = {
   ],
   'ai.guardrails': [
     { name: 'ModelCall', invariants: ['Every call has a token budget, a timeout and a declared output schema.', 'Output failing schema validation is never rendered as trusted content.'] }
+  ],
+  'agent.action-boundaries': [
+    { name: 'ToolDispatch', invariants: ['Only allowlisted tools with schema-valid arguments execute.', 'Every proposed, denied or executed tool call appends one immutable ActionLog entry.'] }
   ],
   'pipeline.idempotency': [
     { name: 'StageRun', invariants: ['A stage run is keyed by (stage, window) and may execute at most once as effective.', 'Replaying a window does not change the output partition.'] }

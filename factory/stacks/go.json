@@ -1,0 +1,33 @@
+{
+  "id": "go",
+  "match": ["go", "golang", "chi", "gin", "echo", "fiber", "pgx"],
+  "language": "Go 1.23",
+  "runtime": "the Go toolchain, shipped as a single static binary",
+  "ui": "templ + HTMX only if a UI is in scope",
+  "http": "net/http with chi, typed handlers and explicit error returns",
+  "db": "PostgreSQL + pgx, forward-only migrations with goose",
+  "validation": "explicit decode and validation at the boundary (no reflection magic)",
+  "unitRunner": "go test",
+  "tests": "go test for unit and integration, chromedp only if a UI exists",
+  "lint": "golangci-lint + go vet, both blocking in CI",
+  "logs": "slog with a correlation ID field",
+  "ci": "GitHub Actions",
+  "fenceLanguage": "go",
+  "testExtension": "go",
+  "anchorComment": "//",
+  "anchorPattern": "{snake}_test.go",
+  "defaultTestGlobs": ["*_test.go", "**/*_test.go"],
+  "countedIn": ["**/*_test.go"],
+  "commands": {
+    "lint": "golangci-lint run",
+    "typecheck": "go vet ./...",
+    "test": "go test ./..."
+  },
+  "mutation": {
+    "tool": "go-mutesting",
+    "command": "go-mutesting ./...",
+    "configFile": ".go-mutesting.json"
+  },
+  "propertyLibrary": "rapid",
+  "runnerForbidden": ["Vitest", "pytest", "ESLint", "npm test", "npm run test", "cargo test"]
+}

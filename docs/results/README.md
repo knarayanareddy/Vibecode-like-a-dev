@@ -1,9 +1,11 @@
 # Live results
 
 This directory holds **raw, dated results from a real model run**, committed as JSON
-with the provenance needed to reproduce them. It is empty because no live run has
+with the provenance needed to reproduce them, alongside deterministic calibration
+summaries (`calibration-34.json` and `BENCHMARK-REPORT.md`). No live provider run has
 been published yet. That is the honest state of the central claim, and the reason
-this directory exists is so the gap is a missing file rather than a missing paragraph.
+this directory exists is so the gap is a missing live artifact rather than a missing
+paragraph.
 
 ## What is here instead, today
 
@@ -18,15 +20,15 @@ should be read that way.
 1. Provider credentials for a paid API (`openai` or `anthropic`), supplied as the
    `live-agent-benchmark` environment secret in GitHub Actions — the workflow is
    `workflow_dispatch` only, precisely so it cannot run by accident.
-2. At least two agent configurations across the 24 tasks × 3 arms, with a minimum of
+2. At least two agent configurations across the 34 tasks × 3 arms, with a minimum of
    one seed per cell and preferably three (the variance between seeds is the part
    people skip, and it is usually larger than the effect).
 3. A committed artifact per run:
    `docs/results/YYYY-MM-DD-<provider>-<model>-<task-filter>.json` containing the raw
    outcome report, the exact model identifier, the provider's reported token usage,
    the run id and the git SHA of the packet that was measured.
-4. Confidence intervals, not point estimates. With 24 tasks a 100% merge rate and a
-   92% merge rate are frequently the same result.
+4. Confidence intervals, not point estimates. With 34 tasks a 100% merge rate and a
+   94% merge rate are frequently the same result.
 
 ## The comparison that matters
 

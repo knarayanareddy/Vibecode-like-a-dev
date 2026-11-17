@@ -1,0 +1,33 @@
+{
+  "id": "python",
+  "match": ["python", "fastapi", "django", "flask", "pytest", "poetry", "uv", "pydantic"],
+  "language": "Python 3.12",
+  "runtime": "CPython",
+  "ui": "HTMX or a thin React island only if a UI is in scope",
+  "http": "FastAPI with Pydantic models at the boundary",
+  "db": "PostgreSQL + SQLAlchemy Core/Alembic (forward-only migrations)",
+  "validation": "Pydantic at every boundary (input, env, external API)",
+  "unitRunner": "pytest",
+  "tests": "pytest for unit and integration, Playwright for the primary journey",
+  "lint": "ruff + mypy, both blocking in CI",
+  "logs": "structlog with a correlation ID field",
+  "ci": "GitHub Actions",
+  "fenceLanguage": "python",
+  "testExtension": "py",
+  "anchorComment": "#",
+  "anchorPattern": "tests/test_{snake}.py",
+  "defaultTestGlobs": ["tests/**/test_*.py", "tests/**/*_test.py", "**/test_*.py"],
+  "countedIn": ["tests/**"],
+  "commands": {
+    "lint": "ruff check .",
+    "typecheck": "mypy .",
+    "test": "pytest"
+  },
+  "mutation": {
+    "tool": "mutmut",
+    "command": "mutmut run",
+    "configFile": "pyproject.toml"
+  },
+  "propertyLibrary": "hypothesis",
+  "runnerForbidden": ["Vitest", "ESLint", "Zod", "npm test", "npm run test", "go test", "cargo test"]
+}

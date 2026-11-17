@@ -3,7 +3,7 @@
   "schemaVersion": 1,
   "generatedWith": {
     "tool": "vibecode-like-a-dev",
-    "version": "0.19.0"
+    "version": "0.20.0"
   },
   "project": {
     "name": "vibecode-like-a-dev",
@@ -56,7 +56,7 @@
     "countedIn": [
       "tests/**"
     ],
-    "check": "node specs/spec-check.mjs --repo ."
+    "check": "node ./spec-check.mjs"
   },
   "overlays": [
     {
@@ -348,6 +348,12 @@
       "detail": "not applicable: kind in [\"web-app\",\"mobile\"]"
     },
     {
+      "id": "agent.autonomy-limits",
+      "title": "Agent autonomy limits and action boundaries",
+      "reason": "predicate",
+      "detail": "not applicable: (kind eq \"agent\" OR kind eq \"automation\" AND traits includes \"ai\" OR traits includes \"ai\" AND risks.destructiveWrites eq true)"
+    },
+    {
       "id": "agent.spec-drift-guard",
       "title": "Spec drift guard",
       "reason": "tier",
@@ -394,7 +400,7 @@
       ],
       "verify": "automated",
       "traits": [],
-      "anchor": "tests/core/core-primary-journey.test.ts",
+      "anchor": "tests/core-primary-journey.test.js",
       "status": "todo"
     },
     {
@@ -432,7 +438,7 @@
       ],
       "verify": "automated",
       "traits": [],
-      "anchor": "tests/api/cli-ergonomics.test.ts",
+      "anchor": "tests/cli-ergonomics.test.js",
       "status": "todo"
     },
     {
@@ -455,7 +461,7 @@
       ],
       "verify": "automated",
       "traits": [],
-      "anchor": "tests/core/core-domain-invariants.test.ts",
+      "anchor": "tests/core-domain-invariants.test.js",
       "status": "todo"
     },
     {
@@ -617,10 +623,11 @@
   "stats": {
     "primitives": 17,
     "requirements": 6,
+    "customRequirements": 0,
     "acceptanceCriteria": 8,
     "automated": 3,
     "gates": 9,
     "deferred": 0,
-    "skipped": 17
+    "skipped": 18
   }
 }

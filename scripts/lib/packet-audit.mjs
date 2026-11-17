@@ -11,12 +11,20 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
+import { isAnchorDiscoverable, resolveProfileStacks } from '../../factory/lib/stacks.mjs';
 import { verifyPacket } from '../../factory/lib/verify.mjs';
 
 export const STACK_PROBE = {
-  typescript: { language: /TypeScript|Node\.js/, runner: /Vitest|npm (run )?test/, runnerWrong: /pytest|ruff|mypy|go test/ },
-  python: { language: /Python 3/, runner: /pytest/, runnerWrong: /Vitest|ESLint|Zod|npm (run )?test/ },
-  go: { language: /\bGo\b|golang/, runner: /go test/, runnerWrong: /Vitest|pytest|ESLint|npm (run )?test/ }
+  typescript: { language: /TypeScript|Node\.js/, runner: /Vitest|npm (run )?test/, runnerWrong: /\bpytest\b|\bruff\b|\bmypy\b|\bgo test\b|\bcargo test\b|vendor\/bin\/phpunit/ },
+  javascript: { language: /JavaScript|Node\.js/, runner: /node:test|Vitest|npm (run )?test/, runnerWrong: /\bpytest\b|\bruff\b|\bmypy\b|\bgo test\b|\bcargo test\b|vendor\/bin\/phpunit/ },
+  python: { language: /Python 3/, runner: /pytest/, runnerWrong: /Vitest|ESLint|Zod|npm (run )?test|\bgo test\b|\bcargo test\b/ },
+  go: { language: /\bGo\b|golang/, runner: /\bgo test\b/, runnerWrong: /Vitest|\bpytest\b|ESLint|npm (run )?test|\bcargo test\b/ },
+  rust: { language: /\bRust\b|Cargo/, runner: /\bcargo test\b/, runnerWrong: /Vitest|\bpytest\b|ESLint|npm (run )?test|npm run lint|\bgo test\b/ },
+  java: { language: /\bJava\b|OpenJDK/, runner: /JUnit|mvnw test/, runnerWrong: /Vitest|\bpytest\b|ESLint|npm (run )?test|npm run lint|\bcargo test\b/ },
+  kotlin: { language: /\bKotlin\b/, runner: /JUnit|Kotest|gradlew test/, runnerWrong: /Vitest|\bpytest\b|ESLint|npm (run )?test|npm run lint|\bcargo test\b/ },
+  ruby: { language: /\bRuby\b/, runner: /RSpec|bundle exec rspec/, runnerWrong: /Vitest|\bpytest\b|ESLint|npm (run )?test|npm run lint|\bcargo test\b/ },
+  php: { language: /\bPHP\b/, runner: /PHPUnit|vendor\/bin\/phpunit/, runnerWrong: /Vitest|\bpytest\b|ESLint|npm (run )?test|npm run lint|\bcargo test\b/ },
+  csharp: { language: /C#|\.NET/, runner: /xUnit|dotnet test/, runnerWrong: /Vitest|\bpytest\b|ESLint|npm (run )?test|npm run lint|\bcargo test\b/ }
 };
 
 const STOP = new Set([
@@ -100,16 +108,37 @@ export function auditPacket(profile, outDir) {
   const leaks = ['undefined', 'NaN', '[object Object]', '{{', '}}'].filter((token) => all.includes(token));
   check('no-template-leaks', leaks.length === 0, `packet prints ${leaks.join(', ')}`);
 
-  const declared = String(profile.constraints.stack || 'undecided').toLowerCase();
-  const probe = STACK_PROBE[declared];
-
+  const resolvedStacks = resolveProfileStacks(profile);
   const stack = spec.stack ?? spec.project?.stack;
-  if (probe) {
-    check('stack-language', probe.language.test(all), `declared stack "${declared}" is not named in the packet`);
-    check('stack-test-runner', probe.runner.test(all), `no test runner for "${declared}" in the packet`);
-    const wrong = [...all.matchAll(new RegExp(probe.runnerWrong.source, 'g'))].map((match) => match[0]);
-    check('stack-no-foreign-tooling', wrong.length === 0, `packet names foreign tooling for "${declared}": ${[...new Set(wrong)].join(', ')}`);
-  } else if (declared !== 'undecided') {
+  if (resolvedStacks.isMultiService) {
+    for (const svc of resolvedStacks.services) {
+      check('stack-service-named', all.includes(svc.service), `service "${svc.service}" is not named in the packet`);
+      const probe = svc.profile ? STACK_PROBE[svc.profile.id] : null;
+      if (probe) {
+        check('stack-test-runner', probe.runner.test(all), `no test runner for service "${svc.service}" (${svc.declared})`);
+      }
+    }
+  } else if (resolvedStacks.recognised && resolvedStacks.primary) {
+    const declared = resolvedStacks.declaredLabel;
+    const probe = declared.toLowerCase() === 'undecided' ? null : STACK_PROBE[resolvedStacks.primary.id];
+    if (probe) {
+      check('stack-language', probe.language.test(all), `declared stack "${declared}" is not named in the packet`);
+      check('stack-test-runner', probe.runner.test(all), `no test runner for "${declared}" in the packet`);
+      const wrong = [...all.matchAll(new RegExp(probe.runnerWrong.source, 'g'))].map((match) => match[0]);
+      check('stack-no-foreign-tooling', wrong.length === 0, `packet names foreign tooling for "${declared}": ${[...new Set(wrong)].join(', ')}`);
+    }
+    // Roadmap 1.7: every automated requirement's anchor path must be discoverable by
+    // that ecosystem's default test runner glob (never a choose-runner placeholder).
+    const undiscoverable = spec.requirements
+      .filter((req) => req.verify === 'automated' && req.anchor)
+      .filter((req) => !isAnchorDiscoverable(resolvedStacks.primary, req.anchor));
+    check(
+      'anchor-glob-discoverable',
+      undiscoverable.length === 0,
+      `anchors not matched by ${resolvedStacks.primary.id} default test glob: ${undiscoverable.map((r) => r.anchor).join(', ')}`
+    );
+  } else {
+    const declared = resolvedStacks.declaredLabel;
     // An unknown stack must be admitted, not silently replaced with a default.
     check(
       'stack-unrecognised-is-labelled',
@@ -163,6 +192,25 @@ export function auditPacket(profile, outDir) {
   const keywords = ideaKeywords(profile.idea);
   const present = keywords.filter((word) => new RegExp(`\\b${word}\\b`, 'i').test(specification));
   const coverage = keywords.length === 0 ? 1 : present.length / keywords.length;
+
+  // Roadmap 1.3 (F-13): no duplicate glossary terms (case-insensitive) in 02-domain-model.md.
+  const domainDocPath = path.join(outDir, '02-domain-model.md');
+  try {
+    const domainDoc = readFileSync(domainDocPath, 'utf8');
+    const glossarySection = domainDoc.split(/^##\s+\d+\.\s+Ubiquitous language/m)[1]?.split(/^###\s+/m)[0] ?? '';
+    const seenTerms = new Set();
+    const dupes = [];
+    for (const row of glossarySection.split('\n')) {
+      const match = row.match(/^\|\s*\*\*([^*]+)\*\*\s*\|/);
+      if (!match) continue;
+      const key = match[1].trim().toLowerCase();
+      if (seenTerms.has(key)) dupes.push(match[1].trim());
+      seenTerms.add(key);
+    }
+    check('glossary-no-duplicate-terms', dupes.length === 0, `duplicate glossary term(s) in 02-domain-model.md: ${dupes.join(', ')}`);
+  } catch {
+    // single-file tier-0 packets do not emit 02-domain-model.md
+  }
 
   const lines = readdirSync(outDir)
     .filter((file) => file.endsWith('.md'))
