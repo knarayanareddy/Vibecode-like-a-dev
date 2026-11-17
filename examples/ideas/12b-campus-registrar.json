@@ -1,0 +1,11 @@
+{
+  "name": "campus-registrar",
+  "idea": "A multi-campus registrar service managing student transcripts, course enrolments and grade appeals for universities. Advisors must only read student records for their assigned school role, and every external transcript disclosure must be recorded in an immutable log.",
+  "kind": "api",
+  "stage": "production",
+  "users": { "scale": "medium" },
+  "traits": ["auth", "persistence", "search"],
+  "risks": { "pii": true, "multiTenant": true, "regulated": true },
+  "regulation": ["ferpa"],
+  "constraints": { "team": 6, "weeks": 14, "stack": "java" }
+}

@@ -11,12 +11,28 @@ import path from 'node:path';
 import { digest, ensureProjectDir, extensionError, ID_PATTERN } from './extension-utils.mjs';
 
 export const DELIVERY_POLICY_SCHEMA_VERSION = 1;
+export const DELIVERY_POLICY_V2_SCHEMA_VERSION = 2;
 
 const POLICY_FIELDS = new Set(['schemaVersion', 'id', 'verification', 'review', 'queue', 'merge']);
-const VERIFICATION_FIELDS = new Set(['verifyPacket', 'commands']);
-const REVIEW_FIELDS = new Set(['independent']);
+const VERIFICATION_V1_FIELDS = new Set(['verifyPacket', 'commands']);
+const VERIFICATION_V2_FIELDS = new Set([
+  'verifyPacket',
+  'verifyDriftGuard',
+  'verifyGates',
+  'requireSandboxReceipt',
+  'requireOsSandbox',
+  'enforceResourceClaims',
+  'sandboxBackend',
+  'commands'
+]);
+const VERIFIER_CMD_FIELDS = new Set(['id', 'executable', 'args', 'timeoutMs', 'allowChildProcess', 'extraReadPaths']);
+const REVIEW_V1_FIELDS = new Set(['independent']);
+const REVIEW_V2_FIELDS = new Set(['independent', 'minApprovals', 'requireChecklist', 'escalationTier']);
 const QUEUE_FIELDS = new Set(['enabled']);
 const MERGE_FIELDS = new Set(['local', 'push', 'forge']);
+const ALLOWED_SANDBOX_BACKENDS = new Set(['auto', 'oci', 'bwrap', 'linux-ns', 'darwin-seatbelt', 'node-permission']);
+const EVAL_ARG = /^(?:-c|-e|-p|--(?:command|eval|print)(?:=|$)|--env(?:=|$))/;
+const SECRETISH = /(?:token|secret|password|credential|authorization|api[_-]?key)/i;
 
 function plainObject(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -45,22 +61,102 @@ export function defaultDeliveryPolicy() {
   };
 }
 
+/** Default v2 delivery policy: receipt-gated submission + sandboxed drift/gate/command verification (ADR 0011). */
+export function defaultSandboxedDeliveryPolicy({ commands = [], sandboxBackend = 'auto', merge = { local: false, push: false, forge: false } } = {}) {
+  return {
+    schemaVersion: DELIVERY_POLICY_V2_SCHEMA_VERSION,
+    id: 'sandboxed-delivery-v2',
+    verification: {
+      verifyPacket: true,
+      verifyDriftGuard: true,
+      verifyGates: true,
+      requireSandboxReceipt: true,
+      requireOsSandbox: false,
+      enforceResourceClaims: true,
+      sandboxBackend,
+      commands
+    },
+    review: { independent: true, minApprovals: 1, requireChecklist: true },
+    queue: { enabled: true },
+    merge: { local: Boolean(merge.local), push: Boolean(merge.push), forge: Boolean(merge.forge) }
+  };
+}
+
+function validateVerifierCommand(cmd, idx, errors) {
+  const label = `delivery policy.verification.commands[${idx}]`;
+  if (!closedObject(cmd, VERIFIER_CMD_FIELDS, label, errors)) return;
+  if (!ID_PATTERN.test(String(cmd.id ?? ''))) errors.push(`${label}.id must be lowercase kebab-case`);
+  if (typeof cmd.executable !== 'string' || !path.isAbsolute(cmd.executable) || cmd.executable.includes('..') || /[\r\n\0]/.test(cmd.executable)) {
+    errors.push(`${label}.executable must be a safe absolute path`);
+  }
+  if (!Array.isArray(cmd.args) || cmd.args.length > 64 || cmd.args.some((a) => typeof a !== 'string' || !a.length || a.length > 2048 || /[\r\n\0]/.test(a) || EVAL_ARG.test(a) || SECRETISH.test(a))) {
+    errors.push(`${label}.args must be at most 64 safe non-secret fixed arguments without eval/shell flags`);
+  }
+  if (cmd.timeoutMs !== undefined && (!Number.isSafeInteger(cmd.timeoutMs) || cmd.timeoutMs < 100 || cmd.timeoutMs > 600_000)) {
+    errors.push(`${label}.timeoutMs must be an integer from 100 to 600000`);
+  }
+  if (cmd.allowChildProcess !== undefined && typeof cmd.allowChildProcess !== 'boolean') {
+    errors.push(`${label}.allowChildProcess must be boolean`);
+  }
+  if (cmd.extraReadPaths !== undefined && (!Array.isArray(cmd.extraReadPaths) || cmd.extraReadPaths.some((p) => typeof p !== 'string' || !path.isAbsolute(p) || p.includes('..')))) {
+    errors.push(`${label}.extraReadPaths must be safe absolute paths`);
+  }
+}
+
 export function validateDeliveryPolicy(policy) {
   const errors = [];
   closedObject(policy, POLICY_FIELDS, 'delivery policy', errors);
   if (!plainObject(policy)) return { ok: false, errors };
-  if (policy.schemaVersion !== DELIVERY_POLICY_SCHEMA_VERSION) errors.push(`delivery policy schemaVersion must be ${DELIVERY_POLICY_SCHEMA_VERSION}`);
+  const isV2 = policy.schemaVersion === DELIVERY_POLICY_V2_SCHEMA_VERSION;
+  if (policy.schemaVersion !== DELIVERY_POLICY_SCHEMA_VERSION && !isV2) {
+    errors.push(`delivery policy schemaVersion must be ${DELIVERY_POLICY_SCHEMA_VERSION} or ${DELIVERY_POLICY_V2_SCHEMA_VERSION}`);
+  }
   if (!ID_PATTERN.test(String(policy.id ?? ''))) errors.push('delivery policy id must be lowercase kebab-case');
-  if (closedObject(policy.verification, VERIFICATION_FIELDS, 'delivery policy.verification', errors)) {
+  if (closedObject(policy.verification, isV2 ? VERIFICATION_V2_FIELDS : VERIFICATION_V1_FIELDS, 'delivery policy.verification', errors)) {
     if (policy.verification.verifyPacket !== true) errors.push('delivery policy verification.verifyPacket must be true');
-    if (!Array.isArray(policy.verification.commands) || policy.verification.commands.length !== 0) {
-      errors.push('M5 delivery policy supports no project command checks until a sandboxed verifier is separately approved');
+    if (!isV2) {
+      if (!Array.isArray(policy.verification.commands) || policy.verification.commands.length !== 0) {
+        errors.push('M5 delivery policy supports no project command checks until a sandboxed verifier is separately approved');
+      }
+    } else {
+      for (const boolKey of ['verifyDriftGuard', 'verifyGates', 'requireSandboxReceipt', 'requireOsSandbox', 'enforceResourceClaims']) {
+        if (policy.verification[boolKey] !== undefined && typeof policy.verification[boolKey] !== 'boolean') {
+          errors.push(`delivery policy verification.${boolKey} must be boolean`);
+        }
+      }
+      if (policy.verification.sandboxBackend !== undefined && !ALLOWED_SANDBOX_BACKENDS.has(policy.verification.sandboxBackend)) {
+        errors.push(`delivery policy verification.sandboxBackend must be one of: ${[...ALLOWED_SANDBOX_BACKENDS].join(', ')}`);
+      }
+      if (!Array.isArray(policy.verification.commands) || policy.verification.commands.length > 8) {
+        errors.push('delivery policy verification.commands must be an array of at most 8 commands');
+      } else {
+        const seenIds = new Set();
+        policy.verification.commands.forEach((cmd, idx) => {
+          validateVerifierCommand(cmd, idx, errors);
+          if (cmd?.id && seenIds.has(cmd.id)) errors.push(`duplicate verification command id "${cmd.id}"`);
+          if (cmd?.id) seenIds.add(cmd.id);
+        });
+      }
     }
   }
-  if (closedObject(policy.review, REVIEW_FIELDS, 'delivery policy.review', errors) && policy.review.independent !== true) errors.push('delivery policy review.independent must be true');
+  if (closedObject(policy.review, isV2 ? REVIEW_V2_FIELDS : REVIEW_V1_FIELDS, 'delivery policy.review', errors)) {
+    if (policy.review.independent !== true) errors.push('delivery policy review.independent must be true');
+    if (isV2 && policy.review.minApprovals !== undefined && (!Number.isSafeInteger(policy.review.minApprovals) || policy.review.minApprovals < 1 || policy.review.minApprovals > 5)) {
+      errors.push('delivery policy review.minApprovals must be an integer from 1 to 5');
+    }
+    if (isV2 && policy.review.requireChecklist !== undefined && typeof policy.review.requireChecklist !== 'boolean') {
+      errors.push('delivery policy review.requireChecklist must be boolean');
+    }
+    if (isV2 && policy.review.escalationTier !== undefined && (!Number.isSafeInteger(policy.review.escalationTier) || policy.review.escalationTier < 0 || policy.review.escalationTier > 3)) {
+      errors.push('delivery policy review.escalationTier must be an integer from 0 to 3');
+    }
+  }
   if (closedObject(policy.queue, QUEUE_FIELDS, 'delivery policy.queue', errors) && policy.queue.enabled !== true) errors.push('delivery policy queue.enabled must be true');
   if (closedObject(policy.merge, MERGE_FIELDS, 'delivery policy.merge', errors)) {
-    for (const field of MERGE_FIELDS) if (policy.merge[field] !== false) errors.push(`M5 delivery policy merge.${field} must be false`);
+    for (const field of MERGE_FIELDS) {
+      if (typeof policy.merge[field] !== 'boolean') errors.push(`delivery policy merge.${field} must be boolean`);
+      else if (!isV2 && policy.merge[field] !== false) errors.push(`M5 delivery policy merge.${field} must be false`);
+    }
   }
   return { ok: errors.length === 0, errors };
 }

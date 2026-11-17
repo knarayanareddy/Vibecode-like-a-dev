@@ -776,6 +776,64 @@ export function withRuntimeIntegrationWorkspace({ missionFile, packageId, candid
 }
 
 /**
+ * Async sibling of `withRuntimeIntegrationWorkspace` for sandboxed v2 command
+ * and gate verification (ADR 0011). Prepares the detached merge tree under the
+ * serialized workspace lock, runs async read-only sandboxed checks against it,
+ * and unconditionally cleans up under lock.
+ */
+export async function withRuntimeIntegrationWorkspaceAsync({ missionFile, packageId, candidateSha, projectDir = '.', callback } = {}) {
+  const repo = primaryWorkspaceRepository(projectDir);
+  const project = repo.root;
+  const current = missionCurrentOrThrow(missionFile, project);
+  if (!COMMIT.test(String(candidateSha ?? ''))) throw extensionError('integration candidate SHA must be a full commit', 'INVALID_CANDIDATE_SHA');
+  if (typeof callback !== 'function') throw extensionError('integration callback is required', 'INVALID_INTEGRATION_REQUEST');
+  const workPackage = current.mission.workPackages.find((entry) => entry.id === packageId);
+  if (!workPackage) throw extensionError(`mission "${current.mission.id}" has no work package "${packageId}"`, 'UNKNOWN_WORK_PACKAGE');
+  const root = path.join(path.dirname(repo.root), '.vld-integrations', `${path.basename(repo.root)}-${digest(repo.commonDir).slice(0, 12)}`);
+  if (isWithin(repo.root, root)) throw extensionError('integration root must be outside the project checkout', 'INVALID_WORKSPACE_ROOT');
+
+  const prepared = withWorkspaceLock(repo, () => {
+    mkdirWithoutSymlinks(root, 'integration root');
+    const directory = path.join(root, current.mission.id, packageId, `${candidateSha.slice(0, 12)}-${randomUUID()}`);
+    if (!isWithin(root, directory)) throw extensionError('integration worktree path escapes its managed root', 'INVALID_WORKSPACE_ROOT');
+    git(repo.project, ['-c', 'core.autocrlf=false', '-c', 'core.eol=lf', 'worktree', 'add', '--detach', directory, current.mission.target.commit], 'INTEGRATION_WORKTREE_FAILED');
+    if (!gitSucceeds(directory, ['merge', '--no-commit', '--no-ff', candidateSha])) {
+      try { git(directory, ['merge', '--abort'], 'INTEGRATION_MERGE_ABORT_FAILED'); } catch {}
+      git(repo.project, ['worktree', 'remove', '--force', directory], 'INTEGRATION_WORKTREE_CLEANUP_FAILED');
+      return { integrated: false, outcome: 'conflict' };
+    }
+    const integrationTree = git(directory, ['write-tree'], 'INTEGRATION_TREE_FAILED');
+    if (!COMMIT.test(integrationTree)) throw extensionError('integration did not produce a tree digest', 'INTEGRATION_TREE_FAILED');
+    return { integrated: true, directory, integrationTree, targetSha: current.mission.target.commit, mission: current.mission, workPackage };
+  });
+
+  if (!prepared.integrated) return prepared;
+
+  try {
+    const result = await callback({
+      worktree: prepared.directory,
+      targetSha: prepared.targetSha,
+      candidateSha,
+      integrationTree: prepared.integrationTree,
+      mission: prepared.mission,
+      workPackage: prepared.workPackage
+    });
+    return {
+      integrated: true,
+      targetSha: prepared.targetSha,
+      candidateSha,
+      integrationTree: prepared.integrationTree,
+      result
+    };
+  } finally {
+    withWorkspaceLock(repo, () => {
+      try { git(prepared.directory, ['merge', '--abort'], 'INTEGRATION_MERGE_ABORT_FAILED'); } catch {}
+      git(repo.project, ['worktree', 'remove', '--force', prepared.directory], 'INTEGRATION_WORKTREE_CLEANUP_FAILED');
+    });
+  }
+}
+
+/**
  * Reconcile a stale lock and interrupted removal. It intentionally never deletes
  * an unowned worktree or a remaining branch; recovery favours preserving work.
  */

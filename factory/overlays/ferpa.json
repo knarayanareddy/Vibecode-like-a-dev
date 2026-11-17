@@ -1,0 +1,55 @@
+{
+  "id": "ferpa",
+  "layer": "domain",
+  "title": "FERPA student education-record privacy",
+  "why": "Student education records belong to the school boundary and are protected under FERPA: access is limited to school officials with legitimate educational interest and authorised parents or eligible students, third-party disclosure requires written consent and a permanent disclosure log, and directory information requires an opt-out.",
+  "addRequirements": [
+    {
+      "key": "education.legitimate-interest-access",
+      "title": "Education records are restricted to legitimate educational interest",
+      "area": "security",
+      "statement": "When an actor requests a student education record, the application shall grant access only to the student's verified parent, an eligible student, or a school official scoped to that student's school and assigned roster.",
+      "definition": "Being authenticated inside a district is not permission to browse every student: roster and institutional role gate every read.",
+      "failurePath": "If roster assignment or institutional role cannot be verified, the application denies the read and logs the denied attempt.",
+      "acceptance": [
+        "Given a teacher assigned to classroom A, when they query a student enrolled only in classroom B, then access is denied.",
+        "Given a verified parent, when they read education records, then only their own child's records are returned.",
+        "Given two schools or districts, when an administrator queries student records, then no record from another institution is visible."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "education.disclosure-consent-and-log",
+      "title": "External disclosures require consent and a permanent disclosure log",
+      "area": "reliability",
+      "statement": "When personally identifiable information from a student education record is disclosed outside the school, the application shall verify recorded written consent or a declared FERPA exception and write an append-only disclosure record retained for the life of the education record.",
+      "definition": "Every disclosure names the recipient, the records released, the legitimate interest or consent reference, and the timestamp.",
+      "failurePath": "If neither valid consent nor an enumerated statutory exception is recorded, or if the disclosure log write fails, the disclosure is refused.",
+      "acceptance": [
+        "Given a third-party export with no recorded parent or eligible-student consent and no statutory exception, when requested, then the export is refused.",
+        "Given a permitted disclosure, when the disclosure ledger is inspected by a parent or school official, then recipient, purpose, fields and timestamp are recorded and immutable."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "education.directory-opt-out-and-amendment",
+      "title": "Directory-information opt-outs and record-amendment requests are enforced",
+      "area": "data",
+      "statement": "When a parent or eligible student opts out of directory information or submits a record-amendment request, the application shall suppress directory fields across all non-official views and record the amendment decision or attached statement of disagreement.",
+      "definition": "Opt-out flags travel with the student record across exports, rosters and search results, and contested records retain their formal amendment trail.",
+      "failurePath": "If opt-out status is unknown on a student record, directory disclosure defaults to suppressed rather than public.",
+      "acceptance": [
+        "Given a student with directory opt-out enabled, when a directory listing or public roster is queried, then that student's directory fields are excluded.",
+        "Given a denied amendment request, when the parent attaches a statement of disagreement, then subsequent disclosures of the contested record include that statement."
+      ],
+      "verify": "automated"
+    }
+  ],
+  "addGates": [
+    {
+      "id": "G3-FERPA-DISCLOSURE",
+      "tier": 3,
+      "statement": "Roster-scoped student-record access and append-only FERPA disclosure logging are proven by automated tests."
+    }
+  ]
+}

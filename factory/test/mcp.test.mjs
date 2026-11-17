@@ -103,7 +103,11 @@ test('MCP and emitted packets share one normalized stack and selected-practice c
     name: 'stack-contract',
     traits: ['persistence']
   };
-  for (const [stack, extension, fenceLanguage] of [['Python 3.12', 'py', 'python'], ['Go 1.23', 'go', 'go'], ['TypeScript strict', 'ts', 'ts']]) {
+  for (const [stack, extension, fenceLanguage, anchorPattern] of [
+    ['Python 3.12', 'py', 'python', /^tests\/test_[a-z0-9_]+\.py$/],
+    ['Go 1.23', 'go', 'go', /^[a-z0-9_]+_test\.go$/],
+    ['TypeScript strict', 'ts', 'ts', /^tests\/[a-z0-9-]+\.test\.ts$/]
+  ]) {
     const profile = { ...base, stack };
     const selected = payload(call('select_primitives', profile));
     const projected = payload(call('plan_project', profile));
@@ -117,7 +121,7 @@ test('MCP and emitted packets share one normalized stack and selected-practice c
     assert.deepEqual(projected.contract, selected.contract);
     assert.deepEqual(manifest.primitives.map((entry) => entry.id), selected.contract.selectedPracticeIds);
     for (const requirement of requirements.requirements.filter((entry) => entry.verify === 'automated')) {
-      assert.ok(requirement.anchor.endsWith(`.test.${extension}`), `${stack}: ${requirement.anchor}`);
+      assert.match(requirement.anchor, anchorPattern, `${stack}: ${requirement.anchor}`);
     }
     assert.match(packet.files.get('05-verification.md'), new RegExp('```' + fenceLanguage + '\n'));
   }

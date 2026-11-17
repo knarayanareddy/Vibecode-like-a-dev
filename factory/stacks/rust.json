@@ -1,0 +1,33 @@
+{
+  "id": "rust",
+  "match": ["rust", "cargo", "rustc", "axum", "actix", "tokio", "clap"],
+  "language": "Rust (2021 edition)",
+  "runtime": "Native static binary built with Cargo",
+  "ui": "Leptos or HTMX only if a UI is in scope",
+  "http": "axum + tower with typed extractors and explicit error types",
+  "db": "PostgreSQL + sqlx (compile-time checked, forward-only SQL migrations)",
+  "validation": "serde + newtype boundary parsing (reject invalid states at deserialisation)",
+  "unitRunner": "cargo test",
+  "tests": "cargo test for unit and integration tests under tests/",
+  "lint": "cargo clippy --all-targets -- -D warnings + cargo fmt --check",
+  "logs": "tracing with structured span correlation IDs",
+  "ci": "GitHub Actions",
+  "fenceLanguage": "rust",
+  "testExtension": "rs",
+  "anchorComment": "//",
+  "anchorPattern": "tests/{snake}.rs",
+  "defaultTestGlobs": ["tests/*.rs", "tests/**/*.rs"],
+  "countedIn": ["tests/**"],
+  "commands": {
+    "lint": "cargo clippy --all-targets -- -D warnings",
+    "typecheck": "cargo check --all-targets",
+    "test": "cargo test"
+  },
+  "mutation": {
+    "tool": "cargo-mutants",
+    "command": "cargo mutants",
+    "configFile": ".cargo/mutants.toml"
+  },
+  "propertyLibrary": "proptest",
+  "runnerForbidden": ["Vitest", "pytest", "ESLint", "npm test", "npm run lint", "go test"]
+}

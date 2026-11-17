@@ -13,9 +13,12 @@
 
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { compileProfileRules } from './custom-rules.mjs';
+import { vocabularyFor } from './emit/vocabulary.mjs';
 import { ROOT } from './indexer.mjs';
 import { applyOverlays, checkOverlayTargets, overlayGates, resolveOverlays } from './overlays.mjs';
 import { evaluate, explain, getPath } from './predicate.mjs';
+import { formatRiskHintWarnings, scanRiskHints } from './risk-hints.mjs';
 
 const POLICY_PATH = path.join(ROOT, 'factory', 'policy.json');
 const ROUTING_PATH = path.join(ROOT, 'factory', 'routing.json');
@@ -335,6 +338,7 @@ export function collectGates(profile, policy, rigor, primitives, extraGates = []
   const gates = new Map();
   for (let tier = 0; tier <= rigor.tier; tier += 1) {
     for (const gate of policy.gates[String(tier)] ?? []) {
+      if (gate.primitiveOnly) continue;
       if (!gates.has(gate.id)) gates.set(gate.id, { ...gate, origin: `policy:tier-${tier}` });
     }
   }
@@ -409,14 +413,38 @@ export function buildPlan(
   const { selected, deferredExtra = [] } = forceBudget(selection, forced, rigor);
   selection.deferred = [...deferredExtra, ...selection.deferred];
 
-  const { requirements } = selectRequirements(profile, merged.catalog, rigor, previousIds);
+  const { requirements: catalogRequirements } = selectRequirements(profile, merged.catalog, rigor, previousIds);
+  const compiledRules = compileProfileRules(profile, catalogRequirements, previousIds);
+  const requirements = compiledRules.requirements;
   const gates = collectGates(profile, policy, rigor, selected, overlayGates(resolved.overlays));
   const docs = policy.requiredDocs[rigor.packet];
+  const riskHints = scanRiskHints(profile);
+  const vocab = vocabularyFor(profile);
+  const vocabulary = {
+    primary: vocab.primary,
+    secondary: vocab.secondary,
+    source: vocab.source,
+    confidence: vocab.confidence,
+    lowConfidence: vocab.lowConfidence,
+    candidates: vocab.candidates.slice(0, 5).map((entry) => entry.word)
+  };
 
   const knownEnforces = new Set(merged.catalog.requirements.map((requirement) => requirement.key));
   const dangling = selected
     .flatMap((primitive) => (primitive.enforces ?? []).map((key) => ({ primitive: primitive.id, key })))
     .filter((entry) => !knownEnforces.has(entry.key));
+
+  const warnings = [
+    ...selection.missing.map((id) => `routing references unknown primitive "${id}"`),
+    ...formatRiskHintWarnings(riskHints, profile),
+    ...(vocab.lowConfidence
+      ? [
+          `vocabulary hint: primary noun confidence is ${vocab.confidence.toFixed(2)} (< 0.60); using neutral default "${vocab.primary}"` +
+            `${vocabulary.candidates.length ? ` (candidates: ${vocabulary.candidates.join(', ')})` : ''}. ` +
+            'Set profile.domain: { "entity": "<noun>", "actors": ["<actor>"] } to name the domain explicitly.'
+        ]
+      : [])
+  ];
 
   return {
     version: 1,
@@ -431,22 +459,29 @@ export function buildPlan(
     skipped: selection.skipped,
     overlays: merged.provenance,
     requirements,
+    customRules: compiledRules.pins,
     gates,
+    riskHints,
+    vocabulary,
     config: {
       team: profile.constraints.team,
       weeks: profile.constraints.weeks,
-      stack: profile.constraints.stack
+      stack:
+        profile.constraints.stack && typeof profile.constraints.stack === 'object' && !Array.isArray(profile.constraints.stack)
+          ? Object.entries(profile.constraints.stack).map(([service, name]) => `${service}: ${name}`).join(', ')
+          : profile.constraints.stack
     },
     stats: {
       primitives: selected.length,
       requirements: requirements.length,
+      customRequirements: compiledRules.customRequirements.length,
       acceptanceCriteria: requirements.reduce((sum, r) => sum + r.acceptance.length, 0),
       automated: requirements.filter((r) => r.verify === 'automated').length,
       gates: gates.length,
       deferred: selection.deferred.length,
       skipped: selection.skipped.length
     },
-    warnings: selection.missing.map((id) => `routing references unknown primitive "${id}"`),
+    warnings,
     danglingEnforces: dangling
   };
 }

@@ -189,6 +189,11 @@
       {
         "id": "G2-DRIFT",
         "statement": "CI fails when a requirement loses its test anchor or the spec references a missing primitive."
+      },
+      {
+        "id": "G2-AUTONOMY",
+        "primitiveOnly": true,
+        "statement": "Autonomous tool calls enforce a closed allowlist, human confirmation on destructive actions, step/cost ceilings and a tested kill switch."
       }
     ],
     "3": [

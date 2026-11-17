@@ -78,7 +78,7 @@ function matches(name, patterns) {
   });
 }
 
-const MANIFEST_PATTERN = /(^|\/)(package\.json|pyproject\.toml|requirements(-[\w.]+)?\.txt|go\.mod|Cargo\.toml|Gemfile|composer\.json|pubspec\.yaml)$/;
+const MANIFEST_PATTERN = /(^|\/)(package\.json|pyproject\.toml|requirements(-[\w.]+)?\.txt|go\.mod|Cargo\.toml|Gemfile|composer\.json|pubspec\.yaml|pom\.xml|build\.gradle(\.kts)?|[^/]+\.csproj)$/;
 const TEST_TOOL_DEPS = [
   'vitest', 'jest', 'mocha', 'ava', 'pytest', 'hypothesis', 'playwright', '@playwright/test',
   'cypress', 'coverage', 'uvu', 'tap', 'phpunit', 'flutter_test', 'rspec', 'rspec-rails',
@@ -253,6 +253,74 @@ function collectDependencies(scan) {
   }
 
   return { runtime, dev, manifests };
+}
+
+function inferManifestStack(scan, manifestPath) {
+  const base = path.posix.basename(manifestPath);
+  const dir = path.posix.dirname(manifestPath);
+  const prefix = dir === '.' ? '' : `${dir}/`;
+
+  if (base === 'pyproject.toml' || /^requirements(-[\w.]+)?\.txt$/.test(base)) return 'python';
+  if (base === 'go.mod') return 'go';
+  if (base === 'Cargo.toml') return 'rust';
+  if (base === 'Gemfile') return 'ruby';
+  if (base === 'composer.json') return 'php';
+  if (base === 'pom.xml') return 'java';
+  if (base.endsWith('.csproj')) return 'csharp';
+  if (base === 'build.gradle' || base === 'build.gradle.kts') {
+    const hasKotlin = scan.sourceFiles.some((file) => file.startsWith(prefix) && file.endsWith('.kt'));
+    return hasKotlin || base.endsWith('.kts') ? 'kotlin' : 'java';
+  }
+  if (base === 'pubspec.yaml') return 'dart';
+  if (base === 'package.json') {
+    const pkg = readJsonFile(scan, manifestPath);
+    const allDeps = { ...(pkg?.dependencies ?? {}), ...(pkg?.devDependencies ?? {}) };
+    const hasTsConfig = scan.has(dir === '.' ? 'tsconfig.json' : `${dir}/tsconfig.json`);
+    const hasTsSource = scan.sourceFiles.some((file) => file.startsWith(prefix) && /\.(?:ts|tsx|vue|svelte)$/.test(file));
+    if ('typescript' in allDeps || hasTsConfig || hasTsSource) return 'typescript';
+    return 'javascript';
+  }
+  return null;
+}
+
+/**
+ * Infer a per-service stack map ({ backend: 'python', frontend: 'typescript' })
+ * when distinct subdirectories declare manifests for different ecosystems.
+ */
+function inferServiceStacks(scan, manifests) {
+  const SKIP_SERVICE_DIRS = /^(?:tests?|fixtures?|examples?|docs|scripts|tools|factory)$/i;
+  const byDir = new Map();
+  for (const manifest of manifests) {
+    const dir = path.posix.dirname(manifest);
+    if (dir === '.') continue;
+    const topSegment = dir.split('/')[0];
+    if (SKIP_SERVICE_DIRS.test(topSegment)) continue;
+    const stack = inferManifestStack(scan, manifest);
+    if (!stack) continue;
+    if (!byDir.has(dir)) byDir.set(dir, { dir, stack, manifest });
+  }
+  if (byDir.size < 2) return null;
+  const entries = [...byDir.values()];
+  const distinctStacks = new Set(entries.map((entry) => entry.stack));
+  if (distinctStacks.size < 2) return null;
+
+  // Prefer short directory leaf names ("backend", "frontend") when unique;
+  // keep the relative path when two services share a leaf name.
+  const leafCounts = new Map();
+  for (const entry of entries) {
+    const leaf = path.posix.basename(entry.dir).toLowerCase();
+    leafCounts.set(leaf, (leafCounts.get(leaf) ?? 0) + 1);
+  }
+  const map = {};
+  const evidenceLines = [];
+  for (const entry of entries.sort((a, b) => a.dir.localeCompare(b.dir))) {
+    const leaf = path.posix.basename(entry.dir).toLowerCase();
+    const useShort = entry.dir.split('/').length === 1 && leafCounts.get(leaf) === 1;
+    const key = useShort ? leaf : entry.dir.toLowerCase();
+    map[key] = entry.stack;
+    evidenceLines.push(`${entry.manifest} -> ${key}: ${entry.stack}`);
+  }
+  return { map, evidence: evidenceLines };
 }
 
 function dominantLanguage(scan) {
@@ -587,11 +655,22 @@ function adoptLocalRepo(repoRoot, options = {}) {
   if (explicitName) note('name', name, 'high', ['supplied via --name']);
   else if (manifestName) note('name', name, 'high', [`manifest name: ${manifestName}`]);
 
-  // ---- language
+  // ---- language / per-service stacks
+  const serviceStacks = inferServiceStacks(scan, deps.manifests);
   const language = dominantLanguage(scan);
-  if (language) {
+  const rootManifestStack = deps.manifests.filter((file) => !file.includes('/')).map((file) => inferManifestStack(scan, file)).find(Boolean) ?? null;
+  let inferredStack = 'undecided';
+  if (serviceStacks) {
+    inferredStack = serviceStacks.map;
+    note('constraints.stack', serviceStacks.map, 'high', serviceStacks.evidence);
+    observations.push(`Multi-service repository detected (${Object.entries(serviceStacks.map).map(([svc, st]) => `${svc}: ${st}`).join(', ')}); packet emits one command block per service.`);
+  } else if (language) {
+    inferredStack = language.language;
     note('constraints.stack', language.language, 'high', [`${language.count} source files, ${language.language} dominant`]);
     if (language.mixed) observations.push('More than one language detected; the dominant one is used for stack defaults.');
+  } else if (rootManifestStack) {
+    inferredStack = rootManifestStack;
+    note('constraints.stack', rootManifestStack, 'medium', [`inferred from root manifest`]);
   } else {
     note('constraints.stack', 'undecided', 'low', ['no source files found']);
   }
@@ -742,8 +821,14 @@ function adoptLocalRepo(repoRoot, options = {}) {
   questions.push('How many engineers will work on it, and for how long?');
   if (risks.pii) questions.push('Which stored fields are personal data, and what is the retention period?');
 
+  const stackSummary =
+    typeof inferredStack === 'object'
+      ? Object.entries(inferredStack).map(([svc, st]) => `${svc} (${st})`).join(' + ')
+      : inferredStack === 'undecided'
+        ? 'an undetected stack'
+        : inferredStack;
   const draftIdea =
-    `TODO replace with one paragraph. Adopted draft: ${kind} built with ${language?.language ?? 'an undetected stack'}` +
+    `TODO replace with one paragraph. Adopted draft: ${kind} built with ${stackSummary}` +
     `${traits.length ? `, using ${traits.join(', ')}` : ''}${deploy.length ? ', deployed' : ''}. ` +
     'Describe who it is for, what it does, and what they do today instead.';
 
@@ -759,7 +844,7 @@ function adoptLocalRepo(repoRoot, options = {}) {
     constraints: {
       team: 1,
       weeks: stage === 'production' ? 8 : 4,
-      stack: language?.language ?? 'undecided',
+      stack: inferredStack,
       mustUse
     },
     $adopted: {

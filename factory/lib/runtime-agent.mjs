@@ -11,10 +11,13 @@ import { randomUUID } from 'node:crypto';
 import {
   agentPolicyDigest,
   assertAgentPolicy,
-  loadAgentPolicy
+  loadAgentPolicy,
+  SANDBOXED_AGENT_ADAPTER_IDS
 } from './agent-policy.mjs';
 import { executeAgentAdapter } from './agent-adapters.mjs';
 import { digest, extensionError } from './extension-utils.mjs';
+import { readMission } from './missions.mjs';
+import { verifySandboxReceipt, workspaceTreeDigest } from './sandbox/receipt.mjs';
 import {
   recordRuntimeAgentReceipt,
   runtimeStatus,
@@ -75,7 +78,22 @@ function receiptOutputSummary(outcome) {
   })[outcome] ?? 'agent ended with an unknown outcome';
 }
 
+function sandboxSummary(sandboxReceipt) {
+  if (!sandboxReceipt) return undefined;
+  return {
+    id: sandboxReceipt.id,
+    backend: sandboxReceipt.backend,
+    confinementClass: sandboxReceipt.confinementClass,
+    mode: sandboxReceipt.mode,
+    workspaceDigestBefore: sandboxReceipt.workspaceDigestBefore,
+    workspaceDigestAfter: sandboxReceipt.workspaceDigestAfter,
+    changedPaths: (sandboxReceipt.changedPaths ?? []).slice(0, 512),
+    receiptDigest: sandboxReceipt.receiptDigest
+  };
+}
+
 function attemptReceipt({ id, policyDigest, contextDigest, workspaceDigest, execution, attempts }) {
+  const sbx = sandboxSummary(execution.sandboxReceipt);
   return {
     id,
     adapter: execution.adapter,
@@ -94,7 +112,8 @@ function attemptReceipt({ id, policyDigest, contextDigest, workspaceDigest, exec
       // format. Retain its digest/size as evidence and only an allowlisted
       // outcome label in the Runtime ledger.
       summary: receiptOutputSummary(execution.outcome)
-    }
+    },
+    ...(sbx ? { sandbox: sbx } : {})
   };
 }
 
@@ -200,9 +219,25 @@ export async function runRuntimeAgent({ missionFile, packageId, policyFile, leas
     execution = { ...safeFailureResult(error, startedAt), adapter: policy.adapter };
   }
 
+  const policyHash = agentPolicyDigest(policy);
+  let receiptGateError = null;
+  if (SANDBOXED_AGENT_ADAPTER_IDS.includes(policy.adapter)) {
+    const missionDoc = readMission(missionFile, { projectDir }).mission;
+    const declaredClaims = missionDoc.workPackages.find((p) => p.id === packageId)?.resourceClaims?.paths ?? [];
+    const check = verifySandboxReceipt(execution.sandboxReceipt, {
+      expectedPolicyDigest: policyHash,
+      requireOsConfinement: Boolean(policy.sandbox?.requireOs),
+      expectedWorkspaceDigestAfter: workspaceTreeDigest(workspace.worktree),
+      allowedResourceGlobs: policy.mode === 'write-workspace' ? declaredClaims : null
+    });
+    if (!check.ok) {
+      receiptGateError = check.errors[0] ?? 'sandbox receipt rejected';
+    }
+  }
+
   const receipt = attemptReceipt({
     id: agentRunId,
-    policyDigest: agentPolicyDigest(policy),
+    policyDigest: policyHash,
     contextDigest,
     workspaceDigest,
     execution,
@@ -211,7 +246,18 @@ export async function runRuntimeAgent({ missionFile, packageId, policyFile, leas
   const recorded = recordRuntimeAgentReceipt({ missionFile, projectDir, packageId, runId: workPackage.run.id, agentRun: receipt });
 
   let settled;
-  if (execution.outcome === 'completed') {
+  if (receiptGateError) {
+    settled = settleRunningAgent({
+      missionFile,
+      projectDir,
+      packageId,
+      runId: workPackage.run.id,
+      leaseToken,
+      actor,
+      completed: false,
+      reason: `sandbox receipt gate blocked transition: ${String(receiptGateError).replace(/[\r\n\0]/g, ' ').slice(0, 300)}`
+    });
+  } else if (execution.outcome === 'completed') {
     settled = settleRunningAgent({ missionFile, projectDir, packageId, runId: workPackage.run.id, leaseToken, actor, completed: true, reason: null });
     if (settled.error || settled.package?.state !== 'changes_ready') {
       // A completed adapter that lost a lease or another Runtime race never

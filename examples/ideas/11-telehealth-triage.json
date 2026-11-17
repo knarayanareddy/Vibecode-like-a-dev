@@ -1,0 +1,14 @@
+{
+  "name": "telehealth-triage",
+  "idea": "A clinical triage portal where patients schedule video consultations with licensed clinicians and an AI intake assistant summarises symptoms. Every symptom summary must require clinician sign-off before joining the chart, and consultations cannot be booked outside licensed state hours.",
+  "kind": "web-app",
+  "stage": "production",
+  "users": { "scale": "medium" },
+  "traits": ["auth", "persistence", "ai", "notifications"],
+  "risks": { "pii": true, "regulated": true, "publicFacing": true },
+  "regulation": ["hipaa", "eu-ai-act"],
+  "constraints": { "team": 5, "weeks": 12, "stack": "python" },
+  "rules": [
+    "Intake summaries flagged high-acuity shall page the on-call clinician within 2 minutes and block self-scheduled deferral."
+  ]
+}

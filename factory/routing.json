@@ -405,6 +405,27 @@
       "why": "The spec is useless if the agent that receives it cannot find the entry point."
     },
     {
+      "primitive": "agent.autonomy-limits",
+      "when": {
+        "any": [
+          { "field": "kind", "eq": "agent" },
+          {
+            "all": [
+              { "field": "kind", "eq": "automation" },
+              { "field": "traits", "includes": "ai" }
+            ]
+          },
+          {
+            "all": [
+              { "field": "traits", "includes": "ai" },
+              { "field": "risks.destructiveWrites", "eq": true }
+            ]
+          }
+        ]
+      },
+      "why": "Autonomous tool loops need dispatcher-enforced allowlists, human confirmation gates, hard budgets and a kill switch rather than prompt wishes."
+    },
+    {
       "primitive": "agent.spec-drift-guard",
       "when": {
         "field": "tier",

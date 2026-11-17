@@ -1,0 +1,54 @@
+{
+  "id": "dora",
+  "layer": "domain",
+  "title": "EU Digital Operational Resilience Act (DORA)",
+  "why": "Financial entities and critical ICT systems under DORA must classify and report major ICT-related incidents within strict statutory windows, prove operational continuity and recovery under disruption, and maintain an enforceable register and exit strategy for third-party ICT providers.",
+  "addRequirements": [
+    {
+      "key": "resilience.ict-incident-classification",
+      "title": "Major ICT incidents are classified and logged on a reporting clock",
+      "area": "reliability",
+      "statement": "When an operational outage, data-integrity failure or security anomaly occurs, the application shall record a structured ICT incident with severity criteria, affected services, client-impact count and detection timestamp to support initial, intermediate and final DORA regulatory reports.",
+      "definition": "Incident triage uses deterministic thresholds rather than ad-hoc judgement so statutory notification clocks start automatically on detection.",
+      "failurePath": "If impact telemetry is incomplete at detection time, the incident defaults to escalated review and records the detection timestamp immediately rather than delaying classification.",
+      "acceptance": [
+        "Given a fault crossing configured availability or data-integrity thresholds, when detected, then a structured incident record is persisted with detection time, classification and escalation deadline.",
+        "Given a classified major incident, when an incident report export is generated, then it includes initial, intermediate and root-cause timeline fields without mutating earlier entries."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "resilience.continuity-and-failover",
+      "title": "Critical functions degrade predictably and verify backup integrity",
+      "area": "reliability",
+      "statement": "When a primary dependency or storage node fails, the application shall enforce bounded timeouts, preserve transactional integrity without silent data loss, and verify backup integrity hashes before restore.",
+      "definition": "Recovery time and recovery point objectives are backed by deterministic failure handling and verified restore artifacts.",
+      "failurePath": "If a backup fails integrity verification or a failover target is unhealthy, the application aborts automated promotion and alerts the on-call operator.",
+      "acceptance": [
+        "Given a simulated dependency outage, when requests hit a critical workflow, then the application fails closed with no partial state corruption and emits a recovery metric.",
+        "Given a backup artifact with a tampered checksum, when restore verification runs, then the restore is rejected."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "resilience.ict-third-party-register",
+      "title": "Third-party ICT dependencies carry a register of information and exit path",
+      "area": "core",
+      "statement": "The application shall maintain a machine-readable register of every third-party ICT provider naming criticality, data location, contractual audit rights and fallback or exit adapter, and refuse unregistered outbound ICT integrations.",
+      "definition": "Concentration risk and exit readiness stay coupled to actual runtime integrations rather than a stale spreadsheet.",
+      "failurePath": "If a critical workflow enables an external ICT provider missing from the register or lacking a declared exit plan, startup validation or CI rejects the configuration.",
+      "acceptance": [
+        "Given an external provider not listed in the ICT register, when configuration is validated, then validation fails naming the unregistered provider.",
+        "Given a registered critical provider, when its entry is inspected, then service scope, region, criticality tier and exit mechanism are all populated."
+      ],
+      "verify": "automated"
+    }
+  ],
+  "addGates": [
+    {
+      "id": "G3-DORA-RESILIENCE",
+      "tier": 3,
+      "statement": "ICT incident classification, backup-integrity verification and the third-party ICT provider register are proven by automated tests."
+    }
+  ]
+}

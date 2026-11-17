@@ -1,0 +1,16 @@
+{
+  "name": "ruby-invoices",
+  "idea": "A subscription billing workspace for freelance studios that generates recurring invoices, tracks retainer hours and reconciles client transfers without storing raw card numbers. Issued invoices cannot be edited in place and overdue reminders stop immediately on payment.",
+  "kind": "web-app",
+  "stage": "mvp",
+  "users": { "scale": "small" },
+  "traits": ["auth", "persistence", "payments", "notifications"],
+  "risks": { "pii": true, "money": true, "multiTenant": true, "publicFacing": true },
+  "riskWaivers": {
+    "regulation.pci-dss": {
+      "why": "Hosted checkout tokenises all payment methods; the workspace never touches cardholder data.",
+      "expires": "2028-12-31"
+    }
+  },
+  "constraints": { "team": 3, "weeks": 8, "stack": "ruby" }
+}

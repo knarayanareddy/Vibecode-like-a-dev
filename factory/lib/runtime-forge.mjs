@@ -164,3 +164,107 @@ export function writeRuntimeForgePlan({ projectDir = '.', outFile, plan } = {}) 
   }
   return { file: path.relative(root, target).split(path.sep).join('/'), digest: plan.digest };
 }
+
+/**
+ * Opt-in governed GitHub v1 execute mode (ADR 0012, roadmap 3.2).
+ * Offline `prepareRuntimeForgePlan`/`exportRuntimeForgePlan` stay untouched;
+ * this entrypoint runs ONLY on explicit caller request with an explicit
+ * in-memory token, binds the immutable Runtime delivery tuple, never writes
+ * the token or raw provider payload to disk, and appends a redacted receipt
+ * to the hash-chained evidence ledger.
+ */
+export async function executeRuntimeForgePlan({
+  missionFile,
+  packageId,
+  candidateId,
+  repository,
+  headRef,
+  baseRef = null,
+  title = undefined,
+  requiredChecks: checks = [],
+  allowMergeRequest = false,
+  requireGitHubApproval = true,
+  existingPullNumber = null,
+  action = 'publish',
+  pullNumber = null,
+  postEvidence = true,
+  token,
+  fetchImpl = globalThis.fetch,
+  projectDir = '.'
+} = {}) {
+  const root = ensureProjectDir(projectDir);
+  const evidence = runtimeForgeEvidence({ missionFile, packageId, candidateId, projectDir: root });
+  const plan = createGitHubPullRequestPlan({
+    repository,
+    headRef,
+    baseRef: baseRef ?? baseFromTarget(evidence.candidate.targetRef),
+    candidate: evidence.candidate,
+    approval: evidence.approval,
+    queue: evidence.queue,
+    title: safeTitle(title, evidence),
+    body: deterministicBody(evidence),
+    requiredChecks: requiredChecks(checks),
+    requireGitHubApproval: Boolean(requireGitHubApproval),
+    allowMergeRequest: action === 'merge' ? Boolean(allowMergeRequest) : false,
+    ...(existingPullNumber ? { existingPullNumber } : {})
+  });
+
+  const { createGitHubV1Client, executeGitHubDelivery } = await import('../integrations/github-v1/index.mjs');
+  const { appendEvidence, verifyEvidenceChain } = await import('./evidence.mjs');
+  const chainBefore = verifyEvidenceChain({ projectDir: root });
+  const client = createGitHubV1Client({ token, fetchImpl });
+
+  const evidenceLines = [
+    `**Mission / package:** \`${evidence.mission.id}\` / \`${evidence.package.id}\``,
+    `**Verification receipt:** \`${evidence.verification.id}\` (${evidence.verification.outcome})`,
+    `**Independent approval:** \`${evidence.approval.id}\``,
+    `**Queue receipt:** \`${evidence.queue.id}\``,
+    `**Packet digest:** \`${evidence.candidate.packetDigest}\``,
+    `**Evidence chain head:** \`${chainBefore.headHash}\` (${chainBefore.entries} entries, ${chainBefore.ok ? 'verified' : 'degraded'})`
+  ];
+
+  const remote = await executeGitHubDelivery({
+    client,
+    plan,
+    action,
+    pullNumber,
+    postEvidence: action === 'publish' ? Boolean(postEvidence) : false,
+    evidenceLines
+  });
+
+  const receiptBody = {
+    schemaVersion: 1,
+    provider: 'github-v1',
+    mode: 'execute',
+    action: remote.action,
+    executedAt: remote.executedAt,
+    missionId: evidence.mission.id,
+    packageId: evidence.package.id,
+    candidateId: evidence.candidate.id,
+    candidateSha: evidence.candidate.candidateSha,
+    targetSha: evidence.candidate.targetSha,
+    planDigest: plan.digest,
+    repository: plan.repository,
+    pullNumber: remote.pullRequest?.number ?? remote.pullNumber ?? null,
+    pullUrl: remote.pullRequest?.url ?? null,
+    requiredChecksPassed: remote.requiredChecksPassed ?? null,
+    githubApproval: remote.githubApproval ?? null,
+    mergedSha: remote.mergedSha ?? null,
+    evidenceCommentId: remote.evidenceComment?.commentId ?? null
+  };
+  const executionReceipt = { ...receiptBody, receiptDigest: digest(receiptBody) };
+
+  const ledger = appendEvidence({
+    projectDir: root,
+    kind: 'forge',
+    actor: 'forge:github-v1',
+    subject: `${plan.repository}#${executionReceipt.pullNumber ?? 'pending'}`,
+    payload: executionReceipt
+  });
+
+  return {
+    ok: true,
+    receipt: executionReceipt,
+    evidenceHash: ledger.headHash
+  };
+}

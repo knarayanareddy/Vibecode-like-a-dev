@@ -1,0 +1,128 @@
+{
+  "schemaVersion": 1,
+  "description": "Ground-truth compiler expectations for examples/ideas/*.json. Enforced by scripts/stress-test.mjs alongside double-compile byte-identity and polyglot runner-glob checks.",
+  "ideas": {
+    "01-photo-sorter": {
+      "tier": 0,
+      "packet": "single-file"
+    },
+    "02-bike-market": {
+      "tier": 2,
+      "requiredKeys": ["payments.correctness"]
+    },
+    "03-standup-bot": {
+      "tier": 1
+    },
+    "04-clinic-bookings": {
+      "tier": 3
+    },
+    "05-payout-ledger": {
+      "tier": 3,
+      "requiredKeys": ["payments.correctness"]
+    },
+    "06-habit-sync": {
+      "tier": 1,
+      "requiredKeys": ["mobile.offline"]
+    },
+    "07-events-etl": {
+      "tier": 2
+    },
+    "08-flags-sdk": {
+      "tier": 2
+    },
+    "09-docs-assistant": {
+      "tier": 1
+    },
+    "10-log-shipper": {
+      "tier": 1
+    },
+    "11-telehealth-triage": {
+      "tier": 3,
+      "requiredKeys": [
+        "data.phi-encryption",
+        "data.minimum-necessary",
+        "ai.eu-transparency-disclosure",
+        "ai.eu-human-oversight"
+      ],
+      "requiredGates": ["G3-PHI-ENCRYPT", "G3-AUDIT-RETENTION", "G3-AI-OVERSIGHT"],
+      "expectCustomRequirements": 1,
+      "runnerCommand": "pytest",
+      "expectTestGlob": "tests/**",
+      "forbiddenPrimaryNouns": ["clinical", "licensed", "portal", "app"]
+    },
+    "12-junior-coders": {
+      "tier": 3,
+      "requiredKeys": [
+        "privacy.parental-consent",
+        "privacy.parent-review-and-erasure",
+        "privacy.child-data-minimisation"
+      ],
+      "requiredGates": ["G3-PARENTAL-CONSENT"],
+      "expectTestGlob": "tests/**"
+    },
+    "12b-campus-registrar": {
+      "tier": 3,
+      "requiredKeys": [
+        "education.legitimate-interest-access",
+        "education.disclosure-consent-and-log",
+        "auth.tenant-isolation"
+      ],
+      "requiredGates": ["G3-FERPA-DISCLOSURE"],
+      "runnerCommand": "./mvnw test",
+      "expectTestGlob": "src/test/**"
+    },
+    "12c-sox-treasury": {
+      "tier": 3,
+      "requiredKeys": [
+        "finance.segregation-of-duties",
+        "finance.period-close-and-reconciliation",
+        "resilience.ict-incident-classification",
+        "resilience.continuity-and-failover",
+        "integration.retries"
+      ],
+      "requiredGates": ["G3-SOX-CONTROLS", "G3-DORA-RESILIENCE"],
+      "runnerCommand": "dotnet test",
+      "expectTestGlob": "tests/**"
+    },
+    "13-incident-responder": {
+      "tier": 2,
+      "requiredKeys": [
+        "agent.action-boundaries",
+        "agent.approval-gate",
+        "agent.budget-and-killswitch",
+        "integration.retries"
+      ],
+      "requiredPrimitives": ["agent.autonomy-limits"],
+      "requiredGates": ["G2-AUTONOMY"],
+      "runnerCommand": "go test ./...",
+      "expectTestGlob": "**/*_test.go",
+      "forbiddenPrimaryNouns": ["autonomous", "on-call", "production"]
+    },
+    "14-polyglot-commerce": {
+      "tier": 3,
+      "requiredKeys": [
+        "custom.wholesale-minimum-order",
+        "payments.card-data-out-of-scope",
+        "data.subject-access-export",
+        "payments.correctness",
+        "integration.retries"
+      ],
+      "requiredGates": ["G3-CARD-SCOPE", "G3-SUBJECT-RIGHTS"],
+      "expectCustomRequirements": 1,
+      "expectTestGlobs": ["web/tests/**", "api/**/*_test.go", "worker/tests/**", "settlement/tests/**"],
+      "forbiddenPrimaryNouns": ["cross-border", "storefront"]
+    },
+    "14b-ruby-invoices": {
+      "tier": 3,
+      "runnerCommand": "bundle exec rspec",
+      "expectTestGlob": "spec/**"
+    },
+    "15-edge-telemetry": {
+      "tier": 1,
+      "requiredKeys": ["mobile.offline", "integration.retries"],
+      "runnerCommand": "cargo test",
+      "expectTestGlob": "tests/**"
+    }
+  },
+  "knownGaps": []
+}

@@ -1,0 +1,120 @@
+{
+  "version": 1,
+  "comment": "Deterministic lexical cues linking domain language in profile.idea to unflagged profile.risks booleans and profile.regulation regimes. These surface explicit warnings (and --strict refusals unless waived in profile.riskWaivers) without silently mutating the profile.",
+  "negationPrefixes": [
+    "\\bno\\s+",
+    "\\bnever\\s+(?:stores?|collects?|handles?|processes?|accepts?|charges?|moves?|touches?|sends?|calls?|exposes?|deletes?|modifies?|runs?)\\s+(?:any\\s+)?",
+    "\\bwithout\\s+(?:any\\s+)?",
+    "\\bdoes\\s+not\\s+(?:store|collect|handle|process|accept|charge|move|touch|send|call|expose|delete|modify|run)\\s+(?:any\\s+)?",
+    "\\bdo\\s+not\\s+(?:store|collect|handle|process|accept|charge|move|touch|send|call|expose|delete|modify|run)\\s+(?:any\\s+)?",
+    "\\bnot\\s+(?:a\\s+)?",
+    "\\bzero\\s+",
+    "\\bfree\\s+of\\s+"
+  ],
+  "risks": [
+    {
+      "flag": "regulated",
+      "why": "Regulated domains (healthcare, children, student records, financial controls, ICT resilience, high-risk AI) earn tier 3 rigor and regime-specific overlay requirements.",
+      "cues": [
+        { "id": "healthcare-phi", "pattern": "\\b(?:hipaa|protected health information|\\bphi\\b|telehealth|telemedicine|clinical\\s+(?:note|record|intake|triage|visit|workflow)|patient\\s+(?:record|chart|intake|visit|portal|triage)|electronic health record|\\behr\\b|prescriptions?|medical\\s+(?:record|device|history|triage))\\b" },
+        { "id": "children-coppa", "pattern": "\\b(?:coppa|children\\s+under\\s+(?:13|thirteen|16|sixteen)|kids?\\s+aged\\s+(?:\\d{1,2}|under\\s+13)|parental\\s+consent|verifiable\\s+guardian|child(?:ren)?'s\\s+(?:account|profile|data|privacy))\\b" },
+        { "id": "education-ferpa", "pattern": "\\b(?:ferpa|student\\s+(?:education\\s+)?records?|k-12\\s+(?:school|district|student|classroom)|gradebook|transcripts?\\s+and\\s+attendance|individuali[sz]ed\\s+education\\s+program|\\biep\\b)\\b" },
+        { "id": "financial-controls", "pattern": "\\b(?:pci[-\\s]?dss|cardholder\\s+data|sarbanes[-\\s]?oxley|\\bsox\\b\\s+(?:audit|control|compliance)|anti[-\\s]?money[-\\s]?laundering|\\baml\\b|\\bkyc\\b|regulated\\s+financial|digital\\s+operational\\s+resilience|\\bdora\\b\\s+(?:compliance|regulated|entity)|customs\\s+(?:declaration|clearance|tariff|brokerage))\\b" },
+        { "id": "privacy-and-ai-regimes", "pattern": "\\b(?:gdpr|soc\\s*2|eu\\s+ai\\s+act|high[-\\s]?risk\\s+ai\\s+system|biometric\\s+identification|automated\\s+(?:credit|hiring|eligibility)\\s+(?:scoring|decision))\\b" }
+      ]
+    },
+    {
+      "flag": "payments",
+      "why": "Moving or reconciling money requires idempotent writes, integer minor units, audit trails and tier-exempt rigor.",
+      "cues": [
+        { "id": "card-and-psp", "pattern": "\\b(?:stripe|adyen|braintree|credit\\s+cards?|debit\\s+cards?|card\\s+(?:charge|payment|capture)|payment\\s+intents?|chargebacks?)\\b" },
+        { "id": "money-movement", "pattern": "\\b(?:payouts?|disbursements?|escrow|double[-\\s]?entry\\s+ledger|settles?\\s+(?:funds|invoices|charges)|merchant\\s+settlement|collects?\\s+payments?|charges?\\s+(?:buyers?|customers?|subscribers?|cards?)|issues?\\s+refunds?|subscription\\s+billing|wire\\s+transfers?|ach\\s+transfers?|reimburs(?:e|es|ement|ements))\\b" }
+      ]
+    },
+    {
+      "flag": "pii",
+      "why": "Storing personal identifiers triggers data-lifecycle, retention, deletion and log-redaction obligations.",
+      "cues": [
+        { "id": "direct-identifiers", "pattern": "\\b(?:personal\\s+data|personally\\s+identifiable|\\bpii\\b|social\\s+security\\s+number|\\bssn\\b|passport\\s+number|national\\s+id|date\\s+of\\s+birth|home\\s+address|phone\\s+numbers?|email\\s+addresses?|biometric\\s+data)\\b" },
+        { "id": "sensitive-subjects", "pattern": "\\b(?:patients?|student\\s+(?:profile|record|roster)|children\\s+under\\s+(?:13|thirteen)|parent(?:al)?\\s+email|employee\\s+salary|medical\\s+history|therapy\\s+sessions?|applicant\\s+resumes?)\\b" }
+      ]
+    },
+    {
+      "flag": "multiTenant",
+      "why": "Serving multiple isolated organisations requires server-derived tenant scoping and cross-tenant isolation tests.",
+      "cues": [
+        { "id": "tenant-boundary", "pattern": "\\b(?:multi[-\\s]?tenant|tenant\\s+isolation|per[-\\s](?:tenant|clinic|school|district|organisation|organization|company|workspace|merchant|customer)\\s+(?:isolation|data|workspace|schema|account)|cross[-\\s]?tenant|another\\s+(?:clinic|school|district|company|organisation|organization|workspace|tenant|merchant)'s)\\b" },
+        { "id": "org-separation", "pattern": "\\b(?:each\\s+(?:clinic|school|district|hospital|law\\s+firm|accounting\\s+firm|company|merchant)\\s+has\\s+its\\s+own|isolated\\s+(?:workspaces?|tenants?|organisations?|organizations?))\\b" }
+      ]
+    },
+    {
+      "flag": "destructiveWrites",
+      "why": "Irreversible mutations or autonomous execution require confirmation gates, dry-run/rollback paths and audit trails.",
+      "cues": [
+        { "id": "irreversible-data", "pattern": "\\b(?:permanently\\s+deletes?|purges?\\s+(?:records|data|accounts)|drops?\\s+tables?|wipes?\\s+(?:storage|disks?|databases?)|overwrites?\\s+production|irreversible\\s+(?:delete|write|action|mutation))\\b" },
+        { "id": "autonomous-side-effects", "pattern": "\\b(?:executes?\\s+shell\\s+commands?|runs?\\s+(?:database\\s+)?migrations?\\s+automatically|pushes?\\s+commits?|merges?\\s+pull\\s+requests?|deploys?\\s+to\\s+production|modifies?\\s+(?:production|infrastructure|firewall|iam)|terminates?\\s+instances?|revokes?\\s+production\\s+credentials?)\\b" }
+      ]
+    },
+    {
+      "flag": "publicFacing",
+      "why": "Internet-exposed surfaces with untrusted callers require rate limiting, abuse protection and strict input validation.",
+      "cues": [
+        { "id": "public-internet", "pattern": "\\b(?:public[-\\s]?facing|public\\s+(?:marketplace|directory|portal|website|api|endpoint|storefront)|open\\s+(?:self[-\\s]?serve\\s+)?registration|anonymous\\s+visitors?|internet[-\\s]?facing|anyone\\s+on\\s+the\\s+web)\\b" }
+      ]
+    },
+    {
+      "flag": "integrations",
+      "why": "External providers fail independently and require timeouts, signature verification, idempotent retries and contract tests.",
+      "cues": [
+        { "id": "third-party-apis", "pattern": "\\b(?:third[-\\s]?party\\s+apis?|inbound\\s+webhooks?|outbound\\s+webhooks?|stripe\\s+webhooks?|github\\s+api|slack\\s+(?:api|bot|events|webhook)|twilio|sendgrid|salesforce\\s+api|shopify\\s+api|hl7|fhir\\s+api|customs\\s+gateway|carrier\\s+apis?)\\b" }
+      ]
+    }
+  ],
+  "regimes": [
+    {
+      "regime": "hipaa",
+      "why": "US healthcare and patient/clinical records trigger HIPAA security, privacy, minimum-necessary and 6-year audit rules.",
+      "pattern": "\\b(?:hipaa|protected health information|\\bphi\\b|telehealth|telemedicine|clinical\\s+(?:note|record|intake|triage|visit)|patient\\s+(?:record|chart|intake|visit|portal|triage)|electronic health record|\\behr\\b|hl7|fhir)\\b"
+    },
+    {
+      "regime": "coppa",
+      "why": "Products directed at children under 13 require verifiable parental consent, data minimisation and parent erasure controls.",
+      "pattern": "\\b(?:coppa|children\\s+under\\s+(?:13|thirteen)|kids?\\s+(?:aged\\s+(?:[4-9]|1[0-2])|under\\s+13)|parental\\s+consent|verifiable\\s+guardian|child(?:ren)?'s\\s+(?:online\\s+)?privacy)\\b"
+    },
+    {
+      "regime": "ferpa",
+      "why": "Student education records in schools or districts require FERPA access restrictions, parent/student consent and disclosure logs.",
+      "pattern": "\\b(?:ferpa|student\\s+(?:education\\s+)?records?|k-12\\s+(?:school|district|student|classroom)|gradebook|student\\s+transcripts?|individuali[sz]ed\\s+education\\s+program|\\biep\\b)\\b"
+    },
+    {
+      "regime": "pci-dss",
+      "why": "Handling payment card numbers or cardholder environments triggers PCI-DSS scope isolation and PAN redaction.",
+      "pattern": "\\b(?:pci[-\\s]?dss|cardholder\\s+data|primary\\s+account\\s+number|raw\\s+card\\s+numbers?|credit\\s+card\\s+vault|payment\\s+card\\s+processing)\\b"
+    },
+    {
+      "regime": "gdpr",
+      "why": "Processing EU/EEA/UK personal data triggers GDPR lawful basis, subject access/export, erasure and processor obligations.",
+      "pattern": "\\b(?:gdpr|european\\s+(?:union\\s+)?(?:users?|customers?|residents?|citizens?|data\\s+subjects?)|\\beea\\b\\s+(?:users?|residents?|data)|data\\s+subject\\s+(?:access|erasure)|right\\s+to\\s+erasure)\\b"
+    },
+    {
+      "regime": "soc2",
+      "why": "Enterprise B2B trust commitments trigger SOC 2 change-management, access-review and availability evidence.",
+      "pattern": "\\b(?:soc\\s*2|trust\\s+services\\s+criteria|aicpa\\s+audit)\\b"
+    },
+    {
+      "regime": "sox",
+      "why": "Public-company financial reporting and general-ledger systems trigger SOX segregation of duties, period-close locks and 7-year audit retention.",
+      "pattern": "\\b(?:sarbanes[-\\s]?oxley|\\bsox\\b|general\\s+ledger\\s+close|financial\\s+restatement|public[-\\s]?company\\s+(?:financial|accounting|revenue)\\s+controls?|icfr)\\b"
+    },
+    {
+      "regime": "dora",
+      "why": "EU financial entities and their critical ICT flows trigger DORA incident-reporting clocks, resilience testing and third-party ICT registers.",
+      "pattern": "\\b(?:digital\\s+operational\\s+resilience|\\bdora\\b|eu\\s+financial\\s+entit(?:y|ies)|ict\\s+(?:third[-\\s]?party|incident\\s+reporting|operational\\s+resilience))\\b"
+    },
+    {
+      "regime": "eu-ai-act",
+      "why": "High-risk or user-facing AI decision systems in the EU trigger EU AI Act transparency, human-oversight and decision-logging obligations.",
+      "pattern": "\\b(?:eu\\s+ai\\s+act|high[-\\s]?risk\\s+ai|automated\\s+(?:credit|hiring|triage|eligibility|grading)\\s+(?:scoring|decision)|biometric\\s+categorisation|conformity\\s+assessment)\\b"
+    }
+  ]
+}

@@ -44,7 +44,7 @@ export const TRAITS = [
  * *which* obligations exist, and HIPAA, GDPR and PCI-DSS impose different ones.
  * Naming the regime is what lets the compiler add content instead of only weight.
  */
-export const REGULATIONS = ['hipaa', 'gdpr', 'pci-dss', 'soc2'];
+export const REGULATIONS = ['hipaa', 'gdpr', 'pci-dss', 'soc2', 'coppa', 'ferpa', 'sox', 'dora', 'eu-ai-act'];
 
 export const RISK_FLAGS = [
   'pii',
@@ -57,7 +57,7 @@ export const RISK_FLAGS = [
 ];
 
 const ID_PATTERN = /^[a-z0-9][a-z0-9-]{1,60}$/;
-const PROFILE_KEYS = new Set(['name', 'idea', 'kind', 'stage', 'users', 'traits', 'risks', 'regulation', 'constraints', 'overlays', 'discoverability', 'traitWaivers', 'domain', 'rules', 'vocabulary', '$comment', '$adopted']);
+const PROFILE_KEYS = new Set(['name', 'idea', 'kind', 'stage', 'users', 'traits', 'risks', 'regulation', 'constraints', 'overlays', 'discoverability', 'traitWaivers', 'riskWaivers', 'domain', 'rules', 'vocabulary', '$comment', '$adopted']);
 const VOCABULARY_KEYS = new Set(['forbidden', 'affirmed']);
 const USER_KEYS = new Set(['scale']);
 const CONSTRAINT_KEYS = new Set(['team', 'weeks', 'stack', 'mustUse']);
@@ -199,6 +199,7 @@ export function normalizeProfile(raw) {
   profile.overlays = Array.isArray(raw.overlays) ? raw.overlays : [];
   profile.regulation = Array.isArray(raw.regulation) ? raw.regulation.map((value) => String(value).toLowerCase()) : [];
   profile.traitWaivers = Array.isArray(raw.traitWaivers) ? raw.traitWaivers : [];
+  profile.riskWaivers = Array.isArray(raw.riskWaivers) ? raw.riskWaivers : [];
   profile.risks = { ...(plainObject(raw.risks) ? raw.risks : {}) };
   Object.defineProperty(profile, '__inputShapeErrors', { value: shapeErrors, enumerable: false });
 
@@ -325,28 +326,76 @@ export function validateProfile(profile) {
     }
   }
 
-  // An author may pin an idea-level rule to the requirement that covers it. The
-  // heuristic in the coverage detector is a classifier, and a classifier that cannot
-  // be corrected is a classifier people route around.
+  // `profile.rules` supports three structured forms (roadmap 1.4):
+  //   1. String business rule -> compiled into a custom requirement (REQ-C01, ...)
+  //   2. Object custom rule { slug?, title?, text, statement?, failurePath?, acceptance?, area?, verify?, why? }
+  //   3. Coverage pin { text, covers: "REQ-008" | "key", appendCriterion?, acceptance?, why? }
+  const RULE_ALLOWED_KEYS = new Set(['slug', 'key', 'title', 'text', 'statement', 'failurePath', 'acceptance', 'area', 'verify', 'covers', 'appendCriterion', 'why']);
+  const RULE_AREAS = new Set(['core', 'data', 'security', 'frontend', 'api', 'reliability', 'ai']);
   if ('rules' in profile) {
     if (!Array.isArray(profile.rules)) {
-      errors.push('rules: must be a list of { text, covers: "REQ-008" } entries');
+      errors.push('rules: must be a list of rule strings, custom rule objects, or { text, covers: "REQ-008" } entries');
     } else {
       profile.rules.forEach((rule, position) => {
-        if (!rule || typeof rule !== 'object' || Array.isArray(rule)) {
-          errors.push(`rules[${position}]: must be an object with text and covers`);
+        if (typeof rule === 'string') {
+          if (rule.trim().length < 10) errors.push(`rules[${position}]: rule string must be at least 10 characters`);
+          if (/[\r\n]/.test(rule)) errors.push(`rules[${position}]: rule string must be one line`);
           return;
         }
-        const unknownRuleKeys = Object.keys(rule).filter((key) => !['text', 'covers', 'why'].includes(key));
-        if (unknownRuleKeys.length > 0) errors.push(`rules[${position}].${unknownRuleKeys[0]}: unknown field`);
-        if (typeof rule.text !== 'string' || rule.text.trim().length < 10) {
-          errors.push(`rules[${position}].text: quote the idea sentence this pins (10+ characters)`);
+        if (!rule || typeof rule !== 'object' || Array.isArray(rule)) {
+          errors.push(`rules[${position}]: must be a string or an object with text`);
+          return;
         }
-        if (typeof rule.covers !== 'string' || !/^REQ-\d{3,}$/.test(rule.covers)) {
-          errors.push(`rules[${position}].covers: must be a requirement id such as "REQ-008"`);
+        const unknownRuleKeys = Object.keys(rule).filter((key) => !RULE_ALLOWED_KEYS.has(key));
+        if (unknownRuleKeys.length > 0) errors.push(`rules[${position}].${unknownRuleKeys[0]}: unknown field`);
+        const body = rule.text ?? rule.statement;
+        if (typeof body !== 'string' || body.trim().length < 10) {
+          errors.push(`rules[${position}].text: state the rule in at least 10 characters`);
+        }
+        if ('covers' in rule && rule.covers !== undefined) {
+          const validRef = typeof rule.covers === 'string' && (/^REQ-(?:C\d{2,}|\d{3,})$/.test(rule.covers) || /^[a-z][a-z0-9-]*(\.[a-z0-9-]+)+$/.test(rule.covers));
+          if (!validRef) {
+            errors.push(`rules[${position}].covers: must be a requirement id such as "REQ-008" or requirement key`);
+          }
+        }
+        if ('slug' in rule && (typeof rule.slug !== 'string' || !/^[a-z0-9][a-z0-9-]{1,48}$/.test(rule.slug))) {
+          errors.push(`rules[${position}].slug: must be lowercase kebab-case (2-49 chars)`);
+        }
+        if ('area' in rule && !RULE_AREAS.has(rule.area)) {
+          errors.push(`rules[${position}].area: must be one of ${[...RULE_AREAS].join(', ')}`);
+        }
+        if ('verify' in rule && !['automated', 'manual', 'gate'].includes(rule.verify)) {
+          errors.push(`rules[${position}].verify: must be automated, manual or gate`);
+        }
+        if ('acceptance' in rule && (!Array.isArray(rule.acceptance) || rule.acceptance.some((c) => typeof c !== 'string' || c.trim().length < 10))) {
+          errors.push(`rules[${position}].acceptance: must be a list of criterion strings (10+ characters)`);
+        }
+        if ('appendCriterion' in rule && typeof rule.appendCriterion !== 'boolean') {
+          errors.push(`rules[${position}].appendCriterion: must be true or false`);
         }
       });
     }
+  }
+
+  // A risk waiver acknowledges an idea-level risk hint with a reason and expiry.
+  if (!Array.isArray(profile.riskWaivers)) {
+    errors.push('riskWaivers: must be a list of { flag, reason, expires } entries');
+  } else {
+    profile.riskWaivers.forEach((waiver, position) => {
+      if (!waiver || typeof waiver !== 'object' || Array.isArray(waiver)) {
+        errors.push(`riskWaivers[${position}]: must be an object with flag, reason and expires`);
+        return;
+      }
+      if (!RISK_FLAGS.includes(waiver.flag)) {
+        errors.push(`riskWaivers[${position}].flag: unknown risk flag "${waiver.flag}". Known: ${RISK_FLAGS.join(', ')}`);
+      }
+      if (typeof waiver.reason !== 'string' || waiver.reason.trim().length < 10) {
+        errors.push(`riskWaivers[${position}].reason: say why the risk does not apply (10+ characters)`);
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(waiver.expires ?? '')) || Number.isNaN(Date.parse(waiver.expires))) {
+        errors.push(`riskWaivers[${position}].expires: must be a YYYY-MM-DD date, so the waiver cannot live forever`);
+      }
+    });
   }
 
   // A waiver is deliberate, dated debt. It must name a trait, a reason and an
@@ -389,13 +438,28 @@ export function validateProfile(profile) {
     }
   }
 
-  // Both fields are rendered into the packet. Validate their shape here rather
-  // than letting a malformed optional value turn into an emitter stack trace.
-  // Newlines would also let profile data become Markdown structure.
-  if (typeof profile.constraints.stack !== 'string' || profile.constraints.stack.trim() === '') {
-    errors.push('constraints.stack: must be a non-empty string');
-  } else if (/[\r\n]/.test(profile.constraints.stack)) {
-    errors.push('constraints.stack: must be one line');
+  // `constraints.stack` may be a single-line string ("rust", "Python 3.12") or a
+  // per-service map ({ backend: "python", frontend: "typescript" }). Newlines are
+  // rejected in both forms so profile data cannot forge Markdown structure.
+  const rawStack = profile.constraints.stack;
+  if (typeof rawStack === 'string') {
+    if (rawStack.trim() === '') errors.push('constraints.stack: must be a non-empty string or per-service map');
+    else if (/[\r\n]/.test(rawStack)) errors.push('constraints.stack: must be one line');
+  } else if (plainObject(rawStack)) {
+    const entries = Object.entries(rawStack);
+    if (entries.length === 0) {
+      errors.push('constraints.stack: per-service map must declare at least one service');
+    }
+    for (const [service, stackName] of entries) {
+      if (!/^[a-z0-9][a-z0-9/_-]{0,60}$/.test(service) || service.includes('..')) {
+        errors.push(`constraints.stack.${service}: service key must be lowercase kebab/snake/path (e.g. "backend", "frontend")`);
+      }
+      if (typeof stackName !== 'string' || stackName.trim() === '' || /[\r\n]/.test(stackName)) {
+        errors.push(`constraints.stack.${service}: must be a non-empty one-line stack name`);
+      }
+    }
+  } else {
+    errors.push('constraints.stack: must be a non-empty string or per-service map (e.g. { backend: "python", frontend: "typescript" })');
   }
 
   if (!Array.isArray(profile.constraints.mustUse)) {

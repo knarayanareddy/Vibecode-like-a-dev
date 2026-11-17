@@ -23,10 +23,10 @@ import { verifyPacket } from './verify.mjs';
 
 export const MISSION_SCHEMA_VERSION = 1;
 const COMMIT = /^[a-f0-9]{40}$/;
-const REQUIREMENT = /^REQ-\d{3,}$/;
+const REQUIREMENT = /^REQ-(?:C\d{2,}|\d{3,})$/;
 const SAFE_GIT_REF = /^(?:HEAD|[A-Za-z0-9][A-Za-z0-9._/-]{0,200})$/;
 const SAFE_PATH_PATTERN = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9][A-Za-z0-9._/*?{}-]{0,240}$/;
-const MISSION_FIELDS = new Set(['schemaVersion', 'id', 'title', 'packet', 'target', 'corePolicyDigest', 'workPackages']);
+const MISSION_FIELDS = new Set(['schemaVersion', 'id', 'title', 'packet', 'target', 'corePolicyDigest', 'workPackages', 'rebaseHistory']);
 const DEFINITION_FIELDS = new Set(['schemaVersion', 'id', 'title', 'workPackages']);
 const PACKAGE_FIELDS = new Set(['id', 'title', 'requirements', 'dependsOn', 'resourceClaims']);
 
@@ -363,5 +363,241 @@ export function missionStatus({ file, projectDir = '.', policy = loadPolicy() } 
       total: report.authority.requirements.length,
       assigned: new Set((loaded.mission.workPackages ?? []).flatMap((workPackage) => workPackage.requirements ?? [])).size
     } : null
+  };
+}
+
+function gitIsAncestor(project, ancestor, descendant) {
+  try {
+    execFileSync('git', ['-C', project, 'merge-base', '--is-ancestor', ancestor, descendant], { stdio: ['ignore', 'ignore', 'ignore'] });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function gitChangedFiles(project, fromCommit, toCommit) {
+  try {
+    const out = execFileSync('git', ['-C', project, 'diff', '--name-only', `${fromCommit}..${toCommit}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    return out.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function claimTouches(paths, changedFiles) {
+  if (!Array.isArray(paths) || paths.length === 0 || changedFiles.length === 0) return false;
+  return changedFiles.some((file) => paths.some((pattern) => {
+    const prefix = pattern.split('*')[0];
+    return prefix ? file.startsWith(prefix) : file === pattern;
+  }));
+}
+
+/**
+ * Deterministically partition a compiled packet's requirements into a
+ * dependency-ordered mission definition grouped by area (ADR 0011, 2.7).
+ */
+export function planMissionDefinitionFromPacket({ packetDir, missionId = null, title = null, resourceClaimsByArea = {} } = {}) {
+  const specFile = path.join(packetDir, 'spec.json');
+  const spec = readJson(specFile);
+  const projectName = String(spec.project?.name ?? 'project').toLowerCase().replace(/[^a-z0-9-]+/g, '-');
+  const id = missionId ?? `${projectName}-build`;
+  const allReqs = (spec.requirements ?? []).filter((r) => REQUIREMENT.test(String(r.id ?? '')));
+  if (allReqs.length === 0) {
+    throw extensionError('packet contains no assignable requirements', 'INVALID_MISSION_PACKET');
+  }
+
+  const areaOrder = ['core', 'data', 'security', 'api', 'ai', 'frontend', 'reliability', 'delivery'];
+  const groups = new Map();
+  for (const req of allReqs) {
+    const area = areaOrder.includes(req.area) ? req.area : 'core';
+    if (!groups.has(area)) groups.set(area, []);
+    groups.get(area).push(req.id);
+  }
+
+  const orderedAreas = [...groups.keys()].sort((a, b) => areaOrder.indexOf(a) - areaOrder.indexOf(b));
+  const defaultClaims = ['src/**', 'lib/**', 'app/**', 'tests/**', 'test/**', 'spec/**', 'docs/**', 'contracts/**', 'migrations/**', 'enforcement/**'];
+  const workPackages = [];
+  for (const area of orderedAreas) {
+    const pkgId = `pkg-${area}`;
+    workPackages.push({
+      id: pkgId,
+      title: `Implement and verify ${area} specification requirements`,
+      requirements: groups.get(area).sort(),
+      dependsOn: [],
+      resourceClaims: {
+        paths: resourceClaimsByArea[area] ?? defaultClaims
+      }
+    });
+  }
+
+  return {
+    schemaVersion: MISSION_SCHEMA_VERSION,
+    id,
+    title: title ?? `Build ${spec.project?.title ?? spec.project?.name ?? 'project'} against verified spec`,
+    workPackages
+  };
+}
+
+/**
+ * Safely rebase a mission onto an updated Git target ref/commit and refreshed
+ * packet authority (roadmap 2.6, ADR 0011).
+ *
+ * Computes added, retained and removed requirement IDs, drops only genuinely
+ * retired IDs when `dropRemoved: true`, assigns newly introduced requirements
+ * to `assignAddedTo` (or a new `pkg-delta` work package when requested),
+ * identifies impacted work packages from changed paths and requirement deltas,
+ * and records an immutable `rebaseHistory` receipt.
+ */
+export function rebaseMission({
+  file,
+  projectDir = '.',
+  targetRef = null,
+  packetDir = null,
+  assignAddedTo = null,
+  dropRemoved = false,
+  dryRun = false,
+  policy = loadPolicy()
+} = {}) {
+  const loaded = readMission(file, { projectDir });
+  const project = loaded.project;
+  const current = loaded.mission;
+  const previousDigest = digest(current);
+  const nextRef = targetRef ?? current.target?.ref ?? 'HEAD';
+  const nextCommit = gitCommit(project, nextRef);
+  const authority = packetAuthority(project, packetDir ?? current.packet?.path ?? 'specs', policy);
+  const nextPolicyDigest = digest(policy);
+
+  const oldAssigned = new Set((current.workPackages ?? []).flatMap((pkg) => pkg.requirements ?? []));
+  const nextKnown = new Set(authority.requirements);
+
+  const addedRequirements = authority.requirements.filter((id) => !oldAssigned.has(id));
+  const removedRequirements = [...oldAssigned].filter((id) => !nextKnown.has(id)).sort();
+  const retainedRequirements = authority.requirements.filter((id) => oldAssigned.has(id));
+
+  if (removedRequirements.length > 0 && !dropRemoved) {
+    throw extensionError(
+      `mission rebase refused: packet removed assigned requirement(s) (${removedRequirements.join(', ')}); pass --drop-removed to acknowledge retirement`,
+      'MISSION_REBASE_REMOVED_REQUIREMENTS'
+    );
+  }
+
+  const fastForward = current.target.commit === nextCommit || gitIsAncestor(project, current.target.commit, nextCommit);
+  const changedFiles = current.target.commit === nextCommit ? [] : gitChangedFiles(project, current.target.commit, nextCommit);
+  const packetChanged = current.packet.digest !== authority.digest;
+  const targetChanged = current.target.commit !== nextCommit || current.target.ref !== nextRef;
+  const policyChanged = current.corePolicyDigest !== nextPolicyDigest;
+
+  const updatedPackages = current.workPackages.map((pkg) => {
+    const filtered = pkg.requirements.filter((id) => nextKnown.has(id));
+    return {
+      ...pkg,
+      requirements: [...filtered],
+      dependsOn: [...(pkg.dependsOn ?? [])],
+      ...(pkg.resourceClaims ? { resourceClaims: { paths: [...pkg.resourceClaims.paths] } } : {})
+    };
+  });
+
+  if (addedRequirements.length > 0) {
+    if (assignAddedTo) {
+      const targetPkg = updatedPackages.find((pkg) => pkg.id === assignAddedTo);
+      if (!targetPkg) {
+        throw extensionError(`mission has no work package "${assignAddedTo}" for added requirements`, 'UNKNOWN_WORK_PACKAGE');
+      }
+      targetPkg.requirements = [...new Set([...targetPkg.requirements, ...addedRequirements])].sort();
+    } else {
+      let deltaPkgId = 'pkg-rebased-delta';
+      let counter = 2;
+      while (updatedPackages.some((pkg) => pkg.id === deltaPkgId)) {
+        deltaPkgId = `pkg-rebased-delta-${counter}`;
+        counter += 1;
+      }
+      updatedPackages.push({
+        id: deltaPkgId,
+        title: 'Rebased specification requirement additions',
+        requirements: [...addedRequirements].sort(),
+        dependsOn: [],
+        resourceClaims: { paths: ['src/**', 'tests/**', 'docs/**'] }
+      });
+    }
+  }
+
+  // Refuse leaving an emptied package dangling after retirement.
+  const emptied = updatedPackages.filter((pkg) => pkg.requirements.length === 0).map((pkg) => pkg.id);
+  if (emptied.length > 0) {
+    throw extensionError(
+      `mission rebase would leave work package(s) without requirements: ${emptied.join(', ')}`,
+      'MISSION_REBASE_EMPTY_PACKAGE'
+    );
+  }
+
+  const impactedPackages = updatedPackages
+    .filter((pkg) => {
+      const prev = current.workPackages.find((p) => p.id === pkg.id);
+      if (!prev) return true;
+      const reqChanged = JSON.stringify(prev.requirements) !== JSON.stringify(pkg.requirements);
+      const filesTouched = claimTouches(pkg.resourceClaims?.paths ?? [], changedFiles);
+      return reqChanged || filesTouched || (!fastForward && targetChanged);
+    })
+    .map((pkg) => pkg.id);
+
+  const historyEntry = {
+    at: new Date().toISOString(),
+    previousMissionDigest: previousDigest,
+    fromCommit: current.target.commit,
+    toCommit: nextCommit,
+    toRef: nextRef,
+    fastForward,
+    fromPacketDigest: current.packet.digest,
+    toPacketDigest: authority.digest,
+    addedRequirements,
+    removedRequirements,
+    impactedPackages
+  };
+
+  const changed = packetChanged || targetChanged || policyChanged || addedRequirements.length > 0 || removedRequirements.length > 0;
+  const nextMission = changed
+    ? {
+        schemaVersion: MISSION_SCHEMA_VERSION,
+        id: current.id,
+        title: current.title,
+        packet: { path: authority.relativePath, digest: authority.digest },
+        target: { ref: nextRef, commit: nextCommit },
+        corePolicyDigest: nextPolicyDigest,
+        workPackages: updatedPackages,
+        rebaseHistory: [...(Array.isArray(current.rebaseHistory) ? current.rebaseHistory : []), historyEntry].slice(-32)
+      }
+    : current;
+
+  const validated = validateMission(nextMission, { projectDir: project, policy });
+  if (!validated.ok) {
+    throw extensionError(`rebased mission failed validation:\n${validated.errors.map((e) => `- ${e}`).join('\n')}`, 'INVALID_MISSION');
+  }
+
+  if (changed && !dryRun) {
+    writeJsonAtomic(loaded.file, nextMission);
+  }
+
+  return {
+    ok: true,
+    changed,
+    dryRun: Boolean(dryRun),
+    fastForward,
+    file: loaded.file,
+    previousDigest,
+    digest: digest(nextMission),
+    mission: nextMission,
+    diff: {
+      packetChanged,
+      targetChanged,
+      policyChanged,
+      fromCommit: current.target.commit,
+      toCommit: nextCommit,
+      changedFiles,
+      addedRequirements,
+      removedRequirements,
+      retainedCount: retainedRequirements.length,
+      impactedPackages,
+      unaffectedPackages: updatedPackages.map((p) => p.id).filter((id) => !impactedPackages.includes(id))
+    }
   };
 }

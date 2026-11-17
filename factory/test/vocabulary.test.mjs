@@ -33,7 +33,7 @@ const FORBIDDEN = [
 
 function profiles() {
   const ideas = readdirSync(path.join(ROOT, 'examples', 'ideas'))
-    .filter((file) => file.endsWith('.json'))
+    .filter((file) => file.endsWith('.json') && file !== 'expected.json')
     .map((file) => JSON.parse(readFileSync(path.join(ROOT, 'examples', 'ideas', file), 'utf8')));
 
   const adversarial = JSON.parse(

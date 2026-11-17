@@ -1,0 +1,10 @@
+{
+  "name": "incident-responder",
+  "idea": "An autonomous on-call remediation agent that inspects production alerts, queries service telemetry and proposes rollback or scaling actions. The agent must never invoke unregistered tools, destructive actions must pause for human approval, and every run must stop at its step budget.",
+  "kind": "agent",
+  "stage": "production",
+  "users": { "scale": "medium" },
+  "traits": ["ai", "auth", "webhooks", "persistence"],
+  "risks": { "pii": true, "destructiveWrites": true },
+  "constraints": { "team": 4, "weeks": 10, "stack": "go" }
+}

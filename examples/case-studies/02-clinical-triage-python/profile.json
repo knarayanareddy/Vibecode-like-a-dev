@@ -1,0 +1,40 @@
+{
+  "name": "clinical-triage-python",
+  "idea": "Clinical intake triage copilot for emergency nurses to summarize patient symptoms, flag high-acuity risks and queue clinician-reviewed care dispositions instead of unstructured paper intake notes.",
+  "kind": "agent",
+  "stage": "production",
+  "users": {
+    "scale": "medium"
+  },
+  "traits": [
+    "ai",
+    "auth",
+    "persistence"
+  ],
+  "risks": {
+    "pii": true,
+    "payments": false,
+    "regulated": true,
+    "multiTenant": true,
+    "destructiveWrites": true,
+    "publicFacing": true,
+    "integrations": false
+  },
+  "regulation": [
+    "hipaa",
+    "gdpr",
+    "eu-ai-act"
+  ],
+  "rules": [
+    "When the triage model classifies an intake as urgent, the service shall require explicit clinician confirmation before releasing the disposition."
+  ],
+  "constraints": {
+    "team": 4,
+    "weeks": 10,
+    "stack": "python",
+    "mustUse": [
+      "FastAPI",
+      "SQLAlchemy"
+    ]
+  }
+}

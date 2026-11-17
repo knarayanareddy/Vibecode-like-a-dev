@@ -1,0 +1,10 @@
+{
+  "name": "edge-telemetry",
+  "idea": "A command-line collector that batches industrial sensor frames from serial gateways, verifies CRC checksums and forwards compressed archives over TLS. Corrupted frames must be quarantined with their byte offset, and local ring buffers must drop nothing during 24-hour link outages.",
+  "kind": "cli",
+  "stage": "production",
+  "users": { "scale": "medium" },
+  "traits": ["offline", "webhooks"],
+  "risks": { "destructiveWrites": false },
+  "constraints": { "team": 3, "weeks": 8, "stack": "rust" }
+}

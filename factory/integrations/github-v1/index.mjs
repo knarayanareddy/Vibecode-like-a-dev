@@ -159,6 +159,40 @@ export async function inspectGitHubPullRequest({ client, plan, pullNumber } = {}
   const approved = effectiveReviews.some((review) => review.state === 'APPROVED');
   return { planDigest: plan.digest, pullRequest, checks: completed, requiredChecksPassed, githubApproval: approved };
 }
+/** Post a secret-redacted VLD verification and evidence comment after checking PR SHA identity. */
+export async function postGitHubEvidenceComment({ client, plan, pullNumber, summaryLines = [] } = {}) {
+  if (!client || typeof client.request !== 'function') throw extensionError('GitHub client is invalid', 'INVALID_GITHUB_PLAN');
+  checkedPlan(plan);
+  const number = safeNumber(pullNumber);
+  const pull = validatePull(
+    await client.request('GET', `/repos/${plan.repository}/pulls/${number}`),
+    { headRef: plan.headRef, headSha: plan.headSha, baseRef: plan.baseRef }
+  );
+  const cleanedLines = (Array.isArray(summaryLines) ? summaryLines : [])
+    .slice(0, 24)
+    .map((line) => redactError(String(line ?? '')).trim())
+    .filter(Boolean);
+  const body = [
+    '<!-- vld-evidence-v1 -->',
+    `**VLD Governed Delivery Evidence** · candidate \`${plan.candidateId}\``,
+    '',
+    `- **Head SHA:** \`${plan.headSha}\` (\`${plan.headRef}\` → \`${plan.baseRef}\`)`,
+    `- **Target SHA:** \`${plan.targetSha}\``,
+    `- **Plan digest:** \`${plan.digest}\``,
+    ...cleanedLines.map((line) => `- ${line}`)
+  ].join('\n');
+  const created = await client.request('POST', `/repos/${plan.repository}/issues/${number}/comments`, { body });
+  if (!object(created) || !Number.isSafeInteger(created.id) || created.id < 1) {
+    throw extensionError('GitHub response is missing comment identity', 'GITHUB_RESPONSE_INVALID');
+  }
+  return {
+    planDigest: plan.digest,
+    pullNumber: pull.number,
+    commentId: created.id,
+    url: typeof created.html_url === 'string' && created.html_url.startsWith('https://github.com/') ? created.html_url : pull.url
+  };
+}
+
 /** Request GitHub's merge endpoint only after remote facts still match the exact plan. */
 export async function requestGitHubMerge({ client, plan, pullNumber } = {}) {
   if (plan?.allowMergeRequest !== true) throw extensionError('GitHub merge request is not enabled by the reviewed plan', 'GITHUB_MERGE_NOT_ALLOWED');
@@ -167,4 +201,57 @@ export async function requestGitHubMerge({ client, plan, pullNumber } = {}) {
   const merged = await client.request('PUT', `/repos/${plan.repository}/pulls/${safeNumber(pullNumber)}/merge`, { sha: plan.headSha, merge_method: 'merge' });
   if (!object(merged) || merged.merged !== true || !SHA.test(String(merged.sha ?? ''))) throw extensionError('GitHub did not confirm an exact merge result; inspect the forge before retrying', 'GITHUB_MERGE_AMBIGUOUS');
   return { planDigest: plan.digest, pullNumber: safeNumber(pullNumber), mergedSha: merged.sha, message: typeof merged.message === 'string' ? merged.message.slice(0, 240) : 'GitHub confirmed merge' };
+}
+
+/**
+ * Opt-in governed GitHub v1 execute mode (ADR 0012, roadmap 3.2).
+ * Supports `publish` (create/update PR + optional evidence comment),
+ * `inspect` (verify checks/reviews for exact head SHA), and `merge`
+ * (re-verify gates + request merge). Never persists credentials.
+ */
+export async function executeGitHubDelivery({
+  client,
+  plan,
+  action = 'publish',
+  pullNumber = null,
+  postEvidence = false,
+  evidenceLines = []
+} = {}) {
+  checkedPlan(plan);
+  if (!['publish', 'inspect', 'merge'].includes(action)) {
+    throw extensionError('GitHub execute action must be publish, inspect, or merge', 'INVALID_GITHUB_ACTION');
+  }
+  if (action === 'publish') {
+    const published = await publishGitHubPullRequest({ client, plan });
+    const comment = postEvidence
+      ? await postGitHubEvidenceComment({
+          client,
+          plan,
+          pullNumber: published.pullRequest.number,
+          summaryLines: evidenceLines
+        })
+      : null;
+    return {
+      action: 'publish',
+      executedAt: new Date().toISOString(),
+      planDigest: plan.digest,
+      pullRequest: published.pullRequest,
+      evidenceComment: comment
+    };
+  }
+  const targetPr = pullNumber ?? plan.existingPullNumber;
+  if (action === 'inspect') {
+    const inspected = await inspectGitHubPullRequest({ client, plan, pullNumber: targetPr });
+    return {
+      action: 'inspect',
+      executedAt: new Date().toISOString(),
+      ...inspected
+    };
+  }
+  const merged = await requestGitHubMerge({ client, plan, pullNumber: targetPr });
+  return {
+    action: 'merge',
+    executedAt: new Date().toISOString(),
+    ...merged
+  };
 }

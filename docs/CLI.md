@@ -6,10 +6,15 @@
 vibecode like a dev — from one paragraph to a spec an agent can execute
 
 Usage
-  vld init <dir>                     write profile.json to fill in
+  vld init <dir> [--interactive]     write profile.json (or build one via guided wizard)
+  vld doctor [--project <dir>] [--packet <dir>] [--json]
+                                     diagnose Node runtime, Git, sandbox backends, packet and audit chain
+  vld migrate [--project <dir>] [--profile <file>] [--packet <dir>] [--dry-run] [--json]
+                                     safely upgrade legacy profiles, runtime policies and packets to current VLD
   vld adopt <repo-or-url> [-o <file>] [--name <slug>] [--idea <text>] [--force] [--json]
                                      infer a profile from a local path or Git repository URL
-  vld plan <profile.json> [--json] [--strict]   show selection and reasoning, write nothing; --strict refuses an adopted TODO idea
+  vld plan <profile.json> [--explain] [--json] [--strict]
+                                     show selection, risk/regime hints and domain-noun confidence; --strict refuses unwaived risks and TODO ideas
   vld compile <profile.json> -o <dir> [--force] [--strict] [--packet-dir <label>] [--lean]
                                      --packet-dir overrides the directory name embedded in generated commands
                                      --lean emits AGENTS.md and spec.json only, for a token-budgeted reader
@@ -22,8 +27,8 @@ Usage
                                      render a delta spec for a brownfield change
   vld change verify <change-dir> [--project <dir>]
                                      validate a change proposal, reviewed evidence links and resulting manifest
-  vld change archive <change-dir> <packet-dir> [--profile <p>]
-                                     fold an applied change into the profile's overlay stack
+  vld change archive <change-dir> <packet-dir> [--profile <p>] [--to-profile-rules]
+                                     fold an applied change into the profile's overlay stack or profile.rules
   vld change init <dir>              write change.json to fill in
   vld artifact list|init|validate|verify|status <type> [id] [--from-store store/asset] [--project <dir>]
                                      generate, validate and cross-check product, architecture, delivery, review and QA artifacts
@@ -67,12 +72,28 @@ Usage
                                      frozen candidate/packet verification, independent review and a local queue; no merge, push or forge access
   vld runtime forge plan-export <mission.json> <package> --candidate <id> --actor release-approver:<id> --repository <owner/repo> --head-ref <branch> [--base-ref <branch>] [--checks <name,...>] [--title <text>] [--out <file>] [--dry-run] [--json]
                                      derive a durable, offline GitHub v1 plan; never reads credentials, invokes gh, pushes, changes a PR, or requests merge
+  vld runtime forge execute <mission.json> <package> --candidate <id> --actor release-approver:<id> --repository <owner/repo> --head-ref <branch> [--action publish|inspect|merge] [--pr <n>] [--allow-merge] [--token-env GITHUB_TOKEN]
+                                     opt-in governed GitHub v1 delivery using an explicit memory-only token; records hash-chained receipt
+  vld review prepare|verify|record [--packet <dir>] [--project <dir>] [--report <review.json>] [--base-ref <ref>] [--head-ref <ref>] [--json]
+                                     context-isolated six-category spec review and high-rigor human escalation
+  vld drift check|init-workflow|init-oracles [--packet <dir>] [--project <dir>] [--base-ref <ref>] [--record] [--force] [--json]
+                                     continuous specification-to-code drift checks, CI workflow, and semantic oracles
+  vld evidence verify|export|append [--project <dir>] [--format json|markdown] [-o <file>] [--json]
+                                     verify or export the tamper-evident SHA-256 hash-chained evidence ledger
+  vld telemetry status|enable|disable|purge [--project <dir>] [--json]
+                                     strictly opt-in local anonymous telemetry (disabled by default; zero automatic network calls)
   vld runtime serve <mission.json> [--port <0-65535>] [--token <local-token>] [--project <dir>]
   vld runtime status|events|allocate|heartbeat|transition|recover [package] --runtime-url <https-url> --runtime-token <token> [--request-id <id>]
                                      explicit typed remote client; https required except loopback development
                                      loopback-only Runtime API plus the local Studio dashboard; never starts an agent
   vld studio serve <mission.json> [--port <0-65535>] [--token <local-token>] [--project <dir>]
                                      launch the same loopback Runtime API and accessible browser Studio; token stays in browser memory only
+  vld mission rebase <mission.json> [--target <ref>] [--packet <dir>] [--assign-added <pkg>] [--drop-removed] [--dry-run] [--project <dir>] [--json]
+                                     rebase a mission onto an updated target commit and/or recompiled packet without dropping coverage
+  vld sandbox probe|conformance [--backend <auto|oci|bwrap|linux-ns|darwin-seatbelt|node-permission>] [--json]
+                                     inspect host sandbox backends or execute the 8 live confinement probes (ADR 0011)
+  vld build [--profile <file>] [--packet <dir>] [--mission <file>] [--adapter <sandboxed-cli|sandboxed-acp|fake>] [--executable <path>] [--arg <value>] [--backend <id>] [--max-repairs <0-5>] [--gates] [--require-os] [--dry-run] [--project <dir>] [--json]
+                                     compile/verify spec, partition mission DAG, run sandboxed packages with bounded repair and emit build-report.json
   vld mcp                            run the MCP server over stdio
   vld index [--check]                rebuild primitives/index.json
 

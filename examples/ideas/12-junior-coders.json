@@ -1,0 +1,11 @@
+{
+  "name": "junior-coders",
+  "idea": "An interactive coding playground for children aged 8 to 12 where young learners build sprite puzzles and share projects in moderated clubs. No child account may store personal data until parental consent is verified, and parents must be able to erase every project in one action.",
+  "kind": "web-app",
+  "stage": "production",
+  "users": { "scale": "medium" },
+  "traits": ["auth", "persistence"],
+  "risks": { "pii": true, "regulated": true, "publicFacing": true },
+  "regulation": ["coppa"],
+  "constraints": { "team": 4, "weeks": 10, "stack": "typescript" }
+}

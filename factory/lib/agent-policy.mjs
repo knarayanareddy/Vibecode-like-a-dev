@@ -12,7 +12,10 @@ import path from 'node:path';
 import { digest, ensureProjectDir, extensionError, ID_PATTERN } from './extension-utils.mjs';
 
 export const AGENT_POLICY_SCHEMA_VERSION = 1;
+export const AGENT_POLICY_V2_SCHEMA_VERSION = 2;
 export const AGENT_ADAPTER_IDS = Object.freeze(['fake', 'local-process', 'acp-v1']);
+export const SANDBOXED_AGENT_ADAPTER_IDS = Object.freeze(['sandboxed-cli', 'sandboxed-acp']);
+export const ALL_AGENT_ADAPTER_IDS = Object.freeze([...AGENT_ADAPTER_IDS, ...SANDBOXED_AGENT_ADAPTER_IDS]);
 export const AGENT_CAPABILITIES = Object.freeze([
   'readWorkspace',
   'writeWorkspace',
@@ -27,7 +30,10 @@ export const AGENT_CAPABILITIES = Object.freeze([
   'gitMerge'
 ]);
 
-const POLICY_FIELDS = new Set(['schemaVersion', 'id', 'adapter', 'mode', 'capabilities', 'limits', 'environment', 'command']);
+const POLICY_V1_FIELDS = new Set(['schemaVersion', 'id', 'adapter', 'mode', 'capabilities', 'limits', 'environment', 'command']);
+const POLICY_V2_FIELDS = new Set([...POLICY_V1_FIELDS, 'sandbox']);
+const SANDBOX_FIELDS = new Set(['backend', 'requireOs', 'allowChildProcess', 'extraReadPaths', 'ociImage']);
+const ALLOWED_SANDBOX_BACKENDS = new Set(['auto', 'oci', 'bwrap', 'linux-ns', 'darwin-seatbelt', 'node-permission']);
 const LIMIT_FIELDS = new Set(['durationMs', 'outputBytes', 'retryBudget']);
 const COMMAND_FIELDS = new Set(['script', 'executable', 'args']);
 const SAFE_ENVIRONMENT_NAMES = new Set(['LANG', 'LC_ALL', 'TZ', 'NO_COLOR']);
@@ -93,6 +99,38 @@ export function defaultFakeAgentPolicy() {
   };
 }
 
+/** Default v2 sandboxed CLI policy with receipt-gated workspace writes (ADR 0011). */
+export function defaultSandboxedCliPolicy({ executable = process.execPath, args = [], mode = 'write-workspace', backend = 'auto' } = {}) {
+  return {
+    schemaVersion: AGENT_POLICY_V2_SCHEMA_VERSION,
+    id: 'sandboxed-cli-v2',
+    adapter: 'sandboxed-cli',
+    mode,
+    capabilities: {
+      readWorkspace: true,
+      writeWorkspace: mode === 'write-workspace',
+      runDeclaredCommands: true,
+      network: false,
+      streamEvents: true,
+      cancel: true,
+      reconnect: false,
+      sandbox: true,
+      credentialAccess: false,
+      gitPush: false,
+      gitMerge: false
+    },
+    sandbox: {
+      backend,
+      requireOs: false,
+      allowChildProcess: false,
+      extraReadPaths: []
+    },
+    limits: { durationMs: 60_000, outputBytes: 262_144, retryBudget: 0 },
+    environment: {},
+    command: { script: null, executable, args }
+  };
+}
+
 /**
  * Structural validation deliberately performs no filesystem lookup, so policy
  * review/digest tests are deterministic. `resolveLocalProcessCommand` performs
@@ -100,11 +138,15 @@ export function defaultFakeAgentPolicy() {
  */
 export function validateAgentPolicy(policy) {
   const errors = [];
-  closedObject(policy, POLICY_FIELDS, 'agent policy', errors);
-  if (!plainObject(policy)) return { ok: false, errors };
-  if (policy.schemaVersion !== AGENT_POLICY_SCHEMA_VERSION) errors.push(`agent policy schemaVersion must be ${AGENT_POLICY_SCHEMA_VERSION}`);
+  if (!plainObject(policy)) return { ok: false, errors: ['agent policy must be an object'] };
+  const isV2 = policy.schemaVersion === AGENT_POLICY_V2_SCHEMA_VERSION;
+  closedObject(policy, isV2 ? POLICY_V2_FIELDS : POLICY_V1_FIELDS, 'agent policy', errors);
+  if (policy.schemaVersion !== AGENT_POLICY_SCHEMA_VERSION && !isV2) {
+    errors.push(`agent policy schemaVersion must be ${AGENT_POLICY_SCHEMA_VERSION} or ${AGENT_POLICY_V2_SCHEMA_VERSION}`);
+  }
   if (!ID_PATTERN.test(String(policy.id ?? ''))) errors.push('agent policy id must be lowercase kebab-case');
-  if (!AGENT_ADAPTER_IDS.includes(policy.adapter)) errors.push(`agent policy adapter must be one of: ${AGENT_ADAPTER_IDS.join(', ')}`);
+  const allowedAdapters = isV2 ? ALL_AGENT_ADAPTER_IDS : AGENT_ADAPTER_IDS;
+  if (!allowedAdapters.includes(policy.adapter)) errors.push(`agent policy adapter must be one of: ${allowedAdapters.join(', ')}`);
   if (!['read-only', 'write-workspace'].includes(policy.mode)) errors.push('agent policy mode must be read-only or write-workspace');
 
   if (closedObject(policy.capabilities, new Set(AGENT_CAPABILITIES), 'agent policy.capabilities', errors)) {
@@ -155,6 +197,34 @@ export function validateAgentPolicy(policy) {
       }
       if (policy.capabilities?.runDeclaredCommands !== true) errors.push(`${policy.adapter} requires runDeclaredCommands: true for its one declared argv`);
     }
+    if (SANDBOXED_AGENT_ADAPTER_IDS.includes(policy.adapter)) {
+      if (!isV2) errors.push(`${policy.adapter} requires agent policy schemaVersion ${AGENT_POLICY_V2_SCHEMA_VERSION}`);
+      if (script !== null) errors.push(`${policy.adapter} command.script must be null`);
+      if (!safeAbsoluteExecutable(executable)) errors.push(`${policy.adapter} command.executable must be a safe absolute path`);
+      if (policy.capabilities?.sandbox !== true) errors.push(`${policy.adapter} requires capabilities.sandbox: true`);
+      if (policy.capabilities?.runDeclaredCommands !== true) errors.push(`${policy.adapter} requires capabilities.runDeclaredCommands: true`);
+      if (closedObject(policy.sandbox, SANDBOX_FIELDS, 'agent policy.sandbox', errors)) {
+        if (!ALLOWED_SANDBOX_BACKENDS.has(String(policy.sandbox.backend ?? ''))) {
+          errors.push(`agent policy.sandbox.backend must be one of: ${[...ALLOWED_SANDBOX_BACKENDS].join(', ')}`);
+        }
+        if (policy.sandbox.requireOs !== undefined && typeof policy.sandbox.requireOs !== 'boolean') {
+          errors.push('agent policy.sandbox.requireOs must be boolean');
+        }
+        if (policy.sandbox.allowChildProcess !== undefined && typeof policy.sandbox.allowChildProcess !== 'boolean') {
+          errors.push('agent policy.sandbox.allowChildProcess must be boolean');
+        }
+        if (policy.sandbox.extraReadPaths !== undefined) {
+          if (!Array.isArray(policy.sandbox.extraReadPaths) || policy.sandbox.extraReadPaths.length > 16 || policy.sandbox.extraReadPaths.some((p) => !safeAbsoluteExecutable(p))) {
+            errors.push('agent policy.sandbox.extraReadPaths must be at most 16 safe absolute paths');
+          }
+        }
+        if (policy.sandbox.ociImage !== undefined && !safeText(policy.sandbox.ociImage, { maximum: 200 })) {
+          errors.push('agent policy.sandbox.ociImage must be a bounded image reference');
+        }
+      }
+    } else if (isV2 && policy.sandbox !== undefined) {
+      errors.push('agent policy.sandbox is only valid for sandboxed-cli or sandboxed-acp adapters');
+    }
   }
 
   return { ok: errors.length === 0, errors };
@@ -196,20 +266,25 @@ export function loadAgentPolicy(policyFile, { projectDir = '.' } = {}) {
 }
 
 /** Resolve the exact executable just before spawn; no PATH lookup is permitted. */
-export function resolveLocalProcessCommand(policy) {
+export function resolveDeclaredExecutable(policy, expectedAdapters = ['local-process', 'sandboxed-cli', 'sandboxed-acp']) {
   assertAgentPolicy(policy);
-  if (policy.adapter !== 'local-process') throw extensionError('agent policy does not select the local-process adapter', 'INVALID_AGENT_POLICY');
+  if (!expectedAdapters.includes(policy.adapter)) throw extensionError(`agent policy does not select one of: ${expectedAdapters.join(', ')}`, 'INVALID_AGENT_POLICY');
   const requested = policy.command.executable;
   let resolved;
-  try { resolved = realpathSync(path.resolve(requested)); } catch { throw extensionError('local-process executable cannot be resolved', 'INVALID_AGENT_EXECUTABLE'); }
-  if (!safeAbsoluteExecutable(resolved)) throw extensionError('local-process executable is not a safe absolute path', 'INVALID_AGENT_EXECUTABLE');
+  try { resolved = realpathSync(path.resolve(requested)); } catch { throw extensionError(`${policy.adapter} executable cannot be resolved`, 'INVALID_AGENT_EXECUTABLE'); }
+  if (!safeAbsoluteExecutable(resolved)) throw extensionError(`${policy.adapter} executable is not a safe absolute path`, 'INVALID_AGENT_EXECUTABLE');
   let stats;
-  try { stats = lstatSync(resolved); } catch { throw extensionError('local-process executable is unavailable', 'INVALID_AGENT_EXECUTABLE'); }
-  if (stats.isSymbolicLink() || !stats.isFile()) throw extensionError('local-process executable is not a regular file', 'INVALID_AGENT_EXECUTABLE');
+  try { stats = lstatSync(resolved); } catch { throw extensionError(`${policy.adapter} executable is unavailable`, 'INVALID_AGENT_EXECUTABLE'); }
+  if (stats.isSymbolicLink() || !stats.isFile()) throw extensionError(`${policy.adapter} executable is not a regular file`, 'INVALID_AGENT_EXECUTABLE');
   // Windows does not expose POSIX execute bits. Limit the portability exception
   // to direct binary formats that execFile can launch without cmd.exe; scripts
   // and command interpreters remain disallowed by the fixed-argv boundary.
   const directWindowsBinary = process.platform === 'win32' && /\.(?:exe|com)$/i.test(resolved);
-  if (!directWindowsBinary && (stats.mode & 0o111) === 0) throw extensionError('local-process executable is not executable', 'INVALID_AGENT_EXECUTABLE');
+  if (!directWindowsBinary && (stats.mode & 0o111) === 0) throw extensionError(`${policy.adapter} executable is not executable`, 'INVALID_AGENT_EXECUTABLE');
   return { executable: resolved, args: [...policy.command.args] };
+}
+
+/** Resolve the exact executable for local-process policies. */
+export function resolveLocalProcessCommand(policy) {
+  return resolveDeclaredExecutable(policy, ['local-process']);
 }

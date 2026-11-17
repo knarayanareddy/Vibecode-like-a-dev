@@ -87,7 +87,8 @@ function readJson(file) {
 
 function nextRequirementIds(existing, count) {
   const numbers = existing
-    .map((requirement) => Number(String(requirement.id).replace(/[^0-9]/g, '')))
+    .filter((requirement) => /^REQ-\d{3,}$/.test(String(requirement.id)))
+    .map((requirement) => Number(String(requirement.id).slice(4)))
     .filter((value) => Number.isFinite(value));
   const start = (numbers.length > 0 ? Math.max(...numbers) : 0) + 1;
   return Array.from({ length: count }, (_, index) => `REQ-${String(start + index).padStart(3, '0')}`);
@@ -833,7 +834,7 @@ function restoreManagedFile(root, relative, previous, label) {
  * by rename, and profile/overlay file replacements use sibling renames. If staging
  * fails (including a planner/emitter failure), callers observe the original bytes.
  */
-export async function archiveChange({ packetDir, changeDir, profilePath = null, force = false, recompile = true, recompileFn = recompilePacket }) {
+export async function archiveChange({ packetDir, changeDir, profilePath = null, force = false, toProfileRules = false, recompile = true, recompileFn = recompilePacket }) {
   const resolvedPacket = ensureRealDirectory(packetDir, 'archive packet directory');
   const specPath = safeManagedFile(resolvedPacket, 'spec.json', 'archive packet manifest');
   if (!existsSync(specPath)) throw new Error(`no spec.json in ${packetDir}`);
@@ -907,6 +908,47 @@ export async function archiveChange({ packetDir, changeDir, profilePath = null, 
   const nextProfile = { ...profile };
   const overlays = Array.isArray(profile.overlays) ? profile.overlays : [];
   if (!overlays.includes(overlayId)) nextProfile.overlays = [...overlays, overlayId];
+
+  // Roadmap 1.4: optional direct write-back into profile.rules so custom business
+  // rules added or appended via `vld change` also persist as structured profile rules
+  // (keyed by slug, idempotent across re-archives and recompiles).
+  if (toProfileRules) {
+    const existingRules = Array.isArray(profile.rules) ? [...profile.rules] : [];
+    for (const req of addRequirements) {
+      const slug = String(req.key).replace(/^[a-z0-9-]+\./, '').replace(/[^a-z0-9-]+/g, '-').slice(0, 48);
+      const ruleObj = {
+        slug,
+        title: req.title,
+        text: req.statement,
+        statement: req.statement,
+        failurePath: req.failurePath,
+        acceptance: req.acceptance,
+        area: req.area ?? 'core',
+        verify: req.verify ?? 'automated',
+        ...(req.why ? { why: req.why } : {})
+      };
+      const idx = existingRules.findIndex((item) => item && typeof item === 'object' && item.slug === slug);
+      if (idx >= 0) existingRules[idx] = ruleObj;
+      else existingRules.push(ruleObj);
+    }
+    for (const mod of modify) {
+      if (!(mod.addAcceptance ?? []).length) continue;
+      const pinObj = {
+        text: mod.addAcceptance[0],
+        covers: mod.key,
+        acceptance: mod.addAcceptance,
+        why: `archived from change ${delta.id}`
+      };
+      const idx = existingRules.findIndex((item) => item && typeof item === 'object' && item.covers === mod.key && item.text === pinObj.text);
+      if (idx >= 0) existingRules[idx] = pinObj;
+      else existingRules.push(pinObj);
+    }
+    nextProfile.rules = existingRules;
+    // When addRequirements move into profile.rules, avoid duplicating them in the overlay.
+    if (addRequirements.length > 0 && modify.length === 0 && remove.length === 0) {
+      nextProfile.overlays = overlays.filter((id) => id !== overlayId);
+    }
+  }
   const overlayText = canonicalJson(overlay);
   const profileText = canonicalJson(nextProfile);
   const previousOverlay = existsSync(overlayPath) ? readFileSync(safeManagedFile(profileRoot, overlayRelative, 'archive overlay'), 'utf8') : null;
@@ -954,7 +996,7 @@ export async function archiveChange({ packetDir, changeDir, profilePath = null, 
     const activeKeys = new Set((stagedSpec.requirements ?? []).map((requirement) => requirement.key));
     const invalidAdded = entry.added.find((key) => !activeKeys.has(key));
     const invalidRemoved = entry.removed.find((key) => activeKeys.has(key));
-    if (!stagedSpec.overlays?.some((item) => item.id === overlayId) || invalidAdded || invalidRemoved) {
+    if ((!toProfileRules && !stagedSpec.overlays?.some((item) => item.id === overlayId)) || invalidAdded || invalidRemoved) {
       throw new Error(`staged archive did not produce the expected overlay state${invalidAdded ? ` (missing ${invalidAdded})` : invalidRemoved ? ` (retained ${invalidRemoved})` : ''}`);
     }
 

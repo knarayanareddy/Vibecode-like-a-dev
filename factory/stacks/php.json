@@ -1,0 +1,33 @@
+{
+  "id": "php",
+  "match": ["php", "laravel", "symfony", "phpunit", "composer"],
+  "language": "PHP 8.3 (strict_types=1)",
+  "runtime": "PHP-FPM 8.3 / FrankenPHP",
+  "ui": "Livewire, Blade or Inertia only if a UI is in scope",
+  "http": "Laravel or Symfony with typed request DTOs at controller boundaries",
+  "db": "PostgreSQL + Doctrine/Laravel forward-only migrations",
+  "validation": "FormRequest / Symfony Validator at every boundary",
+  "unitRunner": "PHPUnit",
+  "tests": "PHPUnit for unit, feature and integration tests",
+  "lint": "PHP_CodeSniffer + PHPStan level 8 blocking in CI",
+  "logs": "Monolog JSON with correlation ID processor",
+  "ci": "GitHub Actions",
+  "fenceLanguage": "php",
+  "testExtension": "php",
+  "anchorComment": "//",
+  "anchorPattern": "tests/{Pascal}Test.php",
+  "defaultTestGlobs": ["tests/**/*Test.php", "**/*Test.php"],
+  "countedIn": ["tests/**"],
+  "commands": {
+    "lint": "vendor/bin/phpcs",
+    "typecheck": "vendor/bin/phpstan analyse",
+    "test": "vendor/bin/phpunit"
+  },
+  "mutation": {
+    "tool": "Infection",
+    "command": "vendor/bin/infection",
+    "configFile": "infection.json5"
+  },
+  "propertyLibrary": "eris",
+  "runnerForbidden": ["Vitest", "pytest", "ESLint", "npm test", "npm run lint", "cargo test"]
+}

@@ -252,20 +252,61 @@
           "**/stryker.config.*",
           "stryker.conf.*",
           "**/stryker.conf.*",
+          "stryker-config.json",
+          "**/stryker-config.json",
           ".mutmut*",
-          "**/.mutmut*"
+          "**/.mutmut*",
+          "cosmic-ray*.toml",
+          "**/cosmic-ray*.toml",
+          ".gremlins.yml",
+          ".gremlins.yaml",
+          "**/.gremlins.yml",
+          "**/.gremlins.yaml",
+          ".cargo/mutants.toml",
+          "mutants.toml",
+          "**/mutants.toml",
+          ".mutant.yml",
+          "config/mutant.yml",
+          "infection.json",
+          "infection.json5",
+          "infection.json.dist"
         ],
         "testGlob": [
           "tests/semantic-oracles/**/*.test.*",
+          "tests/semantic-oracles/**/*.spec.*",
+          "tests/semantic-oracles/**/test_*.py",
+          "tests/semantic-oracles/**/*_test.py",
+          "tests/semantic-oracles/**/*_test.go",
+          "tests/semantic-oracles/**/*.rs",
+          "tests/semantic-oracles/**/*Test.java",
+          "tests/semantic-oracles/**/*Test.kt",
+          "tests/semantic-oracles/**/*Tests.cs",
+          "tests/semantic-oracles/**/*_spec.rb",
+          "tests/semantic-oracles/**/*Test.php",
           "test/semantic-oracles/**/*.test.*",
-          "**/semantic-oracles/**/*.test.*"
+          "spec/semantic-oracles/**/*_spec.rb",
+          "**/semantic-oracles/**/*.test.*",
+          "**/semantic-oracles/**/test_*.py",
+          "**/semantic-oracles/**/*_test.go",
+          "**/semantic-oracles/**/*.rs",
+          "**/semantic-oracles/**/*Test.java",
+          "**/semantic-oracles/**/*Test.kt",
+          "**/semantic-oracles/**/*Tests.cs",
+          "**/semantic-oracles/**/*Test.php"
         ],
         "pythonGlob": [
           "pyproject.toml",
-          "**/pyproject.toml"
+          "**/pyproject.toml",
+          "pom.xml",
+          "**/pom.xml",
+          "build.gradle",
+          "**/build.gradle",
+          "build.gradle.kts",
+          "**/build.gradle.kts"
         ],
         "pythonPatterns": [
-          "\\[tool\\.(mutmut|cosmic-ray)\\]"
+          "\\[tool\\.(mutmut|cosmic-ray)\\]",
+          "pitest"
         ]
       },
       "files": [
@@ -518,6 +559,132 @@
       },
       "how": "A test asserts that a card-shaped value is rejected or absent from storage and logs.",
       "mechanism": "One test. It cannot prove no future endpoint accepts one; the review of the payment surface is the compensating control."
+    },
+    "G2-AUTONOMY": {
+      "check": {
+        "kind": "contains",
+        "glob": [
+          "**/*.test.*",
+          "**/*.spec.*",
+          "**/test_*.*",
+          "**/*_test.*",
+          "**/tests/**/*",
+          "**/test/**/*",
+          "**/spec/**/*"
+        ],
+        "patterns": [
+          "(?i)allowlist|allowed[_\\s-]?tools|unregistered[_\\s-]?tool",
+          "(?i)kill[_\\s-]?switch|step[_\\s-]?budget|max[_\\s-]?steps|cost[_\\s-]?(?:cap|ceiling|budget)"
+        ]
+      },
+      "how": "Tests exercise both the closed tool allowlist and the step/cost budget or kill switch.",
+      "mechanism": "Test signals on the tool dispatcher and runner loop. It does not prove every external side effect is classified destructive; review the tool registry alongside it.",
+      "phase": 2
+    },
+    "G3-PARENTAL-CONSENT": {
+      "check": {
+        "kind": "contains",
+        "glob": [
+          "**/*.test.*",
+          "**/*.spec.*",
+          "**/test_*.*",
+          "**/*_test.*",
+          "**/tests/**/*",
+          "**/test/**/*",
+          "**/spec/**/*"
+        ],
+        "patterns": [
+          "(?i)parental[_\\s-]?consent|guardian[_\\s-]?consent",
+          "(?i)revok(e|ed|ing)|eras(e|ure)|delete"
+        ]
+      },
+      "how": "Tests prove unverified child collection is blocked and parental revocation/erasure clears child records.",
+      "mechanism": "Test signals for consent gating and deletion; verify operator inventory and privacy notice content during release review.",
+      "phase": 3
+    },
+    "G3-FERPA-DISCLOSURE": {
+      "check": {
+        "kind": "contains",
+        "glob": [
+          "**/*.test.*",
+          "**/*.spec.*",
+          "**/test_*.*",
+          "**/*_test.*",
+          "**/tests/**/*",
+          "**/test/**/*",
+          "**/spec/**/*"
+        ],
+        "patterns": [
+          "(?i)roster|legitimate[_\\s-]?educational|student[_\\s-]?record",
+          "(?i)disclosure[_\\s-]?(?:log|record|ledger)|directory[_\\s-]?opt[_\\s-]?out"
+        ]
+      },
+      "how": "Tests verify roster-scoped education-record access and append-only disclosure logging.",
+      "mechanism": "Test signals for authorization and disclosure logging; institutional FERPA exception mapping still needs compliance sign-off.",
+      "phase": 3
+    },
+    "G3-SOX-CONTROLS": {
+      "check": {
+        "kind": "contains",
+        "glob": [
+          "**/*.test.*",
+          "**/*.spec.*",
+          "**/test_*.*",
+          "**/*_test.*",
+          "**/tests/**/*",
+          "**/test/**/*",
+          "**/spec/**/*"
+        ],
+        "patterns": [
+          "(?i)segregation[_\\s-]?of[_\\s-]?duties|self[_\\s-]?approv",
+          "(?i)closed[_\\s-]?period|period[_\\s-]?close|reconcil"
+        ]
+      },
+      "how": "Tests reject self-approval and closed-period mutation and verify reconciliation.",
+      "mechanism": "Automated control tests; external SOX audit still requires sampled operational evidence over the reporting period.",
+      "phase": 3
+    },
+    "G3-DORA-RESILIENCE": {
+      "check": {
+        "kind": "contains",
+        "glob": [
+          "**/*.test.*",
+          "**/*.spec.*",
+          "**/test_*.*",
+          "**/*_test.*",
+          "**/tests/**/*",
+          "**/test/**/*",
+          "**/spec/**/*"
+        ],
+        "patterns": [
+          "(?i)ict[_\\s-]?incident|incident[_\\s-]?classif",
+          "(?i)third[_\\s-]?party[_\\s-]?register|provider[_\\s-]?register|backup[_\\s-]?(?:integrity|checksum)"
+        ]
+      },
+      "how": "Tests prove ICT incident classification, backup checksum checks and third-party provider registry validation.",
+      "mechanism": "Test coverage on incident and registry rules; live failover timing requires a scheduled resilience drill.",
+      "phase": 3
+    },
+    "G3-AI-OVERSIGHT": {
+      "check": {
+        "kind": "contains",
+        "glob": [
+          "**/*.test.*",
+          "**/*.spec.*",
+          "**/test_*.*",
+          "**/*_test.*",
+          "**/tests/**/*",
+          "**/test/**/*",
+          "**/spec/**/*"
+        ],
+        "patterns": [
+          "(?i)machine[_\\s-]?generated|ai[_\\s-]?disclos|model[_\\s-]?version",
+          "(?i)human[_\\s-]?(?:oversight|override|review)|stop[_\\s-]?control"
+        ]
+      },
+      "how": "Tests assert AI output disclosure metadata, human-override gating and stop-control enforcement.",
+      "mechanism": "Automated checks for labels, override gates and trace logs; conformity classification remains a documented legal review.",
+      "phase": 3
     }
   }
 }

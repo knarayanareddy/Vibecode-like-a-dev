@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "description": "50-item labelled corpus for roadmap 1.5 business-rule extraction (ownRulesFor / splitRuleClauses). Includes single modal rules, quantifiers, temporal windows, passive invariants, prohibitions, compound multi-clause sentences and non-rule framing/marketing/stack sentences.",
+  "thresholds": {
+    "minRecall": 0.85,
+    "minPrecision": 0.80
+  },
+  "items": [
+    { "id": "r01", "text": "A clinic must never see another clinic's patients.", "expectRules": 1 },
+    { "id": "r02", "text": "Refunds over $500 require two-person approval before disbursement.", "expectRules": 1 },
+    { "id": "r03", "text": "Every ledger entry is immutable and append-only.", "expectRules": 1 },
+    { "id": "r04", "text": "Settlement runs shall complete within 15 minutes of market close.", "expectRules": 1 },
+    { "id": "r05", "text": "A seller can receive at most one payout per calendar day.", "expectRules": 1 },
+    { "id": "r06", "text": "Sessions expire after 30 minutes of inactivity.", "expectRules": 1 },
+    { "id": "r07", "text": "Raw card numbers may never touch application logs or storage.", "expectRules": 1 },
+    { "id": "r08", "text": "Inbound webhook deliveries are deduplicated by provider event id.", "expectRules": 1 },
+    { "id": "r09", "text": "Self-approval of manual journal adjustments is prohibited.", "expectRules": 1 },
+    { "id": "r10", "text": "Children under 13 cannot submit personal data without parental consent.", "expectRules": 1 },
+    { "id": "r11", "text": "Password reset tokens are single-use and expire within 10 minutes.", "expectRules": 1 },
+    { "id": "r12", "text": "Schema migrations must always be forward-only.", "expectRules": 1 },
+    { "id": "r13", "text": "When an upload exceeds 10 MB, the gateway rejects the payload immediately.", "expectRules": 1 },
+    { "id": "r14", "text": "Audit records older than 7 years are archived to cold storage.", "expectRules": 1 },
+    { "id": "r15", "text": "Only verified practice managers can export billing summaries.", "expectRules": 1 },
+    { "id": "r16", "text": "Every tool invocation is recorded in an append-only action log.", "expectRules": 1 },
+    { "id": "r17", "text": "Closed accounting periods reject backdated inserts and edits.", "expectRules": 1 },
+    { "id": "r18", "text": "A batch job must remain idempotent when replayed on the same date window.", "expectRules": 1 },
+    { "id": "r19", "text": "Break-glass access has to state a reason and expire within 4 hours.", "expectRules": 1 },
+    { "id": "r20", "text": "Failed login attempts lock the account after 5 attempts.", "expectRules": 1 },
+    { "id": "r21", "text": "Personal contact fields are redacted before any log line leaves the host.", "expectRules": 1 },
+    { "id": "r22", "text": "A booking may only be cancelled no later than 24 hours before start.", "expectRules": 1 },
+    { "id": "r23", "text": "Each invoice keeps at least two decimal places in integer minor units.", "expectRules": 1 },
+    { "id": "r24", "text": "External links in user comments are forbidden on child accounts.", "expectRules": 1 },
+    { "id": "r25", "text": "If the audit sink is unreachable, the service refuses the state transition.", "expectRules": 1 },
+    { "id": "r26", "text": "Kill switch activation halts active agent loops within one step.", "expectRules": 1 },
+    { "id": "r27", "text": "Teachers may not read student records outside their assigned roster.", "expectRules": 1 },
+    { "id": "r28", "text": "No tenant can consume more than 100 requests per minute.", "expectRules": 1 },
+    {
+      "id": "r29",
+      "text": "Payouts over $1000 must receive dual approval, and audit logs can never be deleted.",
+      "expectRules": 2
+    },
+    {
+      "id": "r30",
+      "text": "Cancelled orders must release reserved inventory immediately; shipped orders cannot be edited.",
+      "expectRules": 2
+    },
+    {
+      "id": "r31",
+      "text": "All patient notes must be encrypted at rest, while clinicians may only access their own clinic.",
+      "expectRules": 2
+    },
+    {
+      "id": "r32",
+      "text": "Draft invoices are editable by billing clerks; posted invoices are immutable.",
+      "expectRules": 2
+    },
+    {
+      "id": "r33",
+      "text": "Every deletion request purges personal fields within 30 days, and a receipt is recorded without PII.",
+      "expectRules": 2
+    },
+    { "id": "r34", "text": "Backup archives are verified by SHA-256 checksum before restore.", "expectRules": 1 },
+    { "id": "r35", "text": "Unregistered third-party ICT providers are blocked at startup.", "expectRules": 1 },
+
+    { "id": "n01", "text": "A web app for small veterinary clinics that replaces messy spreadsheets.", "expectRules": 0 },
+    { "id": "n02", "text": "Built with TypeScript, Hono and PostgreSQL on a single server.", "expectRules": 0 },
+    { "id": "n03", "text": "Target users are freelance designers and small creative studios.", "expectRules": 0 },
+    { "id": "n04", "text": "Today teams track upcoming renewals in a shared email inbox.", "expectRules": 0 },
+    { "id": "n05", "text": "Designed to be fast, simple and clean on mobile phones.", "expectRules": 0 },
+    { "id": "n06", "text": "A CLI tool for sorting holiday photos into dated folders.", "expectRules": 0 },
+    { "id": "n07", "text": "Keeps everyone on the same page during Friday retrospectives.", "expectRules": 0 },
+    { "id": "n08", "text": "Written in Rust for minimal memory usage on developer laptops.", "expectRules": 0 },
+    { "id": "n09", "text": "A marketplace where local cyclists buy and sell used road bikes.", "expectRules": 0 },
+    { "id": "n10", "text": "Used by internal operations staff across three regional warehouses.", "expectRules": 0 },
+    { "id": "n11", "text": "Users can browse a catalogue of community gardening workshops.", "expectRules": 0 },
+    { "id": "n12", "text": "It should feel calm and approachable for non-technical parents.", "expectRules": 0 },
+    { "id": "n13", "text": "A library for parsing recurring calendar schedules in Go.", "expectRules": 0 },
+    { "id": "n14", "text": "Deployed on a single Linux VM in Frankfurt with daily snapshots.", "expectRules": 0 },
+    { "id": "n15", "text": "Teams currently paste status updates into three different chat channels.", "expectRules": 0 }
+  ]
+}

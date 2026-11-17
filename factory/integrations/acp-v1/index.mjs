@@ -14,7 +14,10 @@ import path from 'node:path';
 import { client, methods, ndJsonStream } from '@agentclientprotocol/sdk';
 import { digest, extensionError } from '../../lib/extension-utils.mjs';
 import { PACKAGE_VERSION } from '../../lib/version.mjs';
+import { agentPolicyDigest } from '../../lib/agent-policy.mjs';
 import { redactAgentOutput } from '../../lib/agent-adapters.mjs';
+import { buildSandboxCommand, selectSandboxBackend } from '../../lib/sandbox/backends.mjs';
+import { createSandboxReceipt, diffWorkspaceSnapshots, snapshotWorkspace, workspaceTreeDigest } from '../../lib/sandbox/receipt.mjs';
 import { acpV1Prompt, negotiateAcpV1, normalizeAcpV1Stop, normalizeAcpV1Update } from './contract.mjs';
 
 function now() { return new Date().toISOString(); }
@@ -79,18 +82,73 @@ function result({ outcome, startedAt, outputDigest, outputBytes, outputSummary, 
  * peer notifications become bounded progress metadata only and never Runtime
  * state transitions.
  */
-export async function runAcpV1Adapter({ spec, policy, signal = null, onEvent = null } = {}) {
-  const startedAt = now(); const command = commandFor(policy); const prompt = acpV1Prompt(spec); let child; let timer; let updateBytes = 0; let updates = 0; let diagnosticBytes = 0; let connection = null; let sessionId = null; let stopped = null;
+export async function runAcpV1Adapter({ spec, policy, signal = null, onEvent = null, sandboxed = policy?.adapter === 'sandboxed-acp' } = {}) {
+  const startedMs = Date.now(); const startedAt = new Date(startedMs).toISOString(); const command = commandFor(policy); const prompt = acpV1Prompt(spec); let child; let timer; let updateBytes = 0; let updates = 0; let diagnosticBytes = 0; let connection = null; let sessionId = null; let stopped = null; let cleanupSandbox = null;
+  let beforeSnap = null; let selectedBackend = null; let seccompDigest = null;
   const emit = (event) => { if (typeof onEvent === 'function') onEvent(event); };
-  try {
-    child = spawn(command.executable, command.args, {
-      cwd: spec.workspace,
-      env: environmentFor(spec, policy),
-      stdio: ['pipe', 'pipe', 'pipe'],
-      shell: false,
-      windowsHide: true,
-      detached: process.platform !== 'win32'
+  const attachReceipt = (res) => {
+    if (!sandboxed || !selectedBackend || !beforeSnap) return res;
+    const afterSnap = snapshotWorkspace(spec.workspace);
+    const finishedMs = Date.now();
+    const sandboxReceipt = createSandboxReceipt({
+      id: `sbx-${spec.id}`,
+      backend: selectedBackend.id,
+      mode: policy.mode,
+      network: false,
+      childProcess: Boolean(policy.sandbox?.allowChildProcess),
+      policyDigest: agentPolicyDigest(policy),
+      seccompDigest,
+      workspaceDigestBefore: workspaceTreeDigest(beforeSnap),
+      workspaceDigestAfter: workspaceTreeDigest(afterSnap),
+      changedPaths: diffWorkspaceSnapshots(beforeSnap, afterSnap),
+      outcome: res.outcome,
+      exitCode: res.exitCode,
+      signal: res.signal,
+      startedAt,
+      finishedAt: res.finishedAt,
+      durationMs: Math.max(0, finishedMs - startedMs),
+      outputDigest: res.outputDigest,
+      outputBytes: res.outputBytes
     });
+    return { ...res, sandboxReceipt };
+  };
+  try {
+    if (sandboxed) {
+      const sbx = policy.sandbox ?? { backend: 'auto' };
+      beforeSnap = snapshotWorkspace(spec.workspace);
+      selectedBackend = selectSandboxBackend({ requested: sbx.backend ?? 'auto', executable: command.executable, requireOs: Boolean(sbx.requireOs) });
+      const invocation = buildSandboxCommand({
+        backend: selectedBackend,
+        executable: command.executable,
+        args: command.args,
+        workspace: spec.workspace,
+        mode: policy.mode,
+        network: false,
+        allowChildProcess: Boolean(sbx.allowChildProcess),
+        extraReadPaths: sbx.extraReadPaths ?? [],
+        ociImage: sbx.ociImage,
+        env: environmentFor(spec, policy)
+      });
+      seccompDigest = invocation.seccompDigest;
+      cleanupSandbox = invocation.cleanup;
+      child = spawn(invocation.executable, invocation.args, {
+        cwd: invocation.cwd,
+        env: invocation.env,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        shell: false,
+        windowsHide: true,
+        detached: process.platform !== 'win32'
+      });
+    } else {
+      child = spawn(command.executable, command.args, {
+        cwd: spec.workspace,
+        env: environmentFor(spec, policy),
+        stdio: ['pipe', 'pipe', 'pipe'],
+        shell: false,
+        windowsHide: true,
+        detached: process.platform !== 'win32'
+      });
+    }
     // Drain diagnostics so a chatty peer cannot block on stderr, but never retain
     // their raw content: ACP process diagnostics may contain arbitrary data.
     child.stderr.on('data', (chunk) => { diagnosticBytes = Math.min(8_192, diagnosticBytes + Buffer.from(chunk).length); });
@@ -138,19 +196,20 @@ export async function runAcpV1Adapter({ spec, policy, signal = null, onEvent = n
     if (signal?.aborted) onAbort(); else signal?.addEventListener('abort', onAbort, { once: true });
     let normalized;
     try { normalized = await Promise.race([work, timeout, cancellation]); } finally { clearTimeout(timer); signal?.removeEventListener('abort', onAbort); }
-    if (signal?.aborted || normalized.outcome === 'cancelled') return result({ outcome: 'cancelled', startedAt, outputDigest: normalized.outputDigest, outputBytes: updateBytes + diagnosticBytes, outputSummary: normalized.outputSummary, signal: 'SIGTERM' });
+    if (signal?.aborted || normalized.outcome === 'cancelled') return attachReceipt(result({ outcome: 'cancelled', startedAt, outputDigest: normalized.outputDigest, outputBytes: updateBytes + diagnosticBytes, outputSummary: normalized.outputSummary, signal: 'SIGTERM' }));
     emit({ type: normalized.outcome === 'completed' ? 'completed' : 'failed', at: now(), message: normalized.outputSummary });
-    return result({ outcome: normalized.outcome, startedAt, outputDigest: digest({ peer: normalized.outputDigest, updates, updateBytes, diagnosticBytes }), outputBytes: updateBytes + diagnosticBytes, outputSummary: normalized.outputSummary });
+    return attachReceipt(result({ outcome: normalized.outcome, startedAt, outputDigest: digest({ peer: normalized.outputDigest, updates, updateBytes, diagnosticBytes }), outputBytes: updateBytes + diagnosticBytes, outputSummary: normalized.outputSummary }));
   } catch (error) {
     const timedOut = error?.code === 'ACP_V1_TIMED_OUT'; const cancelled = signal?.aborted || error?.code === 'ACP_V1_CANCELLED';
     boundedCancellation(connection, sessionId);
     await (stopped ?? (async () => { try { connection?.close(); } catch {}; await terminate(child); })());
     const output = redactAgentOutput(timedOut ? 'ACP v1 session timed out' : cancelled ? 'ACP v1 session cancelled' : `ACP v1 peer failed: ${error?.code ?? 'protocol-error'}`);
     emit({ type: timedOut ? 'timed-out' : cancelled ? 'cancelled' : 'failed', at: now(), message: output });
-    return result({ outcome: timedOut ? 'timed-out' : cancelled ? 'cancelled' : 'failed', startedAt, outputDigest: digest({ outcome: timedOut ? 'timed-out' : cancelled ? 'cancelled' : 'failed', updateBytes, diagnosticBytes }), outputBytes: updateBytes + diagnosticBytes, outputSummary: output, signal: timedOut || cancelled ? 'SIGTERM' : null });
+    return attachReceipt(result({ outcome: timedOut ? 'timed-out' : cancelled ? 'cancelled' : 'failed', startedAt, outputDigest: digest({ outcome: timedOut ? 'timed-out' : cancelled ? 'cancelled' : 'failed', updateBytes, diagnosticBytes }), outputBytes: updateBytes + diagnosticBytes, outputSummary: output, signal: timedOut || cancelled ? 'SIGTERM' : null }));
   } finally {
     clearTimeout(timer);
     if (stopped) await stopped;
     else { try { connection?.close(); } catch {}; await terminate(child); }
+    try { cleanupSandbox?.(); } catch {}
   }
 }

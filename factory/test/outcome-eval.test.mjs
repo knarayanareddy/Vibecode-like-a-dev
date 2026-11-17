@@ -1,9 +1,9 @@
 /**
  * Outcome evaluation harness tests.
  *
- * Verifies the 24-task multi-arm harness across:
+ * Verifies the 34-task multi-arm harness across:
  *   1. calibration soundness (starter fails oracle, naive triggers defect probes,
- *      reference passes oracle + all local gates across all 24 tasks x 3 arms)
+ *      reference passes oracle + all local gates across all 34 tasks x 3 arms)
  *   2. hidden-oracle isolation (an executing agent cannot inspect oracle or defect
  *      probes inside the workspace)
  *   3. live `--runner cmd` execution and paired delta calculation
@@ -19,8 +19,8 @@ import { evaluateWorkspace, materializeWorkspace, runOutcomeHarness, runWorkspac
 import { buildIndex } from '../lib/indexer.mjs';
 
 // @req REQ-002 — end-to-end multi-arm pipeline and verification loop
-test('outcome task suite has 24 valid tasks across 5 categories and calibrates across tiers 0-3', async () => {
-  assert.equal(OUTCOME_TASKS.length, 24);
+test('outcome task suite has 34 valid tasks across 5 categories and calibrates with split metrics and 95% CIs', async () => {
+  assert.equal(OUTCOME_TASKS.length, 34);
   assert.deepEqual(validateOutcomeTasks(OUTCOME_TASKS), []);
 
   const categories = new Set(OUTCOME_TASKS.map((t) => t.category));

@@ -14,11 +14,14 @@ import { spawn } from 'node:child_process';
 import { existsSync, lstatSync } from 'node:fs';
 import path from 'node:path';
 import {
-  AGENT_ADAPTER_IDS,
+  agentPolicyDigest,
+  ALL_AGENT_ADAPTER_IDS,
   assertAgentPolicy,
+  resolveDeclaredExecutable,
   resolveLocalProcessCommand
 } from './agent-policy.mjs';
 import { digest, extensionError } from './extension-utils.mjs';
+import { runSandboxed } from './sandbox/index.mjs';
 
 const KILL_GRACE_MS = 250;
 const EVENT_TYPES = new Set(['started', 'progress', 'output', 'completed', 'failed', 'cancelled', 'timed-out']);
@@ -220,21 +223,69 @@ function runLocalProcess({ spec, policy, signal, onEvent }) {
   });
 }
 
-export function adapterCapabilities(id) {
-  if (!AGENT_ADAPTER_IDS.includes(id)) throw extensionError('unknown M4 agent adapter', 'UNKNOWN_AGENT_ADAPTER');
-  return id === 'fake'
-    ? { readWorkspace: true, writeWorkspace: true, runDeclaredCommands: false, network: false, streamEvents: true, cancel: true, reconnect: true, sandbox: true }
-    : id === 'acp-v1'
-      ? { readWorkspace: true, writeWorkspace: false, runDeclaredCommands: true, network: false, streamEvents: true, cancel: true, reconnect: true, sandbox: false }
-      : { readWorkspace: true, writeWorkspace: false, runDeclaredCommands: true, network: false, streamEvents: true, cancel: true, reconnect: false, sandbox: false };
+async function runSandboxedCli({ spec, policy, signal, onEvent }) {
+  const command = resolveDeclaredExecutable(policy, ['sandboxed-cli']);
+  const cwd = workspaceDirectory(spec.workspace);
+  const sbx = policy.sandbox ?? { backend: 'auto' };
+  const startedAt = nowIso();
+  emit(onEvent, { type: 'started', at: startedAt, message: 'sandboxed CLI adapter started' });
+  const run = await runSandboxed({
+    id: `sbx-${spec.id}`,
+    executable: command.executable,
+    args: command.args,
+    workspace: cwd,
+    mode: policy.mode,
+    network: false,
+    allowChildProcess: Boolean(sbx.allowChildProcess),
+    extraReadPaths: sbx.extraReadPaths ?? [],
+    ociImage: sbx.ociImage,
+    backend: sbx.backend ?? 'auto',
+    requireOs: Boolean(sbx.requireOs),
+    env: environmentFor(spec, policy),
+    policyDigest: agentPolicyDigest(policy),
+    limits: policy.limits,
+    signal,
+    onChunk: (stream, buf) => emit(onEvent, { type: 'output', at: nowIso(), stream, bytes: buf.length })
+  });
+  const finishType = run.outcome === 'completed' ? 'completed' : run.outcome === 'timed-out' ? 'timed-out' : run.outcome === 'cancelled' ? 'cancelled' : 'failed';
+  emit(onEvent, { type: finishType, at: run.receipt.finishedAt, message: `sandboxed CLI ${run.outcome} (${run.backend})` });
+  return {
+    outcome: run.outcome,
+    exitCode: run.exitCode,
+    signal: run.signal,
+    outputDigest: run.outputDigest,
+    outputBytes: run.outputBytes,
+    outputSummary: redactAgentOutput(`${run.stdout}\n${run.stderr}`),
+    startedAt: run.receipt.startedAt,
+    finishedAt: run.receipt.finishedAt,
+    sandboxReceipt: run.receipt
+  };
 }
 
-/** Execute exactly one adapter attempt under a validated M4 policy. */
+export function adapterCapabilities(id) {
+  if (!ALL_AGENT_ADAPTER_IDS.includes(id)) throw extensionError('unknown agent adapter', 'UNKNOWN_AGENT_ADAPTER');
+  if (id === 'fake') {
+    return { readWorkspace: true, writeWorkspace: true, runDeclaredCommands: false, network: false, streamEvents: true, cancel: true, reconnect: true, sandbox: true };
+  }
+  if (id === 'sandboxed-cli') {
+    return { readWorkspace: true, writeWorkspace: true, runDeclaredCommands: true, network: false, streamEvents: true, cancel: true, reconnect: false, sandbox: true };
+  }
+  if (id === 'sandboxed-acp') {
+    return { readWorkspace: true, writeWorkspace: true, runDeclaredCommands: true, network: false, streamEvents: true, cancel: true, reconnect: true, sandbox: true };
+  }
+  if (id === 'acp-v1') {
+    return { readWorkspace: true, writeWorkspace: false, runDeclaredCommands: true, network: false, streamEvents: true, cancel: true, reconnect: true, sandbox: false };
+  }
+  return { readWorkspace: true, writeWorkspace: false, runDeclaredCommands: true, network: false, streamEvents: true, cancel: true, reconnect: false, sandbox: false };
+}
+
+/** Execute exactly one adapter attempt under a validated v1 or v2 agent policy. */
 export async function executeAgentAdapter({ spec, policy, signal = null, onEvent = null } = {}) {
   assertAgentPolicy(policy);
   if (!spec || typeof spec !== 'object' || Array.isArray(spec)) throw extensionError('agent run spec must be an object', 'INVALID_AGENT_RUN');
   if (policy.adapter === 'fake') return runFake({ policy, signal, onEvent });
-  if (policy.adapter === 'acp-v1') {
+  if (policy.adapter === 'sandboxed-cli') return runSandboxedCli({ spec, policy, signal, onEvent });
+  if (policy.adapter === 'acp-v1' || policy.adapter === 'sandboxed-acp') {
     // The stable ACP v1 SDK is a deliberately optional nested package. Core
     // never imports it at startup and no experimental/v2 endpoint is selected.
     let adapter;
@@ -244,7 +295,7 @@ export async function executeAgentAdapter({ spec, policy, signal = null, onEvent
       }
       throw error;
     }
-    return adapter.runAcpV1Adapter({ spec, policy, signal, onEvent });
+    return adapter.runAcpV1Adapter({ spec, policy, signal, onEvent, sandboxed: policy.adapter === 'sandboxed-acp' });
   }
   return runLocalProcess({ spec, policy, signal, onEvent });
 }

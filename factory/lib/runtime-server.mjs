@@ -13,6 +13,8 @@ import { extensionError, ID_PATTERN } from './extension-utils.mjs';
 import { assertRuntimeActor } from './runtime-policy.mjs';
 import { assertRuntimeRequest, runtimeFailure, runtimeSuccess } from './runtime-contracts.mjs';
 import { catalogStatus, readCatalogState } from './catalog.mjs';
+import { appendEvidence, studioEvidenceProjection } from './evidence.mjs';
+import { approveRuntimeDeliveryCandidate, queueRuntimeDeliveryCandidate } from './runtime-delivery.mjs';
 import { STUDIO_PATH, studioCapabilities, studioContentSecurityPolicy, studioHtml, studioNonce } from './studio.mjs';
 import {
   allocateRuntimePackage,
@@ -147,9 +149,14 @@ function dispatch({ request, actor, missionFile, projectDir, close }) {
           protocolVersion: 1,
           actor: { ...actor },
           actions: studioCapabilities(actor),
-          ...(catalog.exists ? { catalog: studioCatalogProjection(catalogStatus(projectDir), projectDir) } : {})
+          ...(catalog.exists ? { catalog: studioCatalogProjection(catalogStatus(projectDir), projectDir) } : {}),
+          evidenceChain: studioEvidenceProjection({ projectDir })
         }
       };
+    }
+    case 'evidence': {
+      closedParams(params, new Set(['limit']), 'evidence');
+      return studioEvidenceProjection({ projectDir, limit: Number.isSafeInteger(params.limit) ? params.limit : 20 });
     }
     case 'events': {
       closedParams(params, new Set(['after', 'limit', 'maxBytes']), 'events');
@@ -167,6 +174,70 @@ function dispatch({ request, actor, missionFile, projectDir, close }) {
     case 'transition': {
       closedParams(params, new Set(['packageId', 'to', 'expectedVersion', 'leaseToken', 'reason']), 'transition');
       return transitionRuntimePackage({ missionFile, projectDir, packageId: params.packageId, to: params.to, actor, expectedVersion: params.expectedVersion, leaseToken: params.leaseToken ?? null, reason: params.reason ?? null, idempotencyKey: request.requestId });
+    }
+    case 'approve': {
+      closedParams(params, new Set(['packageId', 'candidateId', 'policyFile', 'reason']), 'approve');
+      if (actor.role !== 'reviewer') throw extensionError('only an independent reviewer identity may approve a delivery candidate', 'RUNTIME_ACTOR_FORBIDDEN');
+      if (!ID_PATTERN.test(String(params.packageId ?? '')) || !ID_PATTERN.test(String(params.candidateId ?? ''))) {
+        throw extensionError('approve requires valid packageId and candidateId', 'INVALID_RUNTIME_REQUEST');
+      }
+      const policyFile = typeof params.policyFile === 'string' && params.policyFile ? params.policyFile : '.vld/delivery-policy.json';
+      if (path.isAbsolute(policyFile) || policyFile.includes('..') || /[\r\n\0]/.test(policyFile)) {
+        throw extensionError('approve policyFile must be a safe relative path inside the project', 'INVALID_RUNTIME_REQUEST');
+      }
+      const approved = approveRuntimeDeliveryCandidate({
+        missionFile,
+        projectDir,
+        packageId: params.packageId,
+        candidateId: params.candidateId,
+        policyFile,
+        actor,
+        reason: typeof params.reason === 'string' && params.reason.trim() ? params.reason.trim() : 'Approved via local Studio',
+        idempotencyKey: request.requestId
+      });
+      try {
+        appendEvidence({
+          projectDir,
+          kind: 'approval',
+          actor,
+          subject: `${params.packageId}/${params.candidateId}`,
+          payload: { approvalId: approved.approval?.id ?? null, candidateSha: approved.approval?.candidateSha ?? null }
+        });
+      } catch {}
+      return approved;
+    }
+    case 'queue': {
+      closedParams(params, new Set(['packageId', 'candidateId', 'policyFile', 'reason']), 'queue');
+      if (!['release-approver', 'operator'].includes(actor.role)) {
+        throw extensionError('only a release-approver or operator identity may queue an approved candidate', 'RUNTIME_ACTOR_FORBIDDEN');
+      }
+      if (!ID_PATTERN.test(String(params.packageId ?? '')) || !ID_PATTERN.test(String(params.candidateId ?? ''))) {
+        throw extensionError('queue requires valid packageId and candidateId', 'INVALID_RUNTIME_REQUEST');
+      }
+      const policyFile = typeof params.policyFile === 'string' && params.policyFile ? params.policyFile : '.vld/delivery-policy.json';
+      if (path.isAbsolute(policyFile) || policyFile.includes('..') || /[\r\n\0]/.test(policyFile)) {
+        throw extensionError('queue policyFile must be a safe relative path inside the project', 'INVALID_RUNTIME_REQUEST');
+      }
+      const queued = queueRuntimeDeliveryCandidate({
+        missionFile,
+        projectDir,
+        packageId: params.packageId,
+        candidateId: params.candidateId,
+        policyFile,
+        actor,
+        reason: typeof params.reason === 'string' && params.reason.trim() ? params.reason.trim() : 'Queued via local Studio',
+        idempotencyKey: request.requestId
+      });
+      try {
+        appendEvidence({
+          projectDir,
+          kind: 'queue',
+          actor,
+          subject: `${params.packageId}/${params.candidateId}`,
+          payload: { queueId: queued.queue?.id ?? null, candidateSha: queued.queue?.candidateSha ?? null }
+        });
+      } catch {}
+      return queued;
     }
     case 'recover':
       closedParams(params, new Set(), 'recover');

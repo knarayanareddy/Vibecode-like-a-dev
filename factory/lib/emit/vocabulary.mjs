@@ -131,7 +131,15 @@ const ADJECTIVE_WORDS = new Set([
   'nice', 'good', 'bad', 'great', 'better', 'best', 'easy', 'hard', 'simple', 'complex',
   'beautiful', 'pretty', 'awesome', 'amazing', 'cool', 'useful', 'helpful', 'powerful',
   'smart', 'clever', 'efficient', 'reliable', 'robust', 'scalable', 'secure', 'modern',
-  'intuitive', 'seamless', 'flexible', 'lightweight', 'quick', 'instant', 'automatic'
+  'intuitive', 'seamless', 'flexible', 'lightweight', 'quick', 'instant', 'automatic',
+  // Domain and runtime qualifiers that modify the real entity ("an autonomous agent",
+  // "a clinical workflow", "an encrypted store") and must never name it (roadmap 1.3).
+  'autonomous', 'clinical', 'medical', 'agentic', 'intelligent', 'automated', 'distributed',
+  'serverless', 'proactive', 'conversational', 'observable', 'resilient', 'stateless', 'stateful',
+  'realtime', 'real-time', 'encrypted', 'regulated', 'compliant', 'hipaa-compliant',
+  'gdpr-compliant', 'sox-compliant', 'ai-powered', 'cloud-native', 'self-hosted', 'open-source',
+  'asynchronous', 'synchronous', 'verifiable', 'interactive', 'educational', 'pediatric',
+  'financial', 'operational', 'confidential', 'immutable', 'deterministic', 'ephemeral'
 ]);
 
 /**
@@ -145,6 +153,7 @@ const ABSTRACT = new Set([
   'content', 'detail', 'details', 'result', 'results', 'error', 'errors', 'state', 'event',
   'events', 'action', 'actions', 'option', 'options', 'setting', 'settings', 'value', 'values',
   'movement', 'reporting', 'decision', 'reason', 'help', 'amount', 'status', 'process',
+  'autonomy', 'compliance', 'governance', 'privacy', 'security', 'telemetry', 'storage',
   // Number words read as determiners but are not nouns.
   'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'hundred',
   'thousand', 'million', 'second', 'minute', 'hour', 'week', 'month', 'year', 'per', 'times',
@@ -607,11 +616,13 @@ export function vocabularyFor(profile) {
       secondaryPlural: pluralOf(actor),
       secondarySource: 'domain',
       source: 'domain',
+      confidence: 1,
+      lowConfidence: false,
       tenantNoun: domain.tenant ?? null,
       endUser,
       privilegedActor: domain.privilegedActor ?? null,
       forbidden,
-      candidates: allowedPool.slice(0, 6).map((candidate) => ({ word: singularOf(candidate.word), count: candidate.count }))
+      candidates: allowedPool.slice(0, 6).map((candidate) => ({ word: singularOf(candidate.word), count: candidate.count, score: candidate.score }))
     };
   }
 
@@ -644,19 +655,40 @@ export function vocabularyFor(profile) {
   // talks about the user instead of the product.
   const actorFallback = primaryPool.find((candidate) => isActorWord(candidate.word)) ?? primaryPool[0] ?? null;
   const primaryPick = topObject ?? actorFallback;
-  // BUG-1 step 5 of the review: a weak pick that is not a *thing* is a guess, not a
-  // decision. "Something nice for people who like things" used to yield the
-  // adjective `nice`, which rendered as "One nice goes from created to finished" in
-  // every template. The kind's neutral noun is more useful than a wrong one — but a
-  // genuine noun the idea happened to write without a determiner ("Inventory sync")
-  // must survive, so the test is the word's shape, not its score.
+  // Roadmap 1.3 (F-03): compute a calibrated confidence score in [0, 1] for the
+  // inferred primary entity. Picks below CONFIDENCE_FLOOR (0.6) fall back to the
+  // kind's neutral noun ("record", "task", "run") and surface candidate nouns in
+  // plan/compile warnings rather than repeating a wrong guess across the packet.
+  const CONFIDENCE_FLOOR = 0.6;
+  const rawScore = primaryPick ? primaryPick.score : 0;
+  const secondObject = nonActorPool[1] ?? null;
+  let confidence = 0;
+  if (primaryPick) {
+    const GENERIC_ACTOR = new Set(['operator', 'admin', 'administrator', 'member', 'owner', 'manager', 'consumer', 'client']);
+    const nonDemoted = candidates.filter((c) => !c.demoted);
+    const isModifier = !isActorWord(primaryPick.word) && isModifierToken(primaryPick.word);
+    const cleanConcreteShape =
+      !primaryPick.demoted &&
+      !isModifier &&
+      !PARTICIPLE.test(primaryPick.word) &&
+      !ABSTRACT_OUTCOME.test(primaryPick.word) &&
+      !ABSTRACT_SOFTWARE_NOUNS.has(singularOf(primaryPick.word)) &&
+      !GENERIC_ACTOR.has(singularOf(primaryPick.word));
+    if (rawScore >= 7) confidence = 0.92;
+    else if (rawScore >= 5) confidence = 0.84;
+    else if (rawScore >= 4) confidence = 0.74;
+    else if (rawScore >= 3) confidence = 0.66;
+    else confidence = cleanConcreteShape ? 0.62 : 0.42;
+    if (primaryPick.anchored) confidence = Math.min(0.96, confidence + 0.04);
+    if (primaryPick.demoted) confidence -= 0.25;
+    if (isModifier || PARTICIPLE.test(primaryPick.word)) confidence -= 0.35;
+    if (ABSTRACT_OUTCOME.test(primaryPick.word) && !isKnownNoun(primaryPick.word)) confidence -= 0.14;
+    if (ABSTRACT_SOFTWARE_NOUNS.has(singularOf(primaryPick.word))) confidence -= 0.22;
+    confidence = Math.max(0, Math.min(0.96, Math.round(confidence * 100) / 100));
+  }
   const weak = confident.length === 0;
-  const weakNotAThing =
-    weak &&
-    primaryPick !== null &&
-    !isActorWord(primaryPick.word) &&
-    (isModifierToken(primaryPick.word) || PARTICIPLE.test(primaryPick.word) || ABSTRACT_OUTCOME.test(primaryPick.word));
-  const primary = primaryPick && !weakNotAThing ? singularOf(primaryPick.word) : fallback[0];
+  const lowConfidence = confidence < CONFIDENCE_FLOOR;
+  const primary = primaryPick && !lowConfidence ? singularOf(primaryPick.word) : fallback[0];
   // Below the confidence floor we do not guess. The old fallback took the next
   // candidate whatever its score, which is how "A platform to manage medical
   // appointments" produced the actor `manage` and a CLI idea produced `compress`:
@@ -672,7 +704,7 @@ export function vocabularyFor(profile) {
   const topActor = actorCandidates[0] ?? null;
   const secondaryPick = topActor ?? restPool[0] ?? null;
   const secondary = secondaryPick ? singularOf(secondaryPick.word) : fallback[1];
-  const source = primary !== fallback[0] && primaryPick ? (weak ? 'weak' : 'idea') : 'kind';
+  const source = primaryPick && !lowConfidence && primary !== fallback[0] ? (weak ? 'weak' : 'idea') : 'kind';
 
   return {
     primary,
@@ -689,12 +721,14 @@ export function vocabularyFor(profile) {
     privilegedActor: privilegedActorFor(candidates),
     // Did we name the product, guess, or fall back to what its kind implies?
     source,
+    confidence,
+    lowConfidence,
     // Candidates are singular: the ubiquitous-language table lists *things*, and
     // "bookings" next to "booking" is the synonym problem the table exists to stop.
     // Stated explicitly: a reader must be able to see what was ruled out, so a
     // wrong classification is visible rather than silent.
     forbidden,
-    candidates: candidates.slice(0, 6).map((candidate) => ({ word: singularOf(candidate.word), count: candidate.count }))
+    candidates: candidates.slice(0, 6).map((candidate) => ({ word: singularOf(candidate.word), count: candidate.count, score: candidate.score }))
   };
 }
 

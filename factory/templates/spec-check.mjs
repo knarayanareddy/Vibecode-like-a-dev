@@ -21,7 +21,7 @@
  * Rules:
  *   - Every document listed in spec.json must exist.
  *   - Every requirement needs acceptance criteria and a verification method.
- *   - Each `@req REQ-<three-or-more digits>` marker pointing at an unknown requirement is an error; repeat the marker to cite more than one requirement on a line.
+ *   - Each `@req REQ-<id>` marker (`REQ-001` or custom `REQ-C01`) pointing at an unknown requirement is an error; repeat the marker to cite more than one requirement on a line.
  *   - A line marked `@req-ignore` is not an anchor. Use it for fixtures and
  *     examples that quote the marker deliberately; the count is always reported,
  *     so suppression can never be silent. Whole paths can be excluded with
@@ -60,11 +60,25 @@ if (LOCAL && (STRICT || REQUIRE_ASSERTIONS)) {
   console.error('\n✗ --local cannot be combined with --strict or --require-assertions: pick one mode.\n');
   process.exit(2);
 }
-const REPO = path.resolve(option('--repo', process.cwd()));
+function defaultRepoRoot(packetDir) {
+  const cwd = path.resolve(process.cwd());
+  const packet = path.resolve(packetDir);
+  if (cwd !== packet) return cwd;
+  let cursor = packet;
+  for (let depth = 0; depth < 6; depth += 1) {
+    if (existsSync(path.join(cursor, '.git'))) return cursor;
+    const parent = path.dirname(cursor);
+    if (parent === cursor) break;
+    cursor = parent;
+  }
+  return packet;
+}
+
+const REPO = path.resolve(option('--repo', defaultRepoRoot(SPEC_DIR)));
 // `status: done` in spec.json is a sentence someone typed. `--report` makes it a
 // claim about a test run instead: the anchored test name must appear as passed in a
 // machine-readable report (node:test TAP, vitest JSON or JUnit XML).
-const REPORT = option('--report', null);
+const REPORT = option('--report', option('--results', null));
 
 /**
  * Read what actually passed from a test report.
@@ -122,6 +136,10 @@ function readPassedTests(file) {
   return passed;
 }
 
+const errors = [];
+const notices = [];
+const passes = [];
+
 let reportPassed = null;
 if (REPORT) {
   try {
@@ -145,10 +163,10 @@ const IGNORED_DIRS = new Set([
 
 const TEST_FILE = /(^|\/)(tests?|__tests__|specs?)\//;
 const SUPPRESSED = /@req-ignore/i;
-const TEST_NAME = /\.(test|spec)\.[a-z]+$|(^|\/)test_[^/]+\.py$|_test\.(py|go|rb|rs|exs)$|Tests?\.(java|kt|cs|php)$/;
+const TEST_NAME = /\.(test|spec)\.[a-z]+$|(^|\/)test_[^/]+\.py$|_test\.(py|go|rb|rs|exs)$|_spec\.rb$|Tests?\.(java|kt|cs|php)$/;
 const CLARIFY_MARKER = /\[(?:CLARIFY|NEEDS CLARIFICATION)(?::[^\]]*)?\]/i;
 const ASSERTION_SIGNAL =
-  /\b(?:assert[A-Za-z0-9_.]*|expect\s*\(|should\b|require\.[A-Z]\w*|t\.(?:Fatal|Fatalf|Error|Errorf|Fail|FailNow)|pytest\.raises|raises\s*\(|rejects\b|throws\b)\b|!==|===|!=|==|<=|>=/;
+  /^[ \t]*assert\s+\S|\b(?:assert\s*!?\s*\(|assert_[a-z0-9_]+\s*!?\s*\(|assert\.[A-Za-z_]\w*\s*\(|assert[A-Z]\w*\s*\(|Assert\.[A-Z]\w*\s*\(|refute(?:_\w+)?\b|expect\s*\(|should\b|require\.[A-Z]\w*\s*\(|t\.(?:Fatal|Fatalf|Error|Errorf|Fail|FailNow)\b|pytest\.raises|raises\s*\(|rejects\b|throws\b)|!==|===|!=|==|<=|>=/m;
 
 /**
  * Vacuity rules (BLK-2).
@@ -168,9 +186,9 @@ const ASSERTION_SIGNAL =
  * cost of lying, they do not make lying impossible.
  */
 const SKIP_SIGNAL =
-  /\b(?:test|it|describe)\.(?:skip|todo|only)\s*\(|\bx(?:it|describe|test)\s*\(|@(?:Disabled|Ignore)\b|\bpytest\.mark\.skip\b|\bt\.Skip(?:f|Now)?\s*\(/;
+  /\b(?:test|it|describe)\.(?:skip|todo|only)\s*\(|\bx(?:it|describe|test)\s*\(|@(?:Disabled|Ignore)\b|#\[ignore\b|\bpytest\.mark\.skip\b|\bt\.Skip(?:f|Now)?\s*\(|\bmarkTestSkipped\s*\(/;
 const EMPTY_BODY =
-  /\b(?:test|it)\s*\(\s*(?:['"`][^'"`]*['"`]|\w+)\s*,\s*(?:async\s*)?\([^)]*\)\s*=>\s*\{\s*\}\s*\)|\b(?:test|it)\s*\([^)]*\bfunction\s*\([^)]*\)\s*\{\s*\}\s*\)|def\s+test_\w+\s*\([^)]*\):\s*(?:\n\s*(?:pass|\.\.\.)\s*)?$/m;
+  /\b(?:test|it)\s*\(\s*(?:['"`][^'"`]*['"`]|\w+)\s*,\s*(?:async\s*)?\([^)]*\)\s*=>\s*\{\s*\}\s*\)|\b(?:test|it)\s*\([^)]*\bfunction\s*\([^)]*\)\s*\{\s*\}\s*\)|^[ \t]*def\s+test_\w+\s*\([^)]*\):[ \t]*\r?\n([ \t]+)(?:pass|\.\.\.)[ \t]*(?:\r?\n(?![ \t]+\S)|$)|#\[test\]\s*(?:async\s+)?fn\s+\w+\s*\([^)]*\)\s*\{\s*\}|@Test\s*(?:public\s+)?(?:void|fun)\s+\w+\s*\([^)]*\)\s*\{\s*\}|public\s+function\s+test\w+\s*\([^)]*\)(?:\s*:\s*void)?\s*\{\s*\}|\bit\s+['"][^'"]+['"]\s+do\s+end\b/m;
 // A literal on both sides of an equality assertion: expect(true).toBe(true),
 // assertEqual(1, 1), assert 1 == 1.
 //
@@ -277,6 +295,23 @@ function vacuousAssertions(source) {
     // weak assertion, which this rule does not try to grade.
     if (bothLiteral || selfCompare) found.push(`expect(${received[0]})${matcher[0].trim()}(${matcherArgs.join(', ')})`);
   }
+  // Python bare literal assertions: `assert True`, `assert 1 == 1`, `assert "a" == "a"`
+  for (const match of source.matchAll(/^[ \t]*assert\s+(True|1\s*==\s*1|0\s*==\s*0|['"][^'"]*['"]\s*==\s*['"][^'"]*['"])[ \t]*(?:#.*)?$/gm)) {
+    found.push(`assert ${match[1].trim()}`);
+  }
+  // Rust literal macros: `assert!(true)`, `assert_eq!(1, 1)`
+  for (const match of source.matchAll(/\b(assert!\s*\(\s*true\s*\)|assert_eq!\s*\(\s*(-?\d+|true|false|"[^"]*")\s*,\s*\2\s*\))/g)) {
+    found.push(match[1].replace(/\s+/g, ' '));
+  }
+  // JVM / PHP / C# literal assertions: `assertTrue(true)`, `assertEquals(1, 1)`, `$this->assertTrue(true)`, `Assert.True(true)`
+  for (const match of source.matchAll(/(?:\$this->|\bAssert\.)?\b(assertTrue|assertSame|assertEquals|True|Equal)\s*\(\s*(true|-?\d+|['"][^'"]*['"])(?:\s*,\s*\2)?\s*\)/g)) {
+    const call = match[0].trim();
+    if (/True\s*\(\s*true\s*\)$/.test(call) || /,\s*(?:true|-?\d+|['"][^'"]*['"])\s*\)$/.test(call)) found.push(call);
+  }
+  // Ruby RSpec literal assertions: `expect(true).to eq(true)`, `expect(true).to be(true)`, `expect(1).to eq(1)`
+  for (const match of source.matchAll(/\bexpect\s*\(\s*(true|false|nil|-?\d+|['"][^'"]*['"])\s*\)\.to\s+(?:eq|eql|be)\s*\(?\s*\1\s*\)?/g)) {
+    found.push(match[0].trim());
+  }
   return [...new Set(found)];
 }
 // A test file that reaches nothing outside itself cannot be testing the product.
@@ -289,29 +324,171 @@ function vacuousAssertions(source) {
 // that looked like a real test.
 // No trailing \\b: `node:assert/strict` continues with `/`, which is not a word
 // character, so a word boundary never matched there.
-const TEST_INFRASTRUCTURE =
-  /^(?:node:(?:test|assert)(?:\/|$)|(?:@jest\/globals|vitest|jest|mocha|chai|ava|tap|uvu|sinon|@testing-library\/[\w-]+|supertest|pytest|unittest|hypothesis)(?:\/|$))/;
-const IMPORT_SPECIFIER = /(?:^\s*import\s[^'"]*?from\s+|require\s*\(\s*|^\s*from\s+|^\s*import\s+)['"]([^'"]+)['"]/gm;
+const JS_TEST_INFRA =
+  /^(?:node:(?:test|assert)(?:\/|$)|(?:@jest\/globals|vitest|jest|mocha|chai|ava|tap|uvu|sinon|@testing-library\/[\w-]+|@playwright\/test|playwright|supertest|fast-check)(?:\/|$))/;
+const PY_TEST_INFRA =
+  /^(?:pytest|_\w*pytest|pytest_\w+|unittest|hypothesis|freezegun|responses|respx|faker|factory|typing|typing_extensions|__future__|dataclasses)(?:\.|$)/;
+const RUST_NON_PRODUCT =
+  /^(?:std|core|alloc|test|proptest|quickcheck|rstest|pretty_assertions|insta|criterion|mockall|wiremock|serial_test)(?:::|$)/;
+const JVM_NON_PRODUCT =
+  /^(?:org\.junit|junit|org\.testng|org\.assertj|org\.hamcrest|org\.mockito|io\.mockk|io\.kotest|kotlin\.test|net\.jqwik|java|javax|kotlin|kotlinx\.coroutines\.test)(?:\.|$)/;
+const PHP_NON_PRODUCT =
+  /^\\?(?:PHPUnit|Pest|Mockery|Prophecy|Faker|Eris|Hamcrest)(?:\\|$)/i;
+const RUBY_NON_PRODUCT =
+  /^(?:rspec|minitest|test\/unit|spec_helper|rails_helper|test_helper|minitest_helper|webmock|vcr|factory_bot|faker|rantly|json|yaml|time|date|set|ostruct|fileutils|tmpdir|pathname|securerandom)(?:\/|$)/;
+const CSHARP_NON_PRODUCT =
+  /^(?:System|Xunit|NUnit|Microsoft\.VisualStudio\.TestTools|FluentAssertions|Moq|NSubstitute|FakeItEasy|AutoFixture|FsCheck)(?:\.|$)/;
+const GO_NON_PRODUCT =
+  /^(?:testing(?:\/\w+)?|fmt|time|os|io|bytes|strings|strconv|context|sync|errors|math|sort|reflect|regexp|path(?:\/filepath)?|encoding\/\w+|net(?:\/http(?:\/httptest)?)?|github\.com\/stretchr\/testify(?:\/[\w-]+)?|pgregory\.net\/rapid)$/;
 
-/**
- * Does this file import anything that is not test tooling?
- *
- * A relative or aliased import reaches the product by definition. A bare package
- * counts unless it is a test framework, so a test that imports only `node:test`
- * and `node:assert` is still "imports nothing" — which is the truth the rule is
- * trying to express.
- */
-function reachesProduct(source) {
-  // A Go test lives in the same package as the code under test and legitimately has
-  // no import line at all. The package clause is the declaration that this file
-  // belongs to the product's own module, so it counts as reaching it.
-  if (/^\s*package\s+\w+/m.test(source)) return true;
-  for (const match of source.matchAll(IMPORT_SPECIFIER)) {
+function jsReachesProduct(source) {
+  const pattern = /(?:^\s*import\s[\s\S]*?\bfrom\s+|^\s*import\s+|(?:\brequire|\bimport)\s*\(\s*)['"]([^'"]+)['"]/gm;
+  for (const match of source.matchAll(pattern)) {
     const specifier = match[1];
-    if (specifier.startsWith('.') || specifier.startsWith('@/') || specifier.startsWith('/')) return true;
-    if (!TEST_INFRASTRUCTURE.test(specifier)) return true;
+    if (specifier.startsWith('.') || specifier.startsWith('@/') || specifier.startsWith('~/') || specifier.startsWith('/')) return true;
+    if (!JS_TEST_INFRA.test(specifier)) return true;
   }
   return false;
+}
+
+function pythonReachesProduct(source) {
+  for (const rawLine of source.split('\n')) {
+    const line = rawLine.replace(/#.*$/, '').trim();
+    if (!line) continue;
+    const fromMatch = /^from\s+(\.+[\w.]*|[\w.]+)\s+import\s+.+$/.exec(line);
+    if (fromMatch) {
+      const mod = fromMatch[1];
+      if (mod.startsWith('.')) return true;
+      if (!PY_TEST_INFRA.test(mod)) return true;
+      continue;
+    }
+    const importMatch = /^import\s+(.+)$/.exec(line);
+    if (importMatch) {
+      const modules = importMatch[1].split(',').map((part) => part.trim().split(/\s+as\s+/)[0].trim()).filter(Boolean);
+      if (modules.some((mod) => !PY_TEST_INFRA.test(mod))) return true;
+    }
+  }
+  return false;
+}
+
+function rustReachesProduct(source) {
+  for (const match of source.matchAll(/^\s*(?:pub\s+)?use\s+((?:crate|super|self)(?:::\S+)?|[a-zA-Z_]\w*(?:::[\w*{},\s]+)?)\s*;/gm)) {
+    const target = match[1].trim().replace(/^::/, '');
+    if (/^(?:crate|super|self)(?:::|$)/.test(target)) return true;
+    const root = target.split('::')[0];
+    if (root && !RUST_NON_PRODUCT.test(target) && !RUST_NON_PRODUCT.test(root)) return true;
+  }
+  for (const match of source.matchAll(/^\s*extern\s+crate\s+([a-zA-Z_]\w*)\s*;/gm)) {
+    if (!RUST_NON_PRODUCT.test(match[1])) return true;
+  }
+  return false;
+}
+
+function jvmReachesProduct(source) {
+  for (const match of source.matchAll(/^\s*import\s+(?:static\s+)?([A-Za-z_][\w.]*(?:\.\*)?)\s*;?/gm)) {
+    const target = match[1];
+    if (!JVM_NON_PRODUCT.test(target)) return true;
+  }
+  return false;
+}
+
+function phpReachesProduct(source) {
+  for (const match of source.matchAll(/^\s*use\s+(?:function\s+|const\s+)?(\\?[A-Za-z_]\w*(?:\\[A-Za-z_]\w*)+)(?:\s+as\s+\w+)?\s*;/gm)) {
+    const target = match[1];
+    if (!PHP_NON_PRODUCT.test(target)) return true;
+  }
+  for (const match of source.matchAll(/\b(?:require|require_once|include|include_once)\s*\(?\s*(?:__DIR__\s*\.\s*)?['"]([^'"]+)['"]/gm)) {
+    const target = match[1];
+    if (!/vendor\/autoload\.php$/i.test(target) && !/bootstrap/i.test(target)) return true;
+  }
+  return false;
+}
+
+function rubyReachesProduct(source) {
+  for (const match of source.matchAll(/^\s*require_relative\s*\(?\s*['"]([^'"]+)['"]\s*\)?/gm)) {
+    const target = match[1].replace(/^\.\//, '');
+    if (!/^(?:\.\.\/)*(?:spec_helper|rails_helper|test_helper|minitest_helper)(?:\.rb)?$/.test(target)) return true;
+  }
+  for (const match of source.matchAll(/^\s*require\s*\(?\s*['"]([^'"]+)['"]\s*\)?/gm)) {
+    const target = match[1];
+    if (target.startsWith('./') || target.startsWith('../')) {
+      if (!/(?:spec_helper|rails_helper|test_helper|minitest_helper)(?:\.rb)?$/.test(target)) return true;
+      continue;
+    }
+    if (/^(?:lib|app|config\/environment)\//.test(target)) return true;
+    if (!RUBY_NON_PRODUCT.test(target) && target.includes('/')) return true;
+  }
+  return false;
+}
+
+function goReachesProduct(source) {
+  // Check explicit imports first (single-line and grouped `import (...)`).
+  const imports = [];
+  for (const single of source.matchAll(/^\s*import\s+(?:[\w.]+\s+)?["']([^"']+)["']/gm)) imports.push(single[1]);
+  for (const block of source.matchAll(/^\s*import\s*\(([\s\S]*?)\)/gm)) {
+    for (const line of block[1].matchAll(/["']([^"']+)["']/g)) imports.push(line[1]);
+  }
+  if (imports.some((spec) => !GO_NON_PRODUCT.test(spec))) return true;
+  // A Go test in the same package (`package billing`, not `package billing_test` or
+  // `package tests`) has direct access to package symbols without an import line,
+  // provided the test body invokes a package-local symbol beyond `t.*` methods.
+  const pkg = /^\s*package\s+([A-Za-z_]\w*)/m.exec(source)?.[1];
+  if (!pkg || pkg.endsWith('_test') || pkg === 'test' || pkg === 'tests') return false;
+  const stripped = source
+    .replace(/\/\/.*$/gm, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/"(?:\\.|[^"\\])*"|`[^`]*`/g, '""')
+    .replace(/\bfunc\s+Test\w*\s*\([^)]*\)/g, '')
+    .replace(/\bt\.\w+\s*\(/g, '');
+  return /\b[A-Za-z_]\w*\s*\(/.test(stripped) || /\b[A-Za-z_]\w*\s*\{/.test(stripped);
+}
+
+function csharpReachesProduct(source) {
+  for (const match of source.matchAll(/^\s*(?:global\s+)?using\s+(?:static\s+)?([A-Za-z_][\w.]*)\s*;/gm)) {
+    if (!CSHARP_NON_PRODUCT.test(match[1])) return true;
+  }
+  return false;
+}
+
+function elixirReachesProduct(source) {
+  for (const match of source.matchAll(/^\s*(?:alias|import|use)\s+([A-Z][\w.]*)/gm)) {
+    if (!/^ExUnit(?:\.|$)/.test(match[1])) return true;
+  }
+  return false;
+}
+
+const IMPORT_DETECTORS = Object.freeze({
+  '.js': jsReachesProduct,
+  '.mjs': jsReachesProduct,
+  '.cjs': jsReachesProduct,
+  '.jsx': jsReachesProduct,
+  '.ts': jsReachesProduct,
+  '.tsx': jsReachesProduct,
+  '.py': pythonReachesProduct,
+  '.go': goReachesProduct,
+  '.rs': rustReachesProduct,
+  '.java': jvmReachesProduct,
+  '.kt': jvmReachesProduct,
+  '.php': phpReachesProduct,
+  '.rb': rubyReachesProduct,
+  '.cs': csharpReachesProduct,
+  '.exs': elixirReachesProduct
+});
+
+/**
+ * Does this test file import product code rather than only test infrastructure?
+ * Dispatches by file extension so non-quoted import syntaxes (Python, Rust,
+ * Java/Kotlin, PHP, C#, Elixir) and Ruby `require_relative` work under
+ * `--strict --require-assertions`.
+ */
+function reachesProduct(source, filePath = '') {
+  const ext = path.extname(String(filePath)).toLowerCase();
+  const detector = IMPORT_DETECTORS[ext];
+  if (detector) return detector(source);
+  // Shell / Gherkin feature files do not use module imports; fall back to JS check
+  // only for unknown script extensions.
+  if (ext === '.sh' || ext === '.feature') return true;
+  return jsReachesProduct(source);
 }
 
 /**
@@ -339,15 +516,38 @@ const ASSERTION_FREE_WINDOW = 40;
 
 function scopedAssertionFor(source, anchorIndex) {
   const lines = source.split('\n');
-  const anchor = lines[anchorIndex];
-  const first = (anchor ?? '').trim();
-  // A comment holding the anchor for a test that follows on later lines: start the
-  // search there. An anchor inside code (an array of ids) starts at its own line.
-  let start = anchorIndex;
+  // Python: a def body ends at the next non-blank line indented no deeper than `def`.
+  const pyAnchor = lines.slice(anchorIndex, Math.min(lines.length, anchorIndex + 6)).findIndex((line) => /^\s*(?:async\s+)?def\s+\w+\s*\(/.test(line));
+  if (pyAnchor !== -1) {
+    const defIndex = anchorIndex + pyAnchor;
+    const indent = lines[defIndex].match(/^\s*/)[0].length;
+    const body = [];
+    for (let i = defIndex + 1; i < lines.length; i += 1) {
+      const line = lines[i];
+      if (line.trim() !== '' && !line.trim().startsWith('#') && line.match(/^\s*/)[0].length <= indent) break;
+      body.push(line);
+    }
+    return ASSERTION_SIGNAL.test(body.join('\n'));
+  }
+
+  // Ruby RSpec/Minitest: `it ... do` or `def test_...` ends at matching-indent `end`.
+  const rbAnchor = lines.slice(anchorIndex, Math.min(lines.length, anchorIndex + 4)).findIndex((line) => /^\s*(?:it|specify|scenario)\b.*\bdo\b|^\s*def\s+test_\w+/.test(line));
+  if (rbAnchor !== -1) {
+    const startIdx = anchorIndex + rbAnchor;
+    const indent = lines[startIdx].match(/^\s*/)[0].length;
+    const body = [];
+    for (let i = startIdx + 1; i < lines.length; i += 1) {
+      const line = lines[i];
+      if (new RegExp(`^\\s{0,${indent}}end\\b`).test(line)) break;
+      body.push(line);
+    }
+    return ASSERTION_SIGNAL.test(body.join('\n'));
+  }
+
   const window = [];
   let depth = 0;
   let opened = false;
-  for (let i = start; i < Math.min(lines.length, start + ASSERTION_FREE_WINDOW); i += 1) {
+  for (let i = anchorIndex; i < Math.min(lines.length, anchorIndex + ASSERTION_FREE_WINDOW); i += 1) {
     const line = lines[i];
     window.push(line);
     for (const character of line) {
@@ -360,28 +560,8 @@ function scopedAssertionFor(source, anchorIndex) {
     }
     if (opened && depth <= 0) break;
   }
-  const text = window.join('\n');
-  if (ASSERTION_SIGNAL.test(text)) return true;
-
-  // Python: a def body ends at the next line indented no deeper than the `def`.
-  const pyAnchor = lines.slice(anchorIndex, Math.min(lines.length, anchorIndex + 3)).findIndex((line) => /^\s*def\s+\w+\s*\(/.test(line));
-  if (pyAnchor !== -1) {
-    const defIndex = anchorIndex + pyAnchor;
-    const indent = lines[defIndex].match(/^\s*/)[0].length;
-    const body = [lines[defIndex]];
-    for (let i = defIndex + 1; i < lines.length; i += 1) {
-      const line = lines[i];
-      if (line.trim() !== '' && line.match(/^\s*/)[0].length <= indent) break;
-      body.push(line);
-    }
-    return ASSERTION_SIGNAL.test(body.join('\n'));
-  }
-  return false;
+  return ASSERTION_SIGNAL.test(window.join('\n'));
 }
-
-const errors = [];
-const notices = [];
-const passes = [];
 
 const rel = (file) => path.relative(REPO, file).split(path.sep).join('/');
 
@@ -403,7 +583,10 @@ function walk(dir, out = []) {
     }
     // Never follow repository links: scans must neither escape their root nor loop.
     if (stats.isSymbolicLink()) continue;
-    if (stats.isDirectory()) walk(full, out);
+    if (stats.isDirectory()) {
+      if (full !== REPO && full !== SPEC_DIR && existsSync(path.join(full, 'profile.json')) && (existsSync(path.join(full, 'spec', 'spec.json')) || existsSync(path.join(full, 'specs', 'spec.json')))) continue;
+      walk(full, out);
+    }
     else if (/\.(ts|tsx|js|jsx|mjs|cjs|py|go|rb|java|kt|cs|php|rs|sh|feature|exs)$/.test(entry)) out.push(full);
   }
   return out;
@@ -528,7 +711,7 @@ for (const file of walk(REPO)) {
   const sourceLines = source.split('\n');
   for (const [lineIndex, line] of sourceLines.entries()) {
     if (!line.includes('@req')) continue;
-    const matches = [...line.matchAll(/@req\s+(REQ-\d{3,})/g)];
+    const matches = [...line.matchAll(/@req\s+(REQ-(?:\d{3,}|C\d{2,}))/g)];
     if (matches.length === 0) continue;
     if (SUPPRESSED.test(line)) {
       suppressed += matches.length;
@@ -556,11 +739,11 @@ for (const file of walk(REPO)) {
     // per requirement. A single asserted test must not vouch for a neighbour that
     // asserts nothing, which is the false pass this used to allow.
     if (!ASSERTION_SIGNAL.test(source)) {
-      problems.push('no visible assertion');
+      problems.push('no assertion in the anchored test');
     } else if (unprovenIds.size === fileReqIds.length) {
-      problems.push('no visible assertion');
+      problems.push('no assertion in the anchored test');
     } else if (unprovenIds.size > 0) {
-      problems.push(`no visible assertion in the anchored test for ${[...unprovenIds].join(', ')}`);
+      problems.push(`no assertion in the anchored test for ${[...unprovenIds].join(', ')}`);
     }
     // A skipped or disabled test cannot prove anything, so an anchor in one is a
     // claim about a test that will not run.
@@ -576,10 +759,10 @@ for (const file of walk(REPO)) {
     if (EMPTY_BODY.test(source)) {
       problems.push('a test body is empty');
     }
-    // The test must reach outside its own directory to be testing the product.
-    const insideOnly = !reachesProduct(source);
+    // The test must reach product code rather than importing only test libraries.
+    const insideOnly = !reachesProduct(source, file);
     if (insideOnly) {
-      problems.push('the file imports nothing, so it cannot exercise the product');
+      problems.push('the test does not import product code');
     }
 
     if (problems.length > 0) {

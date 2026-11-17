@@ -1,0 +1,33 @@
+{
+  "id": "javascript",
+  "match": ["javascript", "js", "esm", "commonjs", "express"],
+  "language": "JavaScript (ESM, Node.js 22)",
+  "runtime": "Node.js 22 LTS",
+  "ui": "React + Vite (only if a UI is in scope)",
+  "http": "Fastify or node:http, validated handlers",
+  "db": "PostgreSQL + forward-only SQL migrations",
+  "validation": "Schema validation at every boundary (input, env, external API)",
+  "unitRunner": "node:test / Vitest",
+  "tests": "node:test or Vitest for unit and integration, Playwright for the primary journey",
+  "lint": "npm run lint, syntax/typecheck in CI",
+  "logs": "pino with a correlation ID field",
+  "ci": "GitHub Actions",
+  "fenceLanguage": "js",
+  "testExtension": "js",
+  "anchorComment": "//",
+  "anchorPattern": "tests/{slug}.test.js",
+  "defaultTestGlobs": ["tests/**/*.test.js", "tests/**/*.test.mjs", "**/*.test.js", "**/*.test.mjs"],
+  "countedIn": ["tests/**"],
+  "commands": {
+    "lint": "npm run lint",
+    "typecheck": "npm run typecheck",
+    "test": "npm test"
+  },
+  "mutation": {
+    "tool": "Stryker",
+    "command": "npx stryker run",
+    "configFile": "stryker.config.json"
+  },
+  "propertyLibrary": "fast-check",
+  "runnerForbidden": ["pytest", "ruff", "mypy", "go test", "cargo test", "bundle exec rspec", "vendor/bin/phpunit", "dotnet test"]
+}

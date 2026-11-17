@@ -105,7 +105,7 @@ test('an empty test body and an import-free test file are rejected', (t) => {
   orphan.writeTest(`// @req ${orphan.target}\ntest('magic', () => { expect(compute()).toBe(1); });\n`);
   const orphanResult = orphan.run('--require-assertions');
   assert.equal(orphanResult.code, 1);
-  assert.match(orphanResult.out, /imports nothing/);
+  assert.match(orphanResult.out, /the test does not import product code/);
 });
 
 test('a real test still passes, so the guard is not a blanket refusal', (t) => {
@@ -232,7 +232,7 @@ test('asserts on nothing in particular', () => { assert.equal(Date.now() > 0, tr
   );
   const result = f.run('--require-assertions');
   assert.equal(result.code, 1);
-  assert.match(result.out, /imports nothing/);
+  assert.match(result.out, /the test does not import product code/);
 });
 
 /**

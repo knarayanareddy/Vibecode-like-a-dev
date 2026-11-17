@@ -46,7 +46,8 @@ Tier 1 and above, and always when a second agent or a human can look. At tier 0,
 3. **Require evidence per finding**: file, line, the spec line violated, smallest fix. A finding without a spec reference is an opinion, and opinions are the noise that gets reviews ignored.
 4. **Say "none" per category.** It prevents the model from manufacturing findings to look thorough.
 5. **Never let the reviewer fix the code in the same session.** The review is a separate artefact with its own diff.
-6. **Human review goes to design**, not to formatting: the mechanical things are in CI.
+6. **Human review goes to design and high-rigor sign-off**, not to formatting: mechanical checks run in CI, while tier 2+ or money, regulated, or destructive-write packets escalate to an explicit human sign-off (`vld review record` or the local Studio approval surface) after the isolated review completes.
+7. **Bind the review as a verifiable artefact.** Run `vld review prepare` to build a transcript-free packet containing only `spec.json` requirements, the Git diff, and the static test-weakening/dependency/env-var scan; record the resulting six-category JSON verdict via `vld review verify` / `vld review record` so it joins the hash-chained evidence ledger.
 
 ## Checklist
 

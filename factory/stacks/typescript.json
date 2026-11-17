@@ -1,0 +1,33 @@
+{
+  "id": "typescript",
+  "match": ["typescript", "ts", "tsx", "next", "nextjs", "react", "vite", "hono", "fastify", "nestjs", "node", "undecided"],
+  "language": "TypeScript (strict)",
+  "runtime": "Node.js 22 LTS",
+  "ui": "React + Vite (only if a UI is in scope)",
+  "http": "Hono or Fastify, typed handlers",
+  "db": "PostgreSQL + Drizzle (forward-only SQL migrations)",
+  "validation": "Zod at every boundary (input, env, external API)",
+  "unitRunner": "Vitest",
+  "tests": "Vitest for unit and integration, Playwright for the primary journey",
+  "lint": "ESLint + Prettier, typecheck in CI",
+  "logs": "pino with a correlation ID field",
+  "ci": "GitHub Actions",
+  "fenceLanguage": "ts",
+  "testExtension": "ts",
+  "anchorComment": "//",
+  "anchorPattern": "tests/{slug}.test.ts",
+  "defaultTestGlobs": ["tests/**/*.test.ts", "tests/**/*.spec.ts", "**/*.test.ts"],
+  "countedIn": ["tests/**"],
+  "commands": {
+    "lint": "npm run lint",
+    "typecheck": "npm run typecheck",
+    "test": "npm test"
+  },
+  "mutation": {
+    "tool": "Stryker",
+    "command": "npx stryker run",
+    "configFile": "stryker.config.json"
+  },
+  "propertyLibrary": "fast-check",
+  "runnerForbidden": ["pytest", "ruff", "mypy", "go test", "cargo test", "bundle exec rspec", "vendor/bin/phpunit", "dotnet test"]
+}
