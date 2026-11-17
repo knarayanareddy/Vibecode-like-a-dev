@@ -16,7 +16,7 @@ import { REGULATIONS } from '../factory/lib/profile.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MAX_README_LINES = 150;
 
-const readme = readFileSync(path.join(ROOT, 'README.md'), 'utf8');
+const readme = readFileSync(path.join(ROOT, 'README.md'), 'utf8').replace(/\r\n/g, '\n');
 const lineCount = readme.split('\n').length - (readme.endsWith('\n') ? 1 : 0);
 const index = JSON.parse(readFileSync(path.join(ROOT, 'primitives', 'index.json'), 'utf8'));
 const stacksCount = readdirSync(path.join(ROOT, 'factory', 'stacks')).filter((f) => f.endsWith('.json')).length;

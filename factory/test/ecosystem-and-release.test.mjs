@@ -14,7 +14,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { runDoctor } from '../lib/doctor.mjs';
 import { migrateProject } from '../lib/migrate.mjs';
@@ -161,7 +161,7 @@ test('4.4 vld migrate upgrades legacy profiles, v1 policies and stale packets wi
 
 test('0.4, 4.3 & 4.4 VitePress config, archived plans, README metrics, CycloneDX SBOM & SHA-pinned release workflow pass', async () => {
   // VitePress config loads cleanly and covers navigation + sidebar
-  const vp = (await import(path.join(ROOT, 'docs', '.vitepress', 'config.mjs'))).default;
+  const vp = (await import(pathToFileURL(path.join(ROOT, 'docs', '.vitepress', 'config.mjs')).href)).default;
   assert.equal(vp.title, 'vibecode-like-a-dev');
   assert.ok(Array.isArray(vp.themeConfig?.sidebar) && vp.themeConfig.sidebar.length >= 3);
 

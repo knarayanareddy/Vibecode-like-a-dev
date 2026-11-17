@@ -284,7 +284,7 @@ export async function runSandboxed({
  */
 export async function runSandboxConformance({ backend = 'auto' } = {}) {
   const selected = selectSandboxBackend({ requested: backend, executable: process.execPath });
-  const root = mkdtempSync(path.join(os.tmpdir(), 'vld-sbx-conf-'));
+  const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'vld-sbx-conf-')));
   const workspace = path.join(root, 'workspace');
   const outsideDir = path.join(root, 'outside');
   const fakeCredDir = path.join(root, 'cred-home', '.ssh');
@@ -375,7 +375,7 @@ export async function runSandboxConformance({ backend = 'auto' } = {}) {
       "import fs from 'node:fs';",
       "const leakedEnv = process.env.AWS_SECRET_ACCESS_KEY || '';",
       `let leakedKey = ''; try { leakedKey = fs.readFileSync(${JSON.stringify(credFile)}, 'utf8'); } catch {}`,
-      "let homeSsh = ''; try { homeSsh = fs.readdirSync((process.env.HOME || '') + '/.ssh').join(','); } catch {}",
+      "let homeSsh = ''; try { homeSsh = fs.readdirSync((process.env.HOME || process.env.USERPROFILE || '') + '/.ssh').join(','); } catch {}",
       "console.log(JSON.stringify({ leakedEnv, leakedKey, homeSsh }));"
     ].join('\n'));
     const r5 = await runSandboxed({

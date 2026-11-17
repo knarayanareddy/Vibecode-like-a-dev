@@ -8,7 +8,7 @@
  *   node scripts/generate-sbom.mjs --check [-o sbom.cdx.json]
  */
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -21,7 +21,13 @@ const outIdx = argv.indexOf('-o');
 const outFile = path.resolve(ROOT, outIdx !== -1 && argv[outIdx + 1] ? argv[outIdx + 1] : 'sbom.cdx.json');
 
 function sha256File(absPath) {
-  return createHash('sha256').update(readFileSync(absPath)).digest('hex');
+  const buf = readFileSync(absPath);
+  // Normalize CRLF -> LF on UTF-8 text files so Windows core.autocrlf checkouts
+  // produce the exact same digest as POSIX checkouts and published tarballs.
+  if (!buf.includes(0)) {
+    return createHash('sha256').update(buf.toString('utf8').replace(/\r\n/g, '\n'), 'utf8').digest('hex');
+  }
+  return createHash('sha256').update(buf).digest('hex');
 }
 
 export function buildSbom() {
@@ -31,15 +37,15 @@ export function buildSbom() {
     throw new Error(`zero-dependency invariant violated: found ${runtimeDeps.length} runtime dependency/dependencies`);
   }
 
-  const rawPack = execFileSync('npm', ['pack', '--dry-run', '--json'], {
-    cwd: ROOT,
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe']
-  });
+  // npm is a .cmd shim on Windows; fixed command string mirrors distribution.test.mjs.
+  const rawPack = process.platform === 'win32'
+    ? execSync('npm pack --dry-run --json', { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+    : execFileSync('npm', ['pack', '--dry-run', '--json'], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   const packInfo = JSON.parse(rawPack)[0];
+  const outRel = path.relative(ROOT, outFile).split(path.sep).join('/');
   const packedFiles = (packInfo.files ?? [])
     .map((f) => f.path)
-    .filter((rel) => rel !== path.relative(ROOT, outFile) && existsSync(path.join(ROOT, rel)))
+    .filter((rel) => rel !== outRel && existsSync(path.join(ROOT, rel)))
     .sort();
 
   const fileHashes = packedFiles.map((rel) => ({

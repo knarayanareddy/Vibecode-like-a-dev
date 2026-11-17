@@ -18,6 +18,8 @@ import net from 'node:net';
 import path from 'node:path';
 import tls from 'node:tls';
 
+import { fileURLToPath } from 'node:url';
+
 const origLstatSync = fs.lstatSync.bind(fs);
 const origReadlinkSync = fs.readlinkSync.bind(fs);
 const origReadFileSync = fs.readFileSync.bind(fs);
@@ -31,15 +33,28 @@ function assertNoSymlinkEscape(filePath, mode = 'fs.read') {
   if (typeof filePath !== 'string' && !Buffer.isBuffer(filePath) && !(filePath instanceof URL)) return;
   if (!process.permission?.has) return;
   try {
-    const target = filePath instanceof URL ? filePath : String(filePath);
-    const stat = origLstatSync(target);
-    if (stat.isSymbolicLink()) {
-      const link = origReadlinkSync(target);
-      const resolved = path.resolve(path.dirname(path.resolve(String(target))), String(link));
-      if (!process.permission.has(mode, resolved)) {
-        const err = new Error(`VLD sandbox denied symlink traversal outside allowed roots (${resolved})`);
-        err.code = 'ERR_ACCESS_DENIED';
-        throw err;
+    const abs = path.resolve(filePath instanceof URL ? fileURLToPath(filePath) : String(filePath));
+    // Walk candidate and ancestors inside cwd so both leaf symlinks and Windows
+    // directory junctions pointing outside allowed roots are rejected.
+    const chain = [];
+    let cur = abs;
+    while (true) {
+      chain.push(cur);
+      const parent = path.dirname(cur);
+      if (parent === cur || !process.permission.has('fs.read', parent)) break;
+      cur = parent;
+    }
+    for (const seg of chain) {
+      let stat;
+      try { stat = origLstatSync(seg); } catch { continue; }
+      if (stat.isSymbolicLink()) {
+        const link = origReadlinkSync(seg);
+        const resolved = path.resolve(path.dirname(seg), String(link));
+        if (!process.permission.has(mode, resolved)) {
+          const err = new Error(`VLD sandbox denied symlink traversal outside allowed roots (${resolved})`);
+          err.code = 'ERR_ACCESS_DENIED';
+          throw err;
+        }
       }
     }
   } catch (err) {

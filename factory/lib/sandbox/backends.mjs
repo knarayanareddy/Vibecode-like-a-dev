@@ -136,15 +136,49 @@ export function detectSandboxBackends({ refresh = false } = {}) {
       : 'Linux unshare user/net/mount namespaces unavailable'
   });
 
-  // 4. macOS Seatbelt (`sandbox-exec`)
+  // 4. macOS Seatbelt (`sandbox-exec`) — verified against a real Node workspace write probe
   const seatbelt = process.platform === 'darwin' ? resolveSystemBinary('sandbox-exec') : null;
-  const seatbeltOk = Boolean(seatbelt) && commandRuns(seatbelt, ['-p', '(version 1)(allow default)', '/usr/bin/true']);
+  let seatbeltOk = false;
+  if (seatbelt) {
+    let probeDir = null;
+    try {
+      probeDir = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'vld-sbpl-probe-')));
+      const probeWs = path.join(probeDir, 'ws');
+      const probeOut = path.join(probeDir, 'outside.txt');
+      mkdirSync(probeWs, { recursive: true });
+      writeFileSync(probeOut, 'secret', 'utf8');
+      const probeScript = path.join(probeWs, 'ok.mjs');
+      writeFileSync(probeScript, "import fs from 'node:fs'; fs.writeFileSync('ok.txt', '1');\n", 'utf8');
+      const blockScript = path.join(probeWs, 'deny.mjs');
+      writeFileSync(blockScript, `import fs from 'node:fs'; fs.readFileSync(${JSON.stringify(probeOut)});\n`, 'utf8');
+      const sbWrite = path.join(probeDir, 'write.sb');
+      const sbRead = path.join(probeDir, 'read.sb');
+      writeFileSync(sbWrite, buildSeatbeltProfile({ workspace: probeWs, mode: 'write-workspace', allowChildProcess: false, network: false }), 'utf8');
+      writeFileSync(sbRead, buildSeatbeltProfile({ workspace: probeWs, mode: 'read-only', allowChildProcess: false, network: false }), 'utf8');
+      const writePermArgs = nodePermissionArgs({ workspace: probeWs, mode: 'write-workspace', allowChildProcess: false, includeNetDeny: false });
+      const readPermArgs = nodePermissionArgs({ workspace: probeWs, mode: 'read-only', allowChildProcess: false, includeNetDeny: false });
+      execFileSync(seatbelt, ['-f', sbWrite, process.execPath, ...writePermArgs, probeScript], {
+        cwd: probeWs,
+        env: { HOME: probeWs, TMPDIR: probeWs, PATH: '/usr/local/bin:/usr/bin:/bin' },
+        stdio: ['ignore', 'ignore', 'ignore'],
+        timeout: 4000
+      });
+      const blocked = !commandRuns(seatbelt, ['-f', sbRead, process.execPath, ...readPermArgs, blockScript]);
+      seatbeltOk = existsSync(path.join(probeWs, 'ok.txt')) && blocked;
+    } catch {
+      seatbeltOk = false;
+    } finally {
+      if (probeDir) {
+        try { rmSync(probeDir, { recursive: true, force: true }); } catch {}
+      }
+    }
+  }
   backends.push({
     id: 'darwin-seatbelt',
     confinementClass: SANDBOX_BACKEND_CLASS['darwin-seatbelt'],
     available: seatbeltOk,
     executable: seatbeltOk ? seatbelt : null,
-    detail: seatbeltOk ? 'macOS sandbox-exec seatbelt available' : 'macOS sandbox-exec unavailable'
+    detail: seatbeltOk ? 'macOS sandbox-exec seatbelt verified' : 'macOS sandbox-exec unavailable or restricted on host'
   });
 
   // 5. Portable Node >=22 permission model + frozen network-deny preload
@@ -217,9 +251,11 @@ export function selectSandboxBackend({ requested = 'auto', executable = process.
 function nodePermissionArgs({ workspace, mode, extraReadPaths = [], allowChildProcess = false, includeNetDeny = false }) {
   const permFlag = detectNodePermissionFlag();
   if (!permFlag) return [];
+  const realExec = (() => { try { return realpathSync(process.execPath); } catch { return process.execPath; } })();
   const readSet = new Set([
     workspace,
     path.dirname(process.execPath),
+    path.dirname(realExec),
     ...extraReadPaths.map((p) => {
       try { return realpathSync(p); } catch { return path.resolve(p); }
     })
@@ -296,13 +332,15 @@ function buildSeatbeltProfile({ workspace, mode, extraReadPaths = [], allowChild
     '(version 1)',
     '(deny default)',
     '(allow process-exec*)',
-    allowChildProcess ? '(allow process-fork)' : '(deny process-fork)',
+    ...(allowChildProcess ? ['(allow process-fork)'] : []),
+    '(allow process-info* (target self))',
     '(allow signal (target self))',
     '(allow sysctl-read)',
     '(allow mach-lookup)',
-    '(allow ipc-posix-shm-read-data)',
+    '(allow ipc-posix-shm*)',
+    '(allow file-ioctl)',
     '(allow file-read-metadata)',
-    '(allow file-read* (subpath "/usr") (subpath "/bin") (subpath "/sbin") (subpath "/opt/homebrew") (subpath "/System") (subpath "/Library") (subpath "/dev") (literal "/etc") (subpath "/private/etc"))',
+    '(allow file-read* (literal "/") (subpath "/usr") (subpath "/bin") (subpath "/sbin") (subpath "/opt") (subpath "/System") (subpath "/Library") (subpath "/dev") (literal "/etc") (subpath "/private/etc") (subpath "/private/var/db") (subpath "/private/var/select"))',
     `(allow file-read* (subpath ${seatbeltLiteral(path.dirname(realExec))}))`,
     `(allow file-read* (subpath ${seatbeltLiteral(nodePrefix)}))`,
     `(allow file-read* (subpath ${seatbeltLiteral(workspace)}))`
@@ -317,7 +355,7 @@ function buildSeatbeltProfile({ workspace, mode, extraReadPaths = [], allowChild
   if (mode === 'write-workspace') {
     lines.push(`(allow file-write* (subpath ${seatbeltLiteral(workspace)}))`);
   }
-  lines.push('(allow file-write* (literal "/dev/null") (literal "/dev/dtracehelper"))');
+  lines.push('(allow file-write* (literal "/dev/null") (literal "/dev/zero") (literal "/dev/dtracehelper"))');
   lines.push(network ? '(allow network*)' : '(deny network*)');
   return `${lines.join('\n')}\n`;
 }
@@ -470,14 +508,23 @@ export function buildSandboxCommand({
   if (backend.id === 'node-permission') {
     const sandboxTmp = path.join(realWorkspace, '.vld-sandbox-tmp');
     if (mode === 'write-workspace') mkdirSync(sandboxTmp, { recursive: true });
+    const tmpValue = mode === 'write-workspace' ? sandboxTmp : realWorkspace;
+    const winSysEnv = process.platform === 'win32'
+      ? {
+          ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
+          ...(process.env.SYSTEMROOT ? { SYSTEMROOT: process.env.SYSTEMROOT } : {})
+        }
+      : {};
     return {
       executable: process.execPath,
       args: innerArgs,
       cwd: realWorkspace,
-      env: { ...env, HOME: realWorkspace, USERPROFILE: realWorkspace, TMPDIR: mode === 'write-workspace' ? sandboxTmp : realWorkspace },
+      env: { ...winSysEnv, ...env, HOME: realWorkspace, USERPROFILE: realWorkspace, TMPDIR: tmpValue, TMP: tmpValue, TEMP: tmpValue },
       seccompDigest: null,
       cleanup: () => {
-        if (existsSync(sandboxTmp)) rmSync(sandboxTmp, { recursive: true, force: true });
+        try {
+          if (existsSync(sandboxTmp)) rmSync(sandboxTmp, { recursive: true, force: true });
+        } catch {}
       }
     };
   }
