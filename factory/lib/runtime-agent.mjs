@@ -22,11 +22,7 @@ import { digest, extensionError } from './extension-utils.mjs';
 import { modelIdFromPolicy } from './review.mjs';
 import { readMission } from './missions.mjs';
 import { verifySandboxReceipt, workspaceTreeDigest } from './sandbox/receipt.mjs';
-import {
-  recordRuntimeAgentReceipt,
-  runtimeStatus,
-  transitionRuntimePackage
-} from './runtime.mjs';
+import { recordRuntimeAgentReceipt, runtimeRunStops, runtimeStatus, transitionRuntimePackage } from './runtime.mjs';
 import { runtimeWorkspaceAllocation } from './workspaces.mjs';
 
 function now() {
@@ -224,24 +220,59 @@ export async function runRuntimeAgent({ missionFile, packageId, policyFile, leas
   let attempts = 0;
   const events = [];
   const startedAt = now();
+  // P3.6 stop watchdog: a run-stop recorded against this run (Studio pause or
+  // kill) aborts the adapter immediately for 'kill', or stops the retry loop at
+  // the next attempt boundary for 'pause'.
+  const stopController = new AbortController();
+  const forwardAbort = () => stopController.abort();
+  if (signal) {
+    if (signal.aborted) stopController.abort();
+    else signal.addEventListener('abort', forwardAbort, { once: true });
+  }
+  const liveRunId = workPackage.run.id;
+  let stopAction = null;
+  const checkStop = () => {
+    const stops = runtimeRunStops({ missionFile, projectDir, runId: liveRunId });
+    const latest = stops.at(-1);
+    if (!latest) return null;
+    stopAction = latest.action;
+    if (latest.action === 'kill') stopController.abort();
+    return latest.action;
+  };
+  checkStop();
+  const stopPoller = setInterval(checkStop, 50);
   try {
     do {
       attempts += 1;
       const result = await executeAgentAdapter({
         spec,
         policy,
-        signal,
+        signal: stopController.signal,
         onEvent: (event) => {
           // Events returned to the local caller are already schema-validated and
           // redacted by the adapter layer. Keep only bounded metadata in memory.
           if (events.length < 64) events.push(event);
           if (typeof onEvent === 'function') onEvent(event);
+          // A stop recorded mid-attempt (Studio pause/kill) is honoured at this
+          // step boundary as well as by the background poller.
+          if (stopAction === null) {
+            const action = checkStop();
+            if (action === 'kill') stopController.abort();
+          }
         }
       });
       execution = { ...result, adapter: policy.adapter };
-    } while (retryable(execution.outcome) && attempts <= policy.limits.retryBudget && !signal?.aborted);
+    } while (retryable(execution.outcome) && attempts <= policy.limits.retryBudget && !stopController.signal.aborted && stopAction !== 'pause');
   } catch (error) {
     execution = { ...safeFailureResult(error, startedAt), adapter: policy.adapter };
+  } finally {
+    clearInterval(stopPoller);
+    if (signal) signal.removeEventListener('abort', forwardAbort);
+  }
+  if (stopAction && execution && execution.outcome !== 'cancelled') {
+    // A recorded pause or kill owns the outcome: the run stopped because the
+    // reviewer/operator asked it to stop, not because the adapter failed.
+    execution = { ...execution, outcome: 'cancelled', signal: 'SIGTERM' };
   }
 
   const policyHash = agentPolicyDigest(policy);

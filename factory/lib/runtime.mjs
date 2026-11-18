@@ -41,7 +41,7 @@ const MAX_RECEIPTS = 200;
 const COMMIT = /^[a-f0-9]{40}$/;
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9][A-Za-z0-9._-]{7,120}$/;
 const LEASE_TOKEN = /^lease-[a-f0-9-]{36}$/;
-const EVENT_TYPES = new Set(['initialized', 'allocated', 'heartbeat', 'transition', 'ready', 'lease-expired', 'agent-run', 'candidate', 'verification', 'review', 'approval', 'queue', 'forge-plan']);
+const EVENT_TYPES = new Set(['initialized', 'allocated', 'heartbeat', 'transition', 'ready', 'lease-expired', 'agent-run', 'run-stop', 'candidate', 'verification', 'review', 'approval', 'queue', 'forge-plan']);
 
 function errorDetail(error) {
   return String(error?.stderr || error?.message || error || '').trim();
@@ -560,6 +560,11 @@ function validateEvent(event) {
     validateAgentRunReceipt(event.agentRun);
     return;
   }
+  if (event.type === 'run-stop') {
+    if (!['operator', 'release-approver', 'runtime'].includes(event.actor.role)) throw extensionError('runtime run stop event has an invalid actor', 'INVALID_RUNTIME_LEDGER');
+    validateRunStopReceipt(event.runStop);
+    return;
+  }
   if (event.type === 'candidate') {
     if (!ID_PATTERN.test(String(event.runId ?? ''))) throw extensionError('runtime candidate event has an invalid run id', 'INVALID_RUNTIME_LEDGER');
     validateCandidateReceipt(event.candidate);
@@ -637,6 +642,8 @@ function createReceiptIndex() {
     reviewsByCandidate: new Map(),
     queues: new Map(),
     queuesByCandidate: new Map(),
+    runStops: new Map(),
+    runStopsByRun: new Map(),
     forges: new Map(),
     delivery: []
   };
@@ -647,6 +654,17 @@ function recordReceipt(index, event) {
     index.agentRuns.set(event.agentRun.id, {
       sequence: event.sequence, packageId: event.packageId, runId: event.runId,
       agentRun: publicAgentRun(event.agentRun)
+    });
+    return;
+  }
+  if (event.type === 'run-stop') {
+    index.runStops.set(event.runStop.id, {
+      sequence: event.sequence, packageId: event.packageId,
+      runStop: publicDeliveryReceipt(event.runStop)
+    });
+    index.runStopsByRun.set(event.runStop.runId, {
+      sequence: event.sequence, packageId: event.packageId,
+      runStop: publicDeliveryReceipt(event.runStop)
     });
     return;
   }
@@ -707,6 +725,11 @@ function applyEvent(state, event, receipts = state?.receipts ?? createReceiptInd
       throw extensionError('runtime agent receipt does not match a running package', 'INVALID_RUNTIME_LEDGER');
     }
     if (receipts.agentRuns.has(event.agentRun.id)) throw extensionError('runtime agent receipt repeats', 'INVALID_RUNTIME_LEDGER');
+  } else if (event.type === 'run-stop') {
+    const knownRun = workPackage.run?.id === event.runStop.runId || receipts.agentRuns.has(event.runStop.runId) || receipts.runStopsByRun.has(event.runStop.runId);
+    if (!knownRun) throw extensionError('runtime run stop does not match a live or recorded run', 'INVALID_RUNTIME_LEDGER');
+    if (event.runStop.packageId !== event.packageId) throw extensionError('runtime run stop package does not match the event package', 'INVALID_RUNTIME_LEDGER');
+    if (receipts.runStops.has(event.runStop.id)) throw extensionError('runtime run stop receipt repeats', 'INVALID_RUNTIME_LEDGER');
   } else if (event.type === 'candidate') {
     if (workPackage.state !== 'changes_ready' || workPackage.run?.id !== event.runId || event.actor.role !== 'implementer' || event.actor.id !== workPackage.run.holderId || event.candidate.missionId !== next.mission.id || event.candidate.packageId !== event.packageId) {
       throw extensionError('runtime candidate does not match an implementer changes-ready package', 'INVALID_RUNTIME_LEDGER');
@@ -786,6 +809,7 @@ function applyEvent(state, event, receipts = state?.receipts ?? createReceiptInd
     at: event.at,
     ...(event.from ? { from: event.from, to: event.to } : {}),
     ...(event.type === 'agent-run' ? { runId: event.runId, agentRun: publicAgentRun(event.agentRun) } : {}),
+    ...(event.type === 'run-stop' ? { runStop: publicDeliveryReceipt(event.runStop) } : {}),
     ...(event.type === 'candidate' ? { runId: event.runId, candidate: publicDeliveryReceipt(event.candidate) } : {}),
     ...(event.type === 'verification' ? { verification: publicDeliveryReceipt(event.verification) } : {}),
     ...(event.type === 'approval' ? { approval: publicDeliveryReceipt(event.approval) } : {}),
@@ -932,6 +956,7 @@ function publicRuntimeEvent(event) {
     ...(event.expiresAt ? { expiresAt: event.expiresAt } : {}),
     ...(event.reason ? { reason: event.reason } : {}),
     ...(event.agentRun ? { agentRun: publicAgentRun(event.agentRun) } : {}),
+    ...(event.runStop ? { runStop: publicDeliveryReceipt(event.runStop) } : {}),
     ...(event.candidate ? { candidate: publicDeliveryReceipt(event.candidate) } : {}),
     ...(event.verification ? { verification: publicDeliveryReceipt(event.verification) } : {}),
     ...(event.approval ? { approval: publicDeliveryReceipt(event.approval) } : {}),
@@ -1411,6 +1436,68 @@ export function recordRuntimeVerification({ missionFile, packageId, verification
  * package: the queue gate later reads these receipts to block high or critical
  * findings and to demand human sign-off at tier 2 and above.
  */
+function validateRunStopReceipt(receipt) {
+  if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt)) throw extensionError('runtime run stop receipt must be an object', 'INVALID_RUNTIME_LEDGER');
+  const allowed = new Set(['id', 'runId', 'packageId', 'action', 'reason', 'stoppedAt']);
+  for (const key of Object.keys(receipt)) if (!allowed.has(key)) throw extensionError(`runtime run stop receipt.${key} is not allowed`, 'INVALID_RUNTIME_LEDGER');
+  if (!ID_PATTERN.test(String(receipt.id ?? '')) || !ID_PATTERN.test(String(receipt.runId ?? '')) || !ID_PATTERN.test(String(receipt.packageId ?? ''))) throw extensionError('runtime run stop receipt has invalid identity', 'INVALID_RUNTIME_LEDGER');
+  if (receipt.action !== 'pause' && receipt.action !== 'kill') throw extensionError('runtime run stop action must be pause or kill', 'INVALID_RUNTIME_LEDGER');
+  if (typeof receipt.reason !== 'string' || !receipt.reason.trim() || receipt.reason.length > 400 || /[\r\n\0]/.test(receipt.reason)) throw extensionError('runtime run stop reason is invalid', 'INVALID_RUNTIME_LEDGER');
+  if (!validTime(receipt.stoppedAt)) throw extensionError('runtime run stop timestamp is invalid', 'INVALID_RUNTIME_LEDGER');
+  return receipt;
+}
+
+/**
+ * P3.6: read the recorded run-stop receipts for one run. The agent-side stop
+ * watchdog polls this cheaply; read failures degrade to "no stops recorded".
+ */
+export function runtimeRunStops({ missionFile, projectDir = '.', runId } = {}) {
+  try {
+    const context = runtimeContext({ missionFile, projectDir, requireCurrent: false });
+    const { events } = readLedger(context.paths);
+    return events
+      .filter((event) => event.type === 'run-stop' && event.runStop?.runId === runId)
+      .map((event) => publicDeliveryReceipt(event.runStop));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * P3.6: record a cooperative pause or an immediate kill of a live agent run.
+ * The stop is an auditable ledger event; killing also aborts the run through
+ * the caller's abort signal before this receipt is recorded.
+ */
+export function recordRuntimeRunStop({ missionFile, packageId, runId, action, reason, actor, projectDir = '.', policy = defaultRuntimePolicy(), now } = {}) {
+  const context = runtimeContext({ missionFile, projectDir, requireCurrent: true });
+  const requestedActor = assertRuntimeActor(actor);
+  const runStop = {
+    id: `run-stop-${randomUUID()}`,
+    runId: String(runId ?? ''),
+    packageId: String(packageId ?? ''),
+    action: String(action ?? ''),
+    reason: String(reason ?? '').trim().slice(0, 400),
+    stoppedAt: nowIso(now)
+  };
+  try { validateRunStopReceipt(runStop); } catch (error) { throw extensionError(error.message, 'INVALID_RUNTIME_RUN_STOP'); }
+  return withRuntimeLock(context.paths, () => {
+    const { events, state } = readLedger(context.paths);
+    assertCurrentRuntime(context, state, policy);
+    const stopEvent = {
+      schemaVersion: EVENT_VERSION,
+      sequence: state.sequence + 1,
+      at: runStop.stoppedAt,
+      type: 'run-stop',
+      actor: requestedActor,
+      packageId,
+      runStop: publicDeliveryReceipt(runStop)
+    };
+    applyEvent(state, stopEvent);
+    const committed = appendEvents(context.paths, events, [stopEvent]);
+    return { changed: true, replayedSequence: stopEvent.sequence, status: reportRuntime(context, committed.state), runStop: publicDeliveryReceipt(runStop) };
+  });
+}
+
 export function recordRuntimeReview({ missionFile, packageId, review, actor, projectDir = '.', policy = defaultRuntimePolicy(), now } = {}) {
   const context = runtimeContext({ missionFile, projectDir, requireCurrent: true });
   const requestedActor = assertRuntimeActor(actor);

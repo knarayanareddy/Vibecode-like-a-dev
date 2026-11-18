@@ -17,10 +17,12 @@ import { assertRuntimeRequest, runtimeFailure, runtimeSuccess } from './runtime-
 import { catalogStatus, readCatalogState } from './catalog.mjs';
 import { appendEvidence, studioEvidenceProjection } from './evidence.mjs';
 import { approveRuntimeDeliveryCandidate, queueRuntimeDeliveryCandidate } from './runtime-delivery.mjs';
+import { execFileSync } from 'node:child_process';
 import { STUDIO_PATH, studioCapabilities, studioContentSecurityPolicy, studioHtml, studioNonce } from './studio.mjs';
 import {
   allocateRuntimePackage,
   heartbeatRuntimeLease,
+  recordRuntimeRunStop,
   recoverRuntime,
   runtimeEventHistory,
   runtimeStatus,
@@ -136,6 +138,99 @@ function studioCatalogProjection(report, projectDir) {
   };
 }
 
+function boundedGit(projectDir, args, maxBytes = 96 * 1024) {
+  try {
+    const out = execFileSync('git', ['-C', projectDir, ...args], {
+      encoding: 'utf8',
+      maxBuffer: maxBytes,
+      stdio: ['ignore', 'pipe', 'ignore']
+    });
+    return out.slice(0, maxBytes);
+  } catch {
+    return '';
+  }
+}
+
+function reqAnchorsInTree(projectDir, commitSha) {
+  const anchors = new Map();
+  const out = boundedGit(projectDir, ['grep', '-n', '-e', '@req', commitSha], 256 * 1024);
+  for (const line of out.split('\n')) {
+    // git grep <tree>: "<sha>:<path>:<line>:<content>"
+    const match = line.match(/^[0-9a-f]{40}:(.+?):\d+:(.*)$/);
+    if (!match) continue;
+    const file = match[1];
+    for (const token of match[2].matchAll(/@req\s+(REQ-(?:C\d{2,}|\d{3,}))\b/g)) {
+      const requirement = token[1];
+      if (!anchors.has(requirement)) anchors.set(requirement, new Set());
+      anchors.get(requirement).add(file);
+    }
+  }
+  return anchors;
+}
+
+/**
+ * P3.6 candidate page: requirement coverage matrix, mutation score, sandbox
+ * verification receipt, independent review findings, bounded diff, run cost
+ * and the evidence-chain badge — everything a reviewer needs to approve from
+ * Studio alone.
+ */
+function candidateDetail({ missionFile, projectDir, packageId, candidateId = null }) {
+  const status = runtimeStatus({ missionFile, projectDir });
+  const workPackage = (status.packages ?? []).find((entry) => entry.id === packageId);
+  if (!workPackage) throw extensionError(`runtime mission has no work package "${packageId}"`, 'UNKNOWN_WORK_PACKAGE');
+  const delivery = (status.delivery ?? []).filter((entry) => entry.packageId === packageId);
+  const candidateEntry = delivery.filter((entry) => entry.candidate && (!candidateId || entry.candidate.id === candidateId)).at(-1);
+  if (!candidateEntry) throw extensionError('runtime package has no matching frozen candidate receipt', 'RUNTIME_CANDIDATE_NOT_FOUND');
+  const candidate = candidateEntry.candidate;
+  const verification = delivery.filter((entry) => entry.verification?.candidateId === candidate.id).map((entry) => entry.verification).at(-1) ?? null;
+  const review = delivery.filter((entry) => entry.review?.candidateId === candidate.id).map((entry) => entry.review).at(-1) ?? null;
+  const approval = delivery.filter((entry) => entry.approval?.candidateId === candidate.id).map((entry) => entry.approval).at(-1) ?? null;
+  const queue = delivery.filter((entry) => entry.queue?.candidateId === candidate.id).map((entry) => entry.queue).at(-1) ?? null;
+
+  const missionRaw = JSON.parse(readFileSync(path.resolve(projectDir, missionFile), 'utf8'));
+  const specFile = path.resolve(projectDir, missionRaw.packet?.path ?? 'specs', 'spec.json');
+  const spec = existsSync(specFile) ? JSON.parse(readFileSync(specFile, 'utf8')) : { requirements: [] };
+  const anchors = reqAnchorsInTree(projectDir, candidate.candidateSha);
+  const coverage = (spec.requirements ?? []).map((requirement) => ({
+    id: requirement.id,
+    title: requirement.title,
+    area: requirement.area ?? null,
+    verify: requirement.verify ?? null,
+    anchored: anchors.has(requirement.id),
+    anchoredFiles: [...(anchors.get(requirement.id) ?? [])].sort().slice(0, 8)
+  }));
+
+  const mutationChecks = (verification?.checks ?? []).filter((check) => /mutation/i.test(String(check.kind ?? '')));
+  const mutation = mutationChecks.length > 0
+    ? { checks: mutationChecks.map((check) => ({ id: check.id, kind: check.kind, passed: check.passed, output: check.output })), reported: true }
+    : { checks: [], reported: false };
+
+  const runCosts = (status.agentRuns ?? [])
+    .filter((run) => run.packageId === packageId)
+    .map((run) => ({ id: run.id, adapter: run.adapter, outcome: run.outcome, modelId: run.modelId ?? null, usage: run.usage ?? null }));
+  const totals = runCosts.reduce((sum, run) => ({
+    totalTokens: sum.totalTokens + (run.usage?.totalTokens ?? 0),
+    costUsd: sum.costUsd + (run.usage?.costUsd ?? 0)
+  }), { totalTokens: 0, costUsd: 0 });
+
+  const diffText = boundedGit(projectDir, ['diff', '--unified=1', `${candidate.targetSha}..${candidate.candidateSha}`]);
+  const truncated = diffText.length >= 96 * 1024;
+
+  return {
+    package: { id: workPackage.id, state: workPackage.state, requirements: workPackage.requirements },
+    candidate,
+    verification,
+    review,
+    approval,
+    queue,
+    coverage,
+    mutation,
+    cost: { runs: runCosts, totals },
+    diff: { text: diffText, truncated },
+    evidenceChain: studioEvidenceProjection({ projectDir })
+  };
+}
+
 function dispatch({ request, actor, missionFile, projectDir, close }) {
   const params = request.params;
   switch (request.method) {
@@ -176,6 +271,31 @@ function dispatch({ request, actor, missionFile, projectDir, close }) {
     case 'transition': {
       closedParams(params, new Set(['packageId', 'to', 'expectedVersion', 'leaseToken', 'reason']), 'transition');
       return transitionRuntimePackage({ missionFile, projectDir, packageId: params.packageId, to: params.to, actor, expectedVersion: params.expectedVersion, leaseToken: params.leaseToken ?? null, reason: params.reason ?? null, idempotencyKey: request.requestId });
+    }
+    case 'candidate_detail': {
+      closedParams(params, new Set(['packageId', 'candidateId']), 'candidate_detail');
+      if (!ID_PATTERN.test(String(params.packageId ?? ''))) throw extensionError('candidate_detail params.packageId is invalid', 'INVALID_RUNTIME_REQUEST');
+      return candidateDetail({ missionFile, projectDir, packageId: params.packageId, candidateId: params.candidateId ?? null });
+    }
+    case 'pause':
+    case 'kill': {
+      closedParams(params, new Set(['packageId', 'runId', 'reason']), request.method);
+      if (!['operator', 'release-approver', 'runtime'].includes(actor.role)) {
+        throw extensionError('only an operator, release-approver or runtime identity may pause or kill a run', 'RUNTIME_ACTOR_FORBIDDEN');
+      }
+      if (!ID_PATTERN.test(String(params.packageId ?? '')) || !ID_PATTERN.test(String(params.runId ?? ''))) {
+        throw extensionError(`${request.method} requires valid packageId and runId`, 'INVALID_RUNTIME_REQUEST');
+      }
+      const stopped = recordRuntimeRunStop({
+        missionFile,
+        projectDir,
+        packageId: params.packageId,
+        runId: params.runId,
+        action: request.method,
+        reason: typeof params.reason === 'string' && params.reason.trim() ? params.reason.trim() : (request.method === 'kill' ? 'Killed from local Studio' : 'Paused from local Studio'),
+        actor
+      });
+      return stopped;
     }
     case 'approve': {
       closedParams(params, new Set(['packageId', 'candidateId', 'policyFile', 'reason']), 'approve');
@@ -330,6 +450,43 @@ export function createRuntimeServer({ missionFile, projectDir = '.', host = '127
       }
       response.writeHead(204, { 'access-control-allow-origin': origin, 'access-control-allow-methods': 'POST', 'access-control-allow-headers': 'authorization, content-type', vary: 'Origin' });
       response.end();
+      return;
+    }
+    if (request.method === 'GET' && (request.url === '/v1/runtime/stream' || request.url.startsWith('/v1/runtime/stream?'))) {
+      let streamActor;
+      try { streamActor = authenticate(request, tokens); } catch (error) {
+        json(response, 401, runtimeFailure(null, error), origin);
+        return;
+      }
+      response.writeHead(200, {
+        'content-type': 'text/event-stream; charset=utf-8',
+        'cache-control': 'no-store',
+        connection: 'keep-alive',
+        'x-content-type-options': 'nosniff'
+      });
+      let after = 0;
+      try {
+        const streamUrl = new URL(request.url, 'http://127.0.0.1');
+        const requested = Number.parseInt(streamUrl.searchParams.get('after') ?? '', 10);
+        if (Number.isSafeInteger(requested) && requested >= 0) after = requested;
+      } catch {}
+      let closed = false;
+      const write = (frame) => { if (!closed) { try { response.write(frame); } catch { closed = true; } } };
+      write(`: stream opened\n\n`);
+      const tick = () => {
+        if (closed) return;
+        try {
+          const page = runtimeEventHistory({ missionFile, projectDir, actor: streamActor, after, limit: 25, maxBytes: 65536 });
+          for (const event of page.events) {
+            write(`data: ${JSON.stringify(event)}\n\n`);
+            after = Math.max(after, Number(event.sequence) || 0);
+          }
+        } catch {}
+      };
+      tick();
+      const poller = setInterval(tick, 300);
+      const heartbeat = setInterval(() => write(': ping\n\n'), 15000);
+      request.on('close', () => { closed = true; clearInterval(poller); clearInterval(heartbeat); try { response.end(); } catch {} });
       return;
     }
     if (request.method !== 'POST' || request.url !== '/v1/runtime') {
