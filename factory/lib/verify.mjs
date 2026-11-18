@@ -13,9 +13,22 @@
 
 import { existsSync, readdirSync, readFileSync, lstatSync } from 'node:fs';
 import path from 'node:path';
+import { analyzeScopedAssertion } from '../../packages/analysis/src/index.mjs';
+import { ANCHOR_PLACEMENT_MESSAGE, detectTestLanguage, resolveAnchorScope } from './anchor-scope.mjs';
 import { earsError } from './ears.mjs';
 import { loadIndex } from './indexer.mjs';
 import { loadPolicy } from './planner.mjs';
+import { matchAnchorExecution, parseTestReport } from './test-report.mjs';
+
+/** Roadmap P2.5: honest verification verdict hierarchy (never calls anchors "verified"). */
+export const VERIFICATION_VERDICTS = Object.freeze([
+  'failed',
+  'structurally-valid',
+  'anchored-only',
+  'static-asserted',
+  'executed-verified',
+  'mutation-verified'
+]);
 
 const IGNORED_DIRS = new Set([
   'node_modules', '.git', 'dist', 'build', 'out', 'coverage', 'vendor',
@@ -166,51 +179,48 @@ export function reachesProductCode(source, filePath = '') {
  * Where an anchor cannot be scoped individually the caller falls back to the
  * file-level signal, so this narrows a false pass rather than inventing one.
  */
-const ASSERTION_FREE_WINDOW = 40;
-
-function scopedAssertionFor(source, anchorIndex) {
-  const lines = source.split('\n');
-  const pyOffset = lines.slice(anchorIndex, Math.min(lines.length, anchorIndex + 6)).findIndex((line) => /^\s*(?:async\s+)?def\s+\w+\s*\(/.test(line));
-  if (pyOffset !== -1) {
-    const defIndex = anchorIndex + pyOffset;
-    const indent = lines[defIndex].match(/^\s*/)[0].length;
-    const body = [];
-    for (let i = defIndex + 1; i < lines.length; i += 1) {
-      const line = lines[i];
-      if (line.trim() !== '' && !line.trim().startsWith('#') && line.match(/^\s*/)[0].length <= indent) break;
-      body.push(line);
-    }
-    return ASSERTION_SIGNAL.test(body.join('\n'));
+function inspectAnchorScope(source, anchorIndex, filePath = '') {
+  const scoped = resolveAnchorScope(source, anchorIndex, filePath);
+  if (scoped.status === 'misplaced') {
+    return {
+      status: 'misplaced',
+      hasAssertion: false,
+      astValid: false,
+      tautologyReason: null,
+      testName: null,
+      startLine: null,
+      endLine: null,
+      body: '',
+      message: scoped.message
+    };
   }
-  const rbOffset = lines.slice(anchorIndex, Math.min(lines.length, anchorIndex + 4)).findIndex((line) => /^\s*(?:it|specify|scenario)\b.*\bdo\b|^\s*def\s+test_\w+/.test(line));
-  if (rbOffset !== -1) {
-    const startIdx = anchorIndex + rbOffset;
-    const indent = lines[startIdx].match(/^\s*/)[0].length;
-    const body = [];
-    for (let i = startIdx + 1; i < lines.length; i += 1) {
-      const line = lines[i];
-      if (new RegExp(`^\\s{0,${indent}}end\\b`).test(line)) break;
-      body.push(line);
-    }
-    return ASSERTION_SIGNAL.test(body.join('\n'));
-  }
-  const window = [];
-  let depth = 0;
-  let opened = false;
-  for (let i = anchorIndex; i < Math.min(lines.length, anchorIndex + ASSERTION_FREE_WINDOW); i += 1) {
-    const line = lines[i];
-    window.push(line);
-    for (const character of line) {
-      if (character === '{') {
-        depth += 1;
-        opened = true;
-      } else if (character === '}') {
-        depth -= 1;
-      }
-    }
-    if (opened && depth <= 0) break;
-  }
-  return ASSERTION_SIGNAL.test(window.join('\n'));
+  const regexHasAssertion = ASSERTION_SIGNAL.test(scoped.body);
+  const language = detectTestLanguage(filePath);
+  const ast = analyzeScopedAssertion({
+    language,
+    scopeBody: scoped.body,
+    fileSource: source,
+    startLine: scoped.startLine ?? 1
+  });
+  // If the AST analyzer identifies an explicit tautology, reflexive comparison,
+  // swallowed assertion, unreachable assertion, or uncoupled literal assertion,
+  // reject it even if a regex matched `expect(` or `assert`! When it recognizes no
+  // assertion shape at all (an unsupported or idiosyncratic language), the lexical
+  // signal decides — mirroring the dependency-free checker shipped in packets.
+  const firstBad = ast.findings?.[0] ?? null;
+  const isSemanticFailure = !ast.valid && firstBad && firstBad.reason !== 'no-assertion';
+  const hasGenuineAssertion = isSemanticFailure ? false : (ast.valid || regexHasAssertion);
+  return {
+    status: 'ok',
+    hasAssertion: hasGenuineAssertion,
+    astValid: hasGenuineAssertion,
+    tautologyReason: isSemanticFailure ? `${firstBad.reason}: ${firstBad.detail}` : null,
+    testName: scoped.testName,
+    startLine: scoped.startLine ?? null,
+    endLine: scoped.endLine ?? null,
+    body: scoped.body,
+    message: null
+  };
 }
 
 function globToRegExp(glob) {
@@ -279,8 +289,12 @@ export function scanAnchors(repoDir, { exclude = [] } = {}) {
 
     const isTest = TEST_FILE.test(relative) || TEST_NAME.test(relative);
     const fileIds = [];
-    // Requirements whose own anchored test carries no assertion (BLKR-04).
+    // Requirements whose own anchored test carries no assertion (BLKR-04), a
+    // tautological/swallowed/uncoupled assertion (P2.2), or no following test
+    // declaration within 40 lines (roadmap P0.3).
     const unproven = new Set();
+    const tautological = new Map();
+    const misplaced = new Set();
     const sourceLines = source.split('\n');
     for (const [lineIndex, line] of sourceLines.entries()) {
       const matches = [...line.matchAll(ANCHOR_LINE)];
@@ -294,17 +308,68 @@ export function scanAnchors(repoDir, { exclude = [] } = {}) {
       for (const match of matches) {
         const id = match[1];
         fileIds.push(id);
-        if (isTest && !scopedAssertionFor(source, lineIndex)) unproven.add(id);
+        let testName = null;
+        let startLine = null;
+        let endLine = null;
+        let astValid = false;
+        let scopedBody = '';
+        if (isTest) {
+          const scope = inspectAnchorScope(source, lineIndex, file);
+          testName = scope.testName;
+          startLine = scope.startLine;
+          endLine = scope.endLine;
+          astValid = scope.astValid;
+          scopedBody = scope.body;
+          if (scope.status === 'misplaced') misplaced.add(id);
+          else if (scope.tautologyReason) tautological.set(id, scope.tautologyReason);
+          else if (!scope.hasAssertion) unproven.add(id);
+        }
         if (!anchors.has(id)) anchors.set(id, []);
-        anchors.get(id).push({ id, file: relative, isTest });
+        anchors.get(id).push({
+          id,
+          file: relative,
+          line: lineIndex + 1,
+          isTest,
+          testName,
+          startLine,
+          endLine,
+          astValid,
+          body: scopedBody
+        });
       }
     }
     if (isTest && fileIds.length > 0) {
       const ids = [...new Set(fileIds)];
+      if (misplaced.size > 0) {
+        hollow.push({
+          file: relative,
+          ids: [...misplaced].filter((id) => fileIds.includes(id)),
+          reason: `no test declaration follows within 40 lines (${ANCHOR_PLACEMENT_MESSAGE})`,
+          kind: 'misplaced-anchor'
+        });
+      }
+      if (tautological.size > 0) {
+        const byReason = new Map();
+        for (const [id, reason] of tautological.entries()) {
+          if (!byReason.has(reason)) byReason.set(reason, []);
+          byReason.get(reason).push(id);
+        }
+        for (const [reason, rIds] of byReason.entries()) {
+          hollow.push({
+            file: relative,
+            ids: rIds,
+            reason: `tautological or non-observing assertion (${reason})`,
+            kind: 'tautological-assertion'
+          });
+        }
+      }
       // File-level first, then per requirement, and report missing product imports
       // distinctly so `vld verify` agrees with `spec-check.mjs`.
-      if (!ASSERTION_SIGNAL.test(source)) hollow.push({ file: relative, ids, reason: 'no assertion in the anchored test', kind: 'no-assertion' });
-      else if (unproven.size > 0) hollow.push({ file: relative, ids: [...unproven].filter((id) => fileIds.includes(id)), reason: 'no assertion in the anchored test', kind: 'no-assertion' });
+      if (!ASSERTION_SIGNAL.test(source) && misplaced.size === 0 && tautological.size === 0) {
+        hollow.push({ file: relative, ids, reason: 'no assertion in the anchored test', kind: 'no-assertion' });
+      } else if (unproven.size > 0) {
+        hollow.push({ file: relative, ids: [...unproven].filter((id) => fileIds.includes(id)), reason: 'no assertion in the anchored test', kind: 'no-assertion' });
+      }
       if (!reachesProductCode(source, file)) hollow.push({ file: relative, ids, reason: 'the test does not import product code', kind: 'no-import' });
     }
   }
@@ -312,7 +377,19 @@ export function scanAnchors(repoDir, { exclude = [] } = {}) {
   return { anchors, hollow, stray, scanned, suppressed };
 }
 
-export function verifyPacket(packetDir, { repo = null, strict = false, requireAssertions = false, policy = loadPolicy() } = {}) {
+export function verifyPacket(
+  packetDir,
+  {
+    repo = null,
+    strict = false,
+    requireAssertions = false,
+    testReport = null,
+    reportPath = null,
+    requireReport = false,
+    mutationReport = null,
+    policy = loadPolicy()
+  } = {}
+) {
   const errors = [];
   const warnings = [];
   const passes = [];
@@ -637,28 +714,53 @@ export function verifyPacket(packetDir, { repo = null, strict = false, requireAs
     }
   }
 
-  // 6. anchors, when a repository is supplied
+  // 6. anchors + executed test report (P2.1) + honest verdict hierarchy (P2.5)
+  let parsedReport = testReport ?? null;
+  if (!parsedReport && reportPath) {
+    if (!existsSync(reportPath)) {
+      errors.push(`test report not found: ${reportPath}`);
+    } else {
+      try {
+        parsedReport = parseTestReport(readFileSync(reportPath, 'utf8'), { repoRoot: repo ?? '' });
+      } catch (err) {
+        errors.push(`invalid test report ${reportPath}: ${err.message}`);
+      }
+    }
+  }
+  if (requireReport && !parsedReport) {
+    errors.push('--require-report set, but no test execution report was supplied (pass --run or --report <path>)');
+  }
+
   let anchorStats = null;
+  const requirementVerdicts = [];
   if (repo) {
     const { anchors, hollow, scanned, suppressed } = scanAnchors(repo, { exclude: spec.anchors?.exclude ?? [] });
     anchorStats = { scanned, anchored: anchors.size, suppressed };
     if (suppressed > 0) info.push(`${suppressed} anchor(s) ignored by @req-ignore or anchors.exclude`);
-    // BLK-2: a hollow test that backs a requirement marked *done* is an error, not a
-    // notice. The packet says the requirement is proven; the file proves nothing.
-    // This must match the shipped checker, or the two disagree about the same file.
+    // BLK-2 + P2.2: a hollow or tautological test that backs a requirement marked
+    // *done* (or checked under --require-assertions / --run / --require-report) is an error.
     const doneIds = new Set(
       requirements
         .filter((requirement) => String(requirement.status ?? '').toLowerCase() === 'done')
         .map((requirement) => requirement.id)
     );
+    const hollowReqIds = new Set();
     for (const entry of hollow) {
       const ids = entry.ids.filter((id) => known.has(id));
       if (ids.length === 0) continue;
+      if (entry.kind !== 'no-import') {
+        for (const id of ids) hollowReqIds.add(id);
+      }
       const reason = entry.reason ?? 'no assertion in the anchored test';
       const message = `${entry.file} carries @req anchor(s) (${ids.join(', ')}) but ${reason}`;
       const claimed = entry.kind !== 'no-import' && ids.some((id) => doneIds.has(id));
-      if (requireAssertions || claimed) errors.push(message);
-      else warnings.push(`${message} (pass --require-assertions to fail on hollow tests)`);
+      const enforceSemantics =
+        entry.kind === 'misplaced-anchor' ||
+        requireAssertions ||
+        requireReport ||
+        claimed;
+      if (enforceSemantics) errors.push(message);
+      else warnings.push(`${message} (pass --require-assertions to fail on hollow or tautological tests)`);
     }
 
     for (const [id, hits] of anchors) {
@@ -668,17 +770,83 @@ export function verifyPacket(packetDir, { repo = null, strict = false, requireAs
     }
 
     let pending = 0;
-    let proven = 0;
+    let anchoredCount = 0;
+    let staticAssertedCount = 0;
+    let executedPassed = 0;
+    let executedFailed = 0;
+    let executedSkipped = 0;
+
     for (const requirement of requirements) {
-      if (requirement.verify !== 'automated') continue;
+      if (requirement.verify !== 'automated') {
+        requirementVerdicts.push({
+          id: requirement.id,
+          verify: requirement.verify,
+          status: requirement.verify === 'gate' ? 'gate-checked' : 'manual-unverified'
+        });
+        continue;
+      }
       const hits = anchors.get(requirement.id) ?? [];
       const inTests = hits.filter((hit) => hit.isTest);
       const status = String(requirement.status ?? 'todo').toLowerCase();
 
       if (inTests.length > 0) {
-        proven += 1;
+        anchoredCount += 1;
+        const hasValidAst = inTests.some((h) => h.astValid) && !hollowReqIds.has(requirement.id);
+        if (hasValidAst) staticAssertedCount += 1;
+
+        if (parsedReport) {
+          const execOutcomes = inTests.map((h) => ({ hit: h, ...matchAnchorExecution(h, parsedReport) }));
+          const anyFailed = execOutcomes.find((o) => o.status === 'failed');
+          const anyPassed = execOutcomes.find((o) => o.status === 'passed');
+          const anySkipped = execOutcomes.find((o) => o.status === 'skipped');
+
+          if (anyFailed) {
+            executedFailed += 1;
+            const label = anyFailed.hit.testName ? ` "${anyFailed.hit.testName}"` : '';
+            const why = status === 'done'
+              ? 'is marked done, but no passing test'
+              : 'has no passing test';
+            errors.push(`${requirement.id} ${why}: anchored test${label} (${anyFailed.hit.file}:${anyFailed.hit.line}) executed and FAILED`);
+            requirementVerdicts.push({ id: requirement.id, verify: 'automated', status: 'executed-failed', file: anyFailed.hit.file, testName: anyFailed.hit.testName });
+          } else if (anySkipped && !anyPassed) {
+            executedSkipped += 1;
+            const label = anySkipped.hit.testName ? ` "${anySkipped.hit.testName}"` : '';
+            errors.push(`${requirement.id} anchored test${label} (${anySkipped.hit.file}:${anySkipped.hit.line}) was SKIPPED (skipped/todo tests do not verify requirements)`);
+            requirementVerdicts.push({ id: requirement.id, verify: 'automated', status: 'executed-skipped', file: anySkipped.hit.file, testName: anySkipped.hit.testName });
+          } else if (anyPassed) {
+            // Also fail if a sibling anchored test for the same requirement was skipped under strict/requireReport
+            if (anySkipped && (strict || requireReport)) {
+              const label = anySkipped.hit.testName ? ` "${anySkipped.hit.testName}"` : '';
+              errors.push(`${requirement.id} has a skipped anchored test${label} (${anySkipped.hit.file}:${anySkipped.hit.line})`);
+            }
+            executedPassed += 1;
+            const vStatus = mutationReport?.ok && hasValidAst ? 'mutation-verified' : 'executed-passed';
+            requirementVerdicts.push({ id: requirement.id, verify: 'automated', status: vStatus, file: anyPassed.hit.file, testName: anyPassed.hit.testName });
+          } else {
+            const unrunMsg = `${requirement.id} is anchored in ${inTests[0].file}:${inTests[0].line} but did not run in the supplied test report`;
+            if (requireReport) errors.push(unrunMsg);
+            else warnings.push(unrunMsg);
+            requirementVerdicts.push({
+              id: requirement.id,
+              verify: 'automated',
+              status: hasValidAst ? 'static-asserted' : 'anchored-only',
+              file: inTests[0].file,
+              testName: inTests[0].testName
+            });
+          }
+        } else {
+          requirementVerdicts.push({
+            id: requirement.id,
+            verify: 'automated',
+            status: hasValidAst ? 'static-asserted' : 'anchored-only',
+            file: inTests[0].file,
+            testName: inTests[0].testName
+          });
+        }
         continue;
       }
+
+      requirementVerdicts.push({ id: requirement.id, verify: 'automated', status: 'unanchored' });
       if (hits.length > 0) {
         errors.push(`${requirement.id} is anchored only outside a test file (${hits.map((hit) => hit.file).join(', ')})`);
         continue;
@@ -688,21 +856,91 @@ export function verifyPacket(packetDir, { repo = null, strict = false, requireAs
       } else {
         pending += 1;
         const message = `${requirement.id} ${requirement.title}: no test anchor yet`;
-        if (strict) errors.push(message);
+        if (strict || requireReport) errors.push(message);
         else warnings.push(message);
       }
     }
 
-    info.push(`anchors: ${proven} proven, ${pending} pending, ${scanned} files scanned in ${repo}`);
-    if (proven > 0) passes.push(`${proven} automated requirement(s) proven by test anchors`);
+    anchorStats = {
+      ...anchorStats,
+      automated: requirements.filter((r) => r.verify === 'automated').length,
+      anchoredRequirements: anchoredCount,
+      staticAsserted: staticAssertedCount,
+      executedPassed,
+      executedFailed,
+      executedSkipped,
+      pending
+    };
+
+    if (parsedReport) {
+      info.push(
+        `execution: ${executedPassed} executed-passed, ${executedFailed} failed, ${executedSkipped} skipped, ${pending} unanchored (${parsedReport.format}: ${parsedReport.passed}/${parsedReport.total} cases passed)`
+      );
+      if (executedPassed > 0 && executedFailed === 0 && executedSkipped === 0) {
+        passes.push(`${executedPassed} automated requirement(s) executed-passed in test report`);
+      }
+    } else {
+      info.push(
+        `anchors (static — tests not executed): ${anchoredCount} anchored (${staticAssertedCount} AST-asserted), ${pending} pending, ${scanned} files scanned in ${repo}`
+      );
+      if (anchoredCount > 0) {
+        passes.push(
+          `${anchoredCount} automated requirement(s) proven by test anchors (${staticAssertedCount} static-asserted; run with --run or --report for execution proof)`
+        );
+      }
+    }
+  } else if (parsedReport) {
+    warnings.push('test report was supplied without --repo <path>; anchor-to-test execution mapping skipped');
+  }
+
+  // P2.5: Derive exact, honest top-level verdict.
+  const ok = errors.length === 0;
+  let verdict = 'structurally-valid';
+  if (!ok) {
+    verdict = 'failed';
+  } else if (repo && anchorStats) {
+    const totalAuto = anchorStats.automated ?? 0;
+    if (totalAuto === 0) {
+      verdict = parsedReport?.ok ? 'executed-verified' : 'structurally-valid';
+    } else if (parsedReport && anchorStats.executedPassed === totalAuto && anchorStats.staticAsserted === totalAuto) {
+      verdict = mutationReport?.ok ? 'mutation-verified' : 'executed-verified';
+    } else if (requireAssertions && anchorStats.staticAsserted === totalAuto) {
+      verdict = 'static-asserted';
+    } else {
+      verdict = 'anchored-only';
+    }
   }
 
   return {
-    ok: errors.length === 0,
+    ok,
+    verdict,
     errors,
     warnings,
     passes,
     info,
+    requirementVerdicts,
+    execution: parsedReport
+      ? {
+          format: parsedReport.format,
+          total: parsedReport.total,
+          passed: parsedReport.passed,
+          failed: parsedReport.failed,
+          skipped: parsedReport.skipped,
+          ok: parsedReport.ok,
+          sandboxBackend: parsedReport.sandboxBackend ?? null,
+          receiptDigest: parsedReport.receiptDigest ?? null
+        }
+      : null,
+    mutation: mutationReport
+      ? {
+          tool: mutationReport.tool,
+          score: mutationReport.score,
+          threshold: mutationReport.threshold,
+          killed: mutationReport.killed,
+          survived: mutationReport.survived,
+          verdictLabel: mutationReport.verdictLabel
+        }
+      : null,
     stats: {
       packetType,
       tier,

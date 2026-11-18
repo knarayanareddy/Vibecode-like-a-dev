@@ -51,6 +51,9 @@ ul { padding-left: 1.2rem; } .state { font-weight: 700; } .blocked { color: #b42
 <section aria-labelledby="packages-heading"><h2 id="packages-heading">Mission board</h2><div id="packages" class="grid" aria-live="polite"></div></section>
 <section aria-labelledby="runs-heading"><h2 id="runs-heading">Runs and verification</h2><div id="runs" class="grid"></div></section>
 <section aria-labelledby="evidence-heading"><h2 id="evidence-heading">Evidence and review</h2><div id="evidence" class="grid"></div></section>
+<section aria-labelledby="questions-heading"><h2 id="questions-heading">Profile questions (assisted intake)</h2><p class="muted">Answers are recorded by the Runtime with <code>provenance: user</code>; one answer can unlock dependent questions. Waiving a risk flag or regulation needs a reason and an expiry date.</p>
+<div class="actions"><label>Profile file <input id="profile-file" value="profile.json" autocomplete="off" spellcheck="false"></label><button id="load-questions" type="button">Load questions</button></div>
+<div id="questions" class="grid" aria-live="polite"></div></section>
 <section aria-labelledby="actions-heading"><h2 id="actions-heading">Typed Runtime and Approval actions</h2><p class="muted">Only the Runtime API can evaluate these requests. Approvals require an independent reviewer identity; queueing requires a release-approver or operator identity.</p>
 <div class="actions"><label>Package <input id="package-id" autocomplete="off" spellcheck="false"></label><label>Assignee <input id="assignee" value="agent-alpha" autocomplete="off" spellcheck="false"></label><label>Lease ms <input id="lease-ms" inputmode="numeric" value="300000"></label><button id="allocate" type="button" disabled>Allocate package</button><button id="recover" type="button" disabled>Recover expired leases</button></div>
 <div class="actions"><label>Candidate ID <input id="candidate-id" autocomplete="off" spellcheck="false"></label><label>Review note <input id="approval-reason" value="Reviewed against spec.json" autocomplete="off" spellcheck="false"></label><button id="approve" type="button" disabled>Approve candidate</button><button id="queue" type="button" disabled>Queue for merge</button></div>
@@ -68,9 +71,9 @@ export function studioDashboardScript() {
   return `(() => {
   'use strict';
   const $ = (id) => document.getElementById(id);
-  const elements = { token: $('token'), connect: $('connect'), refresh: $('refresh'), connection: $('connection'), mission: $('mission'), packages: $('packages'), runs: $('runs'), evidence: $('evidence'), packageId: $('package-id'), assignee: $('assignee'), leaseMs: $('lease-ms'), allocate: $('allocate'), recover: $('recover'), candidateId: $('candidate-id'), approvalReason: $('approval-reason'), approve: $('approve'), queue: $('queue') };
+  const elements = { token: $('token'), connect: $('connect'), refresh: $('refresh'), connection: $('connection'), mission: $('mission'), packages: $('packages'), runs: $('runs'), evidence: $('evidence'), packageId: $('package-id'), assignee: $('assignee'), leaseMs: $('lease-ms'), allocate: $('allocate'), recover: $('recover'), candidateId: $('candidate-id'), approvalReason: $('approval-reason'), approve: $('approve'), queue: $('queue'), questions: $('questions'), profileFile: $('profile-file'), loadQuestions: $('load-questions') };
   let token = '';
-  let capabilities = { allocate: false, recover: false, approve: false, queue: false };
+  let capabilities = { allocate: false, recover: false, approve: false, queue: false, answer: false };
   const MAX_RUNTIME_RESPONSE_BYTES = 1000000;
   function requestId() { return 'studio-' + (globalThis.crypto && crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + '-' + Math.random().toString(16).slice(2)); }
   function text(value) { if (value === null || value === undefined || value === '') return '—'; return Array.from(String(value), (character) => { const code = character.codePointAt(0); return code <= 31 || (code >= 127 && code <= 159) || (code >= 0x202a && code <= 0x202e) || (code >= 0x2066 && code <= 0x2069) ? '�' : character; }).join(''); }
@@ -79,7 +82,7 @@ export function studioDashboardScript() {
   function definition(parent, label, value) { parent.append(element('dt', label)); parent.append(element('dd', value)); }
   function card(title) { const node = element('article', undefined, 'card'); node.append(element('h3', title)); return node; }
   function setConnection(message, failed) { elements.connection.textContent = message; elements.connection.className = failed ? 'notice' : 'muted'; }
-  function applyCapabilities(studio) { capabilities = studio && studio.actions ? studio.actions : { allocate: false, recover: false, approve: false, queue: false }; elements.allocate.disabled = !capabilities.allocate; elements.recover.disabled = !capabilities.recover; if (elements.approve) elements.approve.disabled = !capabilities.approve; if (elements.queue) elements.queue.disabled = !capabilities.queue; }
+  function applyCapabilities(studio) { capabilities = studio && studio.actions ? studio.actions : { allocate: false, recover: false, approve: false, queue: false, answer: false }; elements.allocate.disabled = !capabilities.allocate; elements.recover.disabled = !capabilities.recover; if (elements.approve) elements.approve.disabled = !capabilities.approve; if (elements.queue) elements.queue.disabled = !capabilities.queue; }
   async function boundedJson(response) {
     const declared = Number((response.headers && response.headers.get && response.headers.get('content-length')) || 0);
     if (Number.isFinite(declared) && declared > MAX_RUNTIME_RESPONSE_BYTES) throw new Error('Runtime response exceeds ' + MAX_RUNTIME_RESPONSE_BYTES + ' bytes.');
@@ -100,6 +103,69 @@ export function studioDashboardScript() {
     const body = await boundedJson(response);
     if (!response.ok || !body.ok) throw new Error((body && body.error && body.error.message) || 'Runtime request failed.');
     return body.result;
+  }
+  let lastQuestions = [];
+  function renderQuestions(questions) {
+    if (!elements.questions) return;
+    lastQuestions = Array.isArray(questions) ? questions : [];
+    clear(elements.questions);
+    for (const q of lastQuestions) {
+      const node = card('Question · ' + text(q.id));
+      node.append(element('p', q.prompt));
+      const list = document.createElement('dl');
+      definition(list, 'Field', q.field); definition(list, 'Current', q.currentValue); definition(list, 'Suggested', q.suggestedValue); definition(list, 'Provenance', q.provenance); definition(list, 'Reason', q.reason);
+      node.append(list);
+      const row = document.createElement('div'); row.className = 'actions';
+      const options = Array.isArray(q.options) ? q.options : null;
+      let input;
+      if (options && options.length > 0) {
+        input = document.createElement('select');
+        for (const option of options) { const opt = document.createElement('option'); opt.value = String(option); opt.textContent = text(option); input.append(opt); }
+      } else {
+        input = element('input'); input.type = 'text'; input.autocomplete = 'off'; input.spellcheck = false;
+        if (q.suggestedValue !== undefined && q.suggestedValue !== null && typeof q.suggestedValue !== 'object') input.value = String(q.suggestedValue);
+      }
+      const reason = element('input'); reason.type = 'text'; reason.autocomplete = 'off'; reason.placeholder = 'waive reason (risk flags only)';
+      const expires = element('input'); expires.type = 'date';
+      const answerButton = element('button', 'Record answer'); answerButton.type = 'button'; answerButton.disabled = !capabilities.answer;
+      const waiveButton = element('button', 'Waive'); waiveButton.type = 'button'; waiveButton.disabled = !capabilities.answer;
+      answerButton.addEventListener('click', async () => {
+        try {
+          const profileFile = elements.profileFile.value.trim() || 'profile.json';
+          let value = input.value;
+          if (value === 'true') value = true; else if (value === 'false') value = false;
+          if (value === 'waive') throw new Error('Use the Waive button with a reason and expiry date instead of the waive option.');
+          const result = await call('answer', { profileFile, questionId: q.id, field: q.field, value });
+          renderQuestions(result && result.remainingQuestions ? result.remainingQuestions : []);
+          setConnection('Answer recorded with provenance user for ' + text(q.field) + '. Dependent questions are refreshed.', false);
+        } catch (error) { setConnection(error.message, true); }
+      });
+      waiveButton.addEventListener('click', async () => {
+        try {
+          if (!reason.value.trim()) throw new Error('A waiver needs a reason.');
+          if (!expires.value) throw new Error('A waiver needs an expiry date.');
+          const profileFile = elements.profileFile.value.trim() || 'profile.json';
+          const result = await call('answer', { profileFile, questionId: q.id, field: q.field, waive: { reason: reason.value.trim(), expires: expires.value } });
+          renderQuestions(result && result.remainingQuestions ? result.remainingQuestions : []);
+          setConnection('Waiver recorded for ' + text(q.field) + ' until ' + text(expires.value) + '.', false);
+        } catch (error) { setConnection(error.message, true); }
+      });
+      row.append(input); row.append(answerButton); row.append(waiveButton); row.append(reason); row.append(expires);
+      node.append(row);
+      elements.questions.append(node);
+    }
+    if (!elements.questions.firstChild) elements.questions.append(element('p', 'No pending questions. The profile answers everything the current scan asks.', 'muted'));
+  }
+  async function loadQuestions() {
+    if (!elements.questions) return;
+    try {
+      const profileFile = elements.profileFile.value.trim() || 'profile.json';
+      const result = await call('get_questions', { profileFile });
+      renderQuestions(result && result.questions ? result.questions : []);
+    } catch (error) {
+      clear(elements.questions);
+      elements.questions.append(element('p', error.message, 'blocked'));
+    }
   }
   function renderMission(result) {
     clear(elements.mission); const runtime = result.runtime || {}; const mission = result.mission || {}; const list = document.createElement('dl');
@@ -131,9 +197,10 @@ export function studioDashboardScript() {
   }
   function renderEvidence(result) { clear(elements.evidence); const node = card('Traceability'); const list = document.createElement('dl'); for (const pkg of result.packages || []) definition(list, pkg.id + ' requirements', (pkg.requirements || []).join(', ')); definition(list, 'Recent event window', (result.recentEvents || []).length + ' event(s) from the bounded current-status window'); definition(list, 'Historic evidence', 'Not displayed here. Request cursor-paged Runtime events when reviewing durable history.'); definition(list, 'Delivery receipts in recent window', (result.delivery || []).length); definition(list, 'Packet digest', result.runtime && result.runtime.packetDigest); node.append(list); elements.evidence.append(node); const chain = result.studio && result.studio.evidenceChain; if (chain && chain.exists) { const chainCard = card('Hash-chained audit ledger'); const chainList = document.createElement('dl'); definition(chainList, 'Chain integrity', chain.ok ? 'verified' : 'tampered at seq ' + chain.firstBrokenSeq); definition(chainList, 'Entries', chain.entries); definition(chainList, 'Head SHA-256', chain.headHash); for (const item of chain.recent || []) definition(chainList, 'seq ' + item.seq + ' · ' + item.kind, item.subject + ' (' + item.actor + ')'); chainCard.append(chainList); for (const error of chain.errors || []) chainCard.append(element('p', error, 'blocked')); elements.evidence.append(chainCard); } const catalog = result.studio && result.studio.catalog; if (catalog) { const catalogCard = card('Signed content catalog'); const catalogList = document.createElement('dl'); definition(catalogList, 'Trust state', catalog.ok ? 'verified' : 'degraded'); definition(catalogList, 'Root digest', catalog.trustedRoot && catalog.trustedRoot.digest); for (const item of catalog.catalogs || []) { definition(catalogList, item.id + ' publisher(s)', (item.packages || []).map((pkg) => pkg.publisher && pkg.publisher.id).join(', ')); definition(catalogList, item.id + ' content digest', item.indexDigest); } catalogCard.append(catalogList); for (const error of catalog.errors || []) catalogCard.append(element('p', error, 'blocked')); elements.evidence.append(catalogCard); } }
   function render(result) { applyCapabilities(result.studio); renderMission(result); renderPackages(result); renderRuns(result); renderEvidence(result); setConnection(result.ok === false ? 'Connected, but Runtime reports a degraded/read-only state. Read the warnings above.' : 'Connected to local Runtime. Status is authoritative.', result.ok === false); }
-  async function refresh() { try { render(await call('status', {})); } catch (error) { applyCapabilities(null); setConnection(error.message, true); } }
+  async function refresh() { try { render(await call('status', {})); } catch (error) { applyCapabilities(null); setConnection(error.message, true); } await loadQuestions(); }
   elements.connect.addEventListener('click', async () => { token = elements.token.value; elements.token.value = ''; await refresh(); if (token) elements.refresh.disabled = false; });
   elements.refresh.addEventListener('click', refresh);
+  if (elements.loadQuestions) elements.loadQuestions.addEventListener('click', loadQuestions);
   elements.allocate.addEventListener('click', async () => { try { if (!globalThis.crypto || !crypto.randomUUID) throw new Error('This browser cannot generate a lease capability. Use the CLI instead.'); const leaseMs = Number(elements.leaseMs.value); const leaseToken = 'lease-' + crypto.randomUUID(); const result = await call('allocate', { packageId: elements.packageId.value, assignee: { role: 'implementer', id: elements.assignee.value }, leaseMs, leaseToken }); await refresh(); setConnection('Allocation created. Copy this lease capability now; Studio will not retain it: ' + result.leaseToken, false); } catch (error) { setConnection(error.message, true); } });
   elements.recover.addEventListener('click', async () => { try { await call('recover', {}); await refresh(); } catch (error) { setConnection(error.message, true); } });
   if (elements.approve) elements.approve.addEventListener('click', async () => { try { await call('approve', { packageId: elements.packageId.value, candidateId: elements.candidateId.value, reason: elements.approvalReason.value }); await refresh(); setConnection('Candidate approved and recorded in evidence ledger.', false); } catch (error) { setConnection(error.message, true); } });
@@ -148,6 +215,8 @@ export function studioCapabilities(actor) {
     recover: ['operator', 'runtime'].includes(actor?.role),
     transition: ['implementer', 'reviewer', 'release-approver', 'operator', 'runtime', 'forge'].includes(actor?.role),
     approve: actor?.role === 'reviewer',
-    queue: ['release-approver', 'operator'].includes(actor?.role)
+    queue: ['release-approver', 'operator'].includes(actor?.role),
+    questions: true,
+    answer: ['operator', 'reviewer', 'release-approver'].includes(actor?.role)
   };
 }

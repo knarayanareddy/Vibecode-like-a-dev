@@ -8,6 +8,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 import {
   agentPolicyDigest,
   assertAgentPolicy,
@@ -15,6 +16,8 @@ import {
   SANDBOXED_AGENT_ADAPTER_IDS
 } from './agent-policy.mjs';
 import { executeAgentAdapter } from './agent-adapters.mjs';
+import { harvestTranscripts } from './agent-transcript.mjs';
+import { appendEvidence } from './evidence.mjs';
 import { digest, extensionError } from './extension-utils.mjs';
 import { readMission } from './missions.mjs';
 import { verifySandboxReceipt, workspaceTreeDigest } from './sandbox/receipt.mjs';
@@ -113,6 +116,21 @@ function attemptReceipt({ id, policyDigest, contextDigest, workspaceDigest, exec
       // outcome label in the Runtime ledger.
       summary: receiptOutputSummary(execution.outcome)
     },
+    ...(execution.transcriptDigest
+      ? {
+          transcriptDigest: execution.transcriptDigest,
+          ...(execution.usage
+            ? {
+                usage: {
+                  inputTokens: Number(execution.usage.inputTokens ?? 0),
+                  outputTokens: Number(execution.usage.outputTokens ?? 0),
+                  totalTokens: Number(execution.usage.totalTokens ?? 0),
+                  costUsd: Number(execution.usage.costUsd ?? 0)
+                }
+              }
+            : {})
+        }
+      : {}),
     ...(sbx ? { sandbox: sbx } : {})
   };
 }
@@ -176,6 +194,7 @@ export async function runRuntimeAgent({ missionFile, packageId, policyFile, leas
   const contextDigest = digest(context);
   const workspaceDigest = digest({ id: workspace.id, missionDigest: workspace.missionDigest, packageId: workspace.packageId, branch: workspace.branch, baseCommit: workspace.baseCommit });
   const agentRunId = `agent-run-${randomUUID()}`;
+  const missionPackage = readMission(missionFile, { projectDir }).mission.workPackages.find((p) => p.id === packageId) ?? null;
   const spec = {
     id: agentRunId,
     missionId: before.runtime.missionId,
@@ -183,6 +202,7 @@ export async function runRuntimeAgent({ missionFile, packageId, policyFile, leas
     packetDigest: context.packetDigest,
     contextDigest,
     requirementIds: [...workPackage.requirements].sort(),
+    resourceClaims: [...(missionPackage?.resourceClaims?.paths ?? [])],
     workspace: workspace.worktree
   };
 
@@ -235,6 +255,16 @@ export async function runRuntimeAgent({ missionFile, packageId, policyFile, leas
     }
   }
 
+  // Preserve tool transcripts as durable project evidence and leave the
+  // worktree deliverable-clean (resource-claim and candidate gates).
+  if (execution && execution.transcriptDigest) {
+    harvestTranscripts({
+      from: path.join(workspace.worktree, '.vld', 'agent-transcripts'),
+      to: path.join(projectDir, '.vld', 'agent-transcripts'),
+      runId: spec.id
+    });
+  }
+
   const receipt = attemptReceipt({
     id: agentRunId,
     policyDigest: policyHash,
@@ -244,6 +274,23 @@ export async function runRuntimeAgent({ missionFile, packageId, policyFile, leas
     attempts
   });
   const recorded = recordRuntimeAgentReceipt({ missionFile, projectDir, packageId, runId: workPackage.run.id, agentRun: receipt });
+
+  // Tool-loop transcript digests are appended to the tamper-evident evidence
+  // chain so the exact tool sequence behind every change stays verifiable.
+  if (receipt.transcriptDigest) {
+    appendEvidence({
+      projectDir,
+      kind: 'agent-transcript',
+      actor: `agent:${receipt.id}`,
+      subject: packageId,
+      payload: {
+        runId: receipt.id,
+        packageId,
+        transcriptDigest: receipt.transcriptDigest,
+        ...(receipt.usage ?? {})
+      }
+    });
+  }
 
   let settled;
   if (receiptGateError) {

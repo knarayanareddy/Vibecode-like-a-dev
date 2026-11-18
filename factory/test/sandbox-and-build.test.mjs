@@ -136,7 +136,7 @@ test('2.3 & 2.4 sandboxed-cli v2 policy, resource-claim gate, receipt-gated cand
       "import fs from 'node:fs';",
       "fs.mkdirSync('tests', { recursive: true });",
       `const anchors = ${JSON.stringify(autoReqs)}.map((id) => '// ${reqTag} ' + id).join('\\n');`,
-      "fs.writeFileSync('tests/unit.test.mjs', `import assert from 'node:assert/strict';\\nimport { hashArchive } from '../src/index.mjs';\\n${anchors}\\nassert.equal(hashArchive('abc'), 'sha256:3');\\n`);"
+      "fs.writeFileSync('tests/unit.test.mjs', `import test from 'node:test';\\nimport assert from 'node:assert/strict';\\nimport { hashArchive } from '../src/index.mjs';\\n${anchors}\\ntest('hashes archive', () => {\\n  assert.equal(hashArchive('abc'), 'sha256:3');\\n});\\n`);"
     ].join('\n'),
     'utf8'
   );
@@ -430,10 +430,13 @@ test('2.7 vld build compiles, executes in sandbox, self-repairs from repair brie
       "  const spec = JSON.parse(fs.readFileSync('specs/spec.json', 'utf8'));",
       `  const anchors = spec.requirements.filter((r) => r.verify === 'automated').map((r) => '// ${reqTag} ' + r.id).join('\\n');`,
       "  fs.writeFileSync('tests/checksum.test.mjs', [",
+      "    \"import test from 'node:test';\",",
       "    \"import assert from 'node:assert/strict';\",",
       "    \"import { hashArchive } from '../src/index.mjs';\",",
       "    anchors,",
-      "    \"assert.equal(hashArchive('hello'), 'sha256:5');\",",
+      "    \"test('hashes archive', () => {\",",
+      "    \"  assert.equal(hashArchive('hello'), 'sha256:5');\",",
+      "    \"});\",",
       "    ''",
       "  ].join('\\n'));",
       "}"

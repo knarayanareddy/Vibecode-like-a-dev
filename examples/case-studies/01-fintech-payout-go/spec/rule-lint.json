@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "rulesChecked": 2,
+  "parsedRules": [
+    {
+      "id": "REQ-C01",
+      "key": "custom.payout-exceeds-1000000-euro-cents",
+      "subject": "payout",
+      "modal": "shall",
+      "predicate": "enforce",
+      "object": "a distinct second treasury approver before posti",
+      "quantity": null,
+      "unit": null,
+      "comparator": null,
+      "negated": false
+    },
+    {
+      "id": "REQ-C02",
+      "key": "custom.settlement-request-reuses-idempotency-key",
+      "subject": "payout",
+      "modal": "shall-not",
+      "predicate": "mutate",
+      "object": "the transfer with idempotency_conflict",
+      "quantity": null,
+      "unit": null,
+      "comparator": null,
+      "negated": true
+    }
+  ],
+  "contradictions": [],
+  "infeasible": [],
+  "resolvedConflicts": [],
+  "duplicates": [],
+  "blockingCount": 0,
+  "warningCount": 0
+}

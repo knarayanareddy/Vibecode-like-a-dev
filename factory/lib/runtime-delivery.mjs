@@ -143,6 +143,9 @@ export function submitRuntimeDeliveryCandidate({ missionFile, packageId, candida
       }
     }
   }
+  const transcriptRun = linkedRun
+    ?? (status.agentRuns ?? []).filter((entry) => entry.packageId === packageId && entry.outcome === 'completed').at(-1)
+    ?? null;
   const candidate = {
     id: `candidate-${randomUUID()}`,
     missionId: loaded.mission.id,
@@ -154,6 +157,7 @@ export function submitRuntimeDeliveryCandidate({ missionFile, packageId, candida
     packetDigest: loaded.mission.packet.digest,
     policyDigest: policy.digest,
     adapterRunId,
+    transcriptDigest: transcriptRun?.transcriptDigest ?? null,
     generatedAt: now()
   };
   return submitRuntimeCandidate({

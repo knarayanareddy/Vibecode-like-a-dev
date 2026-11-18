@@ -31,9 +31,14 @@ const RUNTIME_MODULES = new Set([
   'forge-plan.mjs',
   'repair.mjs',
   'build.mjs',
+  'model-client.mjs',
+  'intake.mjs',
+  'test-runner.mjs',
+  'mutation-runner.mjs',
   'sandbox/index.mjs',
   'sandbox/backends.mjs',
-  'sandbox/receipt.mjs'
+  'sandbox/receipt.mjs',
+  'sandbox/broker.mjs'
 ]);
 
 /** Modules that must stay usable with no process, worktree or network authority. */
@@ -45,6 +50,9 @@ const CORE_MODULES = new Set([
   'emit/derive.mjs',
   'emit/vocabulary.mjs',
   'profile.mjs',
+  'rule-lint.mjs',
+  'questions.mjs',
+  'test-report.mjs',
   'indexer.mjs',
   'predicate.mjs',
   'enforcement.mjs'

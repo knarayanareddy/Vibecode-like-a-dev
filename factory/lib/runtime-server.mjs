@@ -6,10 +6,12 @@
  * a model, runs a command or accepts a caller-selected filesystem path.
  */
 
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { extensionError, ID_PATTERN } from './extension-utils.mjs';
+import { applyProfileAnswer, generateProfileQuestions } from './questions.mjs';
 import { assertRuntimeActor } from './runtime-policy.mjs';
 import { assertRuntimeRequest, runtimeFailure, runtimeSuccess } from './runtime-contracts.mjs';
 import { catalogStatus, readCatalogState } from './catalog.mjs';
@@ -238,6 +240,55 @@ function dispatch({ request, actor, missionFile, projectDir, close }) {
         });
       } catch {}
       return queued;
+    }
+    case 'get_questions': {
+      closedParams(params, new Set(['profileFile']), 'get_questions');
+      const rel = typeof params.profileFile === 'string' && params.profileFile ? params.profileFile : 'profile.json';
+      if (path.isAbsolute(rel) || rel.includes('..') || /[\r\n\0]/.test(rel)) {
+        throw extensionError('get_questions profileFile must be a safe relative path inside the project', 'INVALID_RUNTIME_REQUEST');
+      }
+      const target = path.resolve(projectDir, rel);
+      if (!existsSync(target)) {
+        throw extensionError(`profile file not found: ${rel}`, 'INVALID_RUNTIME_REQUEST');
+      }
+      const parsed = JSON.parse(readFileSync(target, 'utf8'));
+      const raw = parsed.candidateProfile ?? parsed;
+      return generateProfileQuestions(raw, { referenceDate: new Date().toISOString().slice(0, 10) });
+    }
+    case 'answer': {
+      closedParams(params, new Set(['profileFile', 'questionId', 'field', 'value', 'waive']), 'answer');
+      if (!['operator', 'reviewer', 'release-approver'].includes(actor.role)) {
+        throw extensionError('only an operator, reviewer, or release-approver identity may record profile answers', 'RUNTIME_ACTOR_FORBIDDEN');
+      }
+      const rel = typeof params.profileFile === 'string' && params.profileFile ? params.profileFile : 'profile.json';
+      if (path.isAbsolute(rel) || rel.includes('..') || /[\r\n\0]/.test(rel)) {
+        throw extensionError('answer profileFile must be a safe relative path inside the project', 'INVALID_RUNTIME_REQUEST');
+      }
+      const target = path.resolve(projectDir, rel);
+      if (!existsSync(target)) {
+        throw extensionError(`profile file not found: ${rel}`, 'INVALID_RUNTIME_REQUEST');
+      }
+      const parsed = JSON.parse(readFileSync(target, 'utf8'));
+      const base = parsed.candidateProfile ?? parsed;
+      const result = applyProfileAnswer(base, {
+        questionId: typeof params.questionId === 'string' ? params.questionId : null,
+        field: typeof params.field === 'string' ? params.field : null,
+        value: params.value,
+        waive: params.waive && typeof params.waive === 'object' ? params.waive : null,
+        actor: `${actor.role}:${actor.id}`,
+        referenceDate: new Date().toISOString().slice(0, 10)
+      });
+      writeFileSync(target, `${JSON.stringify(result.profile, null, 2)}\n`, 'utf8');
+      try {
+        appendEvidence({
+          projectDir,
+          kind: 'profile-answer',
+          actor,
+          subject: params.field ?? params.questionId ?? rel,
+          payload: { profileFile: rel, field: params.field ?? null, questionId: params.questionId ?? null }
+        });
+      } catch {}
+      return result;
     }
     case 'recover':
       closedParams(params, new Set(), 'recover');

@@ -14,6 +14,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { OUTCOME_TASKS, validateOutcomeTasks } from '../evals/tasks/index.mjs';
 import { evaluateWorkspace, materializeWorkspace, runOutcomeHarness, runWorkspaceLocalChecks, writeModelResponseFiles } from '../lib/outcome-eval.mjs';
 import { buildIndex } from '../lib/indexer.mjs';
@@ -187,4 +188,35 @@ test('workspace-controlled tests cannot write outside their temporary root', asy
   const result = await runWorkspaceLocalChecks(workspace);
   assert.equal(result.ok, false, 'an escape-write attempt must not be treated as a passing workspace check');
   assert.equal(existsSync(sentinel), false, 'the read-only child process may not create a sibling host file');
+});
+
+// Deferred Wave 2 item: live model runners must route through the shared P3.1
+// model-client (typed auth errors, redaction, retries, cassettes) — no inline
+// fetch of provider APIs remains in outcome-eval.mjs.
+test('the openai/anthropic runners use the shared model-client auth path, not inline fetch', async (t) => {
+  const saved = { ...process.env };
+  delete process.env.OPENAI_API_KEY;
+  delete process.env.ANTHROPIC_API_KEY;
+  delete process.env.VLD_MODEL_CASSETTE_DIR;
+  delete process.env.VLD_MODEL_CASSETTE_MODE;
+  t.after(() => {
+    for (const key of ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'VLD_MODEL_CASSETTE_DIR', 'VLD_MODEL_CASSETTE_MODE']) {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key];
+    }
+  });
+  const single = OUTCOME_TASKS.filter((task) => task.id === 'gf-06-rate-limiter');
+  const run = (runner) => runOutcomeHarness({ tasks: single, runner });
+  if (!process.allowedNodeEnvironmentFlags?.has('--permission')) {
+    const report = await run('openai');
+    assert.equal(report.ok, false);
+    assert.equal(report.findings[0].id, 'workspace-sandbox-unavailable');
+    return;
+  }
+  await assert.rejects(run('openai'), /OPENAI_API_KEY/);
+  await assert.rejects(run('anthropic'), /ANTHROPIC_API_KEY/);
+  // The model-client path is also statically present: outcome-eval delegates.
+  const source = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'lib', 'outcome-eval.mjs'), 'utf8');
+  assert.match(source, /createModelClient\(/);
+  assert.doesNotMatch(source, /api\.openai\.com|api\.anthropic\.com/);
 });

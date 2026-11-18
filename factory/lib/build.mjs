@@ -21,7 +21,10 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { agentPolicyDigest, assertAgentPolicy, defaultFakeAgentPolicy, defaultSandboxedCliPolicy } from './agent-policy.mjs';
+import { fileURLToPath } from 'node:url';
+import { executeAgentAdapter } from './agent-adapters.mjs';
+import { harvestTranscripts } from './agent-transcript.mjs';
+import { agentPolicyDigest, assertAgentPolicy, defaultFakeAgentPolicy, defaultSandboxedAgentPolicy, defaultSandboxedCliPolicy, FACTORY_ROOT } from './agent-policy.mjs';
 import { defaultDeliveryPolicy, defaultSandboxedDeliveryPolicy } from './delivery-policy.mjs';
 import { emitPacket } from './emit/index.mjs';
 import { digest, ensureProjectDir, extensionError, readJson, writeJsonAtomic } from './extension-utils.mjs';
@@ -72,15 +75,18 @@ async function verifyPackageWorktree({
   requireAssertions
 }) {
   const packetAbs = path.join(worktree, packetRel);
+  // Parse `git status --porcelain` defensively: the execSync helper trims the
+  // whole output, which can strip the first line's leading status space —
+  // slicing a fixed 3 chars would then eat the path's first character.
   const statusLines = git(worktree, ['status', '--porcelain'])
     .split(/\r?\n/)
-    .map((line) => line.slice(3).trim())
+    .map((line) => line.replace(/^.{0,2}\s+/, '').trim())
     .filter(Boolean);
   const committedLines = git(worktree, ['diff', '--name-only', baseCommit])
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
-  const changed = [...new Set([...statusLines, ...committedLines])].filter((f) => !f.startsWith('.vld-repair'));
+  const changed = [...new Set([...statusLines, ...committedLines])].filter((f) => !f.startsWith('.vld-repair') && !f.startsWith('.vld/'));
   const claims = checkResourceClaims(changed, resourceClaims);
 
   const driftReport = verifyPacket(packetAbs, {
@@ -177,7 +183,11 @@ export async function runBuild({
   requireAssertions = true,
   maxRepairs = 2,
   dryRun = false,
-  reportFile = null
+  reportFile = null,
+  model = null,
+  cassetteDir = null,
+  cassetteMode = null,
+  environment = {}
 } = {}) {
   const project = ensureProjectDir(projectDir);
   const startedMs = Date.now();
@@ -270,21 +280,49 @@ export async function runBuild({
   const agentPolicyRel = path.join(policyDirRel, 'agent-policy.json');
   const deliveryPolicyRel = path.join(policyDirRel, 'delivery-policy.json');
 
+  const agentEnvironment = {
+    ...environment,
+    ...(model ? { VLD_MODEL_SPEC: model } : {}),
+    ...(cassetteDir ? { VLD_MODEL_CASSETTE_DIR: path.resolve(project, cassetteDir) } : {}),
+    ...(cassetteMode ? { VLD_MODEL_CASSETTE_MODE: cassetteMode } : {}),
+    ...(testCommand ? {
+      VLD_TEST_COMMAND: JSON.stringify({
+        executable: testCommand.executable,
+        args: testCommand.args ?? [],
+        timeoutMs: testCommand.timeoutMs ?? 60_000
+      })
+    } : {})
+  };
+  const agentExecutable = executable ?? (adapter === 'sandboxed-agent' ? process.execPath : process.execPath);
+  const agentArgs = adapter === 'sandboxed-agent' && !executable && args.length === 0
+    ? [path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'agents', 'implementer.mjs')]
+    : args;
+
   const agentPolicy = adapter === 'fake'
     ? defaultFakeAgentPolicy()
     : assertAgentPolicy({
-        ...defaultSandboxedCliPolicy({
-          executable: executable ?? process.execPath,
-          args,
-          mode: 'write-workspace',
-          backend: sandboxBackend
-        }),
+        ...(adapter === 'sandboxed-agent'
+          ? defaultSandboxedAgentPolicy({
+              executable: agentExecutable,
+              args: agentArgs,
+              mode: 'write-workspace',
+              backend: sandboxBackend
+            })
+          : defaultSandboxedCliPolicy({
+              executable: executable ?? process.execPath,
+              args,
+              mode: 'write-workspace',
+              backend: sandboxBackend
+            })),
         adapter,
+        environment: agentEnvironment,
         sandbox: {
           backend: sandboxBackend,
           requireOs: Boolean(requireOsSandbox),
-          allowChildProcess: Boolean(allowChildProcess),
-          extraReadPaths: [...extraReadPaths]
+          allowChildProcess: Boolean(allowChildProcess) || adapter === 'sandboxed-agent',
+          extraReadPaths: adapter === 'sandboxed-agent'
+            ? [...new Set([...extraReadPaths, FACTORY_ROOT])]
+            : [...extraReadPaths]
         }
       });
   writeJsonAtomic(path.join(project, agentPolicyRel), agentPolicy);
@@ -370,20 +408,61 @@ export async function runBuild({
         }),
         repair: async ({ attempt, prompt }) => {
           writeFileSync(repairBriefPath, prompt, 'utf8');
-          let run;
           try {
-            run = await runSandboxed({
+            if (adapter === 'sandboxed-agent') {
+              const execution = await executeAgentAdapter({
+                spec: {
+                  id: `repair-${pkg.id}-a${attempt}`,
+                  missionId: mission.id,
+                  packageId: pkg.id,
+                  packetDigest: agentPolicyDigest(agentPolicy),
+                  contextDigest: agentPolicyDigest(agentPolicy),
+                  requirementIds: pkg.requirements,
+                  resourceClaims: pkg.resourceClaims?.paths ?? [],
+                  workspace: worktree
+                },
+                policy: {
+                  ...agentPolicy,
+                  environment: {
+                    ...agentPolicy.environment,
+                    VLD_REPAIR_ATTEMPT: String(attempt),
+                    VLD_REPAIR_BRIEF: '.vld-repair-brief.md'
+                  }
+                }
+              });
+              if (execution.transcriptDigest !== null && !execution.transcriptVerified) {
+                throw extensionError(
+                  `repair attempt ${attempt} transcript failed verification: ${(execution.transcriptErrors ?? []).join('; ')}`,
+                  'AGENT_TRANSCRIPT_TAMPERED'
+                );
+              }
+              if (execution.transcriptDigest) {
+                harvestTranscripts({
+                  from: path.join(worktree, '.vld', 'agent-transcripts'),
+                  to: path.join(project, '.vld', 'agent-transcripts'),
+                  runId: `repair-${pkg.id}-a${attempt}`
+                });
+              }
+              latestSandboxAfterDigest = workspaceTreeDigest(worktree);
+              return {
+                sandboxReceipt: execution.sandboxReceipt,
+                receiptDigest: execution.sandboxReceipt.receiptDigest,
+                transcriptDigest: execution.transcriptDigest
+              };
+            }
+            const run = await runSandboxed({
               executable: agentPolicy.command.executable,
               args: agentPolicy.command.args,
               workspace: worktree,
               mode: 'write-workspace',
               network: false,
-              allowChildProcess: Boolean(allowChildProcess),
+              allowChildProcess: Boolean(allowChildProcess) || adapter === 'sandboxed-agent',
               extraReadPaths,
               backend: sandboxBackend,
               requireOs: Boolean(requireOsSandbox),
               policyDigest: agentPolicyDigest(agentPolicy),
               env: {
+                ...agentPolicy.environment,
                 VLD_MISSION_ID: mission.id,
                 VLD_PACKAGE_ID: pkg.id,
                 VLD_REQUIREMENT_IDS: pkg.requirements.join(','),
@@ -392,11 +471,11 @@ export async function runBuild({
               },
               limits: agentPolicy.limits
             });
+            latestSandboxAfterDigest = workspaceTreeDigest(worktree);
+            return { sandboxReceipt: run.receipt, receiptDigest: run.receipt.receiptDigest };
           } finally {
             if (existsSync(repairBriefPath)) rmSync(repairBriefPath, { force: true });
           }
-          latestSandboxAfterDigest = workspaceTreeDigest(worktree);
-          return { sandboxReceipt: run.receipt, receiptDigest: run.receipt.receiptDigest };
         }
       });
 

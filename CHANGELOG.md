@@ -8,6 +8,22 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) pr
 
 - No unreleased changes recorded yet.
 
+## [0.21.0] - 2026-11-16
+
+### Added
+
+- **Dev environment & sandbox baseline (roadmap P0.1 & P0.2):** reproducible `.devcontainer` + `scripts/bootstrap.sh` (warning when Node sits under `/tmp` or `$HOME`), cross-platform sandbox preflight and conformance (`factory/lib/sandbox/*`, `vld doctor`), and CI-security invariants (40-character SHA-pinned actions, `contents: read`, `timeout-minutes`) in `.github/workflows/ci.yml`.
+- **Per-test anchor scoping (roadmap P0.3):** table-driven `resolveAnchorScope` / `detectTestLanguage` pinning each `@req` to its own test body across 10 placements × 4 languages (40-case matrix) with an exact misplaced-anchor placement message.
+- **Risk-aware assisted intake (roadmap P1.1–P1.5 & P3.1):** deterministic risk-hint scanner (`factory/risk-hints.json`, `examples/risk-corpus.json`, `scripts/eval-risk-scanner.mjs` — 0.965 recall / 0.969 precision), CCPA overlay (10 shipped regulatory regimes), profile inference + rule-lint (contradiction and latency-window pairs), ≤7-question assisted intake (ADR 0013) with hallucinated-quote rejection and scanner-vs-model `needs-human` disagreements, dependent-question unlocking over MCP and the Studio Runtime API (`get_questions`/`answer` with `provenance: user | waived`), provider-agnostic `createModelClient` (anthropic / openai / openai-compatible / direct-argv command; 429 `Retry-After` backoff, cassette record & replay, token/cost budgets, secret redaction), runtime contracts + runtime server question APIs, and labelled routing/rule eval suites.
+- **Executed verification (roadmap P2.1–P2.5):** machine-readable test-report parsers (Node TAP, Vitest/Jest JSON, JUnit XML, Go `-json` NDJSON) with requirement-to-execution mapping (`vld verify --run`, `--report`, `--require-report`), zero-dependency `@vld/analysis` AST non-tautology & subject-coupling checker for JS/TS, Python, Go and Rust (rejecting Adversarial Test F tautologies, reflexive comparisons and swallowed assertions), sandboxed test and mutation runners, executed `G0-RUN` / `G0-CHECK` / `G0-SMOKE` gates with `--static-only` and `--require-executed`, tier-2 `G2-MUTATION` gate (≥60% kill floor; ≥75% at tier 3) parsing Stryker, Gremlins and cargo-mutants reports with dated waivers, the honest verdict hierarchy (`anchored-only` → `static-asserted` → `executed-passed` → `executed-verified` → `mutation-verified`), SHA-pinned `vld ci init` workflows that run tests for execution proof and require the report, and `enforcement/summary.mjs` tables distinguishing `PASS-EXECUTED` from `PASS-STATIC` / `SKIPPED-UNAVAILABLE` / `WAIVED`.
+- **Studio assisted-intake Q&A panel:** `vld runtime serve`'s Studio dashboard renders pending profile questions and records answers or dated waivers through the authenticated Runtime API (`provenance: user`), refreshing dependent questions after each answer.
+- **CHANGELOG discipline:** this file now records every release surface change.
+
+### Changed
+
+- `vld verify` and packet `spec-check.mjs` never call anchors "verified": a static anchor pass reports `static-asserted` (or `anchored-only`) with an explicit hint to run `--run` or `--report` for execution proof, and `done` without a passing test in the report is an error naming the failed, skipped or unrun test.
+- Outcome-harness live model runners (`--runner openai|anthropic`) route through the shared `createModelClient` (bounded retries, secret redaction, optional `VLD_MODEL_CASSETTE_DIR` cassette replay) instead of hand-rolled fetch calls, and report token/cost telemetry per arm.
+
 ## [0.20.0] - 2026-11-16
 
 ### Added

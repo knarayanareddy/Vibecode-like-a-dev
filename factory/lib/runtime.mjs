@@ -348,7 +348,7 @@ function validateAgentSandboxSummary(sandbox) {
 
 function validateAgentRunReceipt(receipt) {
   if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt)) throw extensionError('runtime agent receipt must be an object', 'INVALID_RUNTIME_LEDGER');
-  const allowed = new Set(['id', 'adapter', 'policyDigest', 'contextDigest', 'workspaceDigest', 'outcome', 'attempts', 'startedAt', 'finishedAt', 'durationMs', 'output', 'sandbox']);
+  const allowed = new Set(['id', 'adapter', 'policyDigest', 'contextDigest', 'workspaceDigest', 'outcome', 'attempts', 'startedAt', 'finishedAt', 'durationMs', 'output', 'sandbox', 'transcriptDigest', 'usage']);
   for (const key of Object.keys(receipt)) if (!allowed.has(key)) throw extensionError(`runtime agent receipt.${key} is not allowed`, 'INVALID_RUNTIME_LEDGER');
   if (!ID_PATTERN.test(String(receipt.id ?? ''))) throw extensionError('runtime agent receipt has an invalid id', 'INVALID_RUNTIME_LEDGER');
   if (!ID_PATTERN.test(String(receipt.adapter ?? ''))) throw extensionError('runtime agent receipt has an invalid adapter', 'INVALID_RUNTIME_LEDGER');
@@ -360,6 +360,16 @@ function validateAgentRunReceipt(receipt) {
   if (!receipt.output || typeof receipt.output !== 'object' || Array.isArray(receipt.output) || Object.keys(receipt.output).some((key) => !new Set(['digest', 'bytes', 'summary']).has(key))) throw extensionError('runtime agent receipt output is invalid', 'INVALID_RUNTIME_LEDGER');
   if (!validDigest(receipt.output.digest) || !Number.isSafeInteger(receipt.output.bytes) || receipt.output.bytes < 0 || typeof receipt.output.summary !== 'string' || receipt.output.summary.length > 4_000 || /[\r\n\0]/.test(receipt.output.summary)) throw extensionError('runtime agent receipt output is invalid', 'INVALID_RUNTIME_LEDGER');
   if (receipt.sandbox !== undefined) validateAgentSandboxSummary(receipt.sandbox);
+  if (receipt.transcriptDigest !== undefined && receipt.transcriptDigest !== null && !validDigest(receipt.transcriptDigest)) throw extensionError('runtime agent receipt has an invalid transcript digest', 'INVALID_RUNTIME_LEDGER');
+  if (receipt.usage !== undefined && receipt.usage !== null) {
+    const usage = receipt.usage;
+    if (typeof usage !== 'object' || Array.isArray(usage)) throw extensionError('runtime agent receipt usage is invalid', 'INVALID_RUNTIME_LEDGER');
+    for (const field of ['inputTokens', 'outputTokens', 'totalTokens', 'costUsd']) {
+      if (usage[field] !== undefined && (typeof usage[field] !== 'number' || !Number.isFinite(usage[field]) || usage[field] < 0)) {
+        throw extensionError(`runtime agent receipt usage.${field} is invalid`, 'INVALID_RUNTIME_LEDGER');
+      }
+    }
+  }
   return receipt;
 }
 
@@ -376,6 +386,7 @@ function publicAgentRun(receipt) {
     finishedAt: receipt.finishedAt,
     durationMs: receipt.durationMs,
     output: { ...receipt.output },
+    ...(receipt.transcriptDigest ? { transcriptDigest: receipt.transcriptDigest, ...(receipt.usage ? { usage: { ...receipt.usage } } : {}) } : {}),
     ...(receipt.sandbox ? { sandbox: { ...receipt.sandbox, changedPaths: [...receipt.sandbox.changedPaths] } } : {})
   };
 }
@@ -395,12 +406,13 @@ function safeSummary(value) {
 /** M5 receipts bind only immutable SHA/digest metadata and redacted summaries. */
 function validateCandidateReceipt(candidate) {
   if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) throw extensionError('runtime candidate must be an object', 'INVALID_RUNTIME_LEDGER');
-  const allowed = new Set(['id', 'missionId', 'packageId', 'candidateSha', 'baseSha', 'targetRef', 'targetSha', 'packetDigest', 'policyDigest', 'adapterRunId', 'generatedAt']);
+  const allowed = new Set(['id', 'missionId', 'packageId', 'candidateSha', 'baseSha', 'targetRef', 'targetSha', 'packetDigest', 'policyDigest', 'adapterRunId', 'transcriptDigest', 'generatedAt']);
   for (const key of Object.keys(candidate)) if (!allowed.has(key)) throw extensionError(`runtime candidate.${key} is not allowed`, 'INVALID_RUNTIME_LEDGER');
   if (!ID_PATTERN.test(String(candidate.id ?? '')) || !ID_PATTERN.test(String(candidate.missionId ?? '')) || !ID_PATTERN.test(String(candidate.packageId ?? '')) || !validCommit(candidate.candidateSha) || !validCommit(candidate.baseSha) || !validCommit(candidate.targetSha)) throw extensionError('runtime candidate has invalid id or commit identity', 'INVALID_RUNTIME_LEDGER');
   if (typeof candidate.targetRef !== 'string' || !candidate.targetRef || candidate.targetRef.length > 200 || /[\r\n\0]/.test(candidate.targetRef) || candidate.targetRef.startsWith('-') || candidate.targetRef.includes('..')) throw extensionError('runtime candidate has invalid target ref', 'INVALID_RUNTIME_LEDGER');
   if (!validDigest(candidate.packetDigest) || !validDigest(candidate.policyDigest) || !validTime(candidate.generatedAt)) throw extensionError('runtime candidate has invalid authority metadata', 'INVALID_RUNTIME_LEDGER');
   if (candidate.adapterRunId !== null && !ID_PATTERN.test(String(candidate.adapterRunId ?? ''))) throw extensionError('runtime candidate has invalid adapter run id', 'INVALID_RUNTIME_LEDGER');
+  if (candidate.transcriptDigest !== null && candidate.transcriptDigest !== undefined && !validDigest(candidate.transcriptDigest)) throw extensionError('runtime candidate has invalid transcript digest', 'INVALID_RUNTIME_LEDGER');
   return candidate;
 }
 

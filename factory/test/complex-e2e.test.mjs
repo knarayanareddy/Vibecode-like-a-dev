@@ -52,6 +52,7 @@ const COMPLEX_PROFILE = {
   users: { scale: 'large' },
   traits: ['auth', 'admin', 'payments', 'realtime', 'search', 'upload', 'notifications', 'webhooks', 'offline', 'ai', 'i18n', 'persistence', 'background-jobs'],
   risks: { pii: true, payments: true, regulated: true, multiTenant: true, destructiveWrites: true, publicFacing: true, integrations: true },
+  regulation: ['hipaa', 'pci-dss', 'eu-ai-act'],
   constraints: { team: 8, weeks: 20, stack: 'typescript', mustUse: ['postgres', 'stripe'] },
   overlays: ['org-baseline', 'health-data', 'two-person-review']
 };

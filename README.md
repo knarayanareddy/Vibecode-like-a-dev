@@ -3,7 +3,7 @@
 Turn a one-paragraph product idea or an existing repository into a deterministic, executable specification packet (`specs/`) enforced in CI — and optionally executed inside an OS-confined autonomous build and review loop.
 
 - **Zero runtime dependencies** · Requires **Node.js 22 or newer** (`.nvmrc` pinned).
-- **Polyglot & compliance-ready:** **36 primitives**, **10 language stacks** (`typescript`, `javascript`, `python`, `go`, `rust`, `java`, `kotlin`, `csharp`, `ruby`, `php`), and **9 regulatory overlays** (`gdpr`, `hipaa`, `pci-dss`, `soc2`, `coppa`, `ferpa`, `sox`, `dora`, `eu-ai-act`).
+- **Polyglot & compliance-ready:** **36 primitives**, **10 language stacks** (`typescript`, `javascript`, `python`, `go`, `rust`, `java`, `kotlin`, `csharp`, `ruby`, `php`), and **10 regulatory overlays** (`gdpr`, `hipaa`, `ccpa`, `pci-dss`, `soc2`, `coppa`, `ferpa`, `sox`, `dora`, `eu-ai-act`).
 - **Deterministic compiler:** identical `profile.json` inputs compile byte-for-byte identical EARS requirements (`spec.json`), custom business rules (`REQ-C01…`), design docs (`--lean` available for minimal prompt tokens), drift guards (`spec-check.mjs`), and CI gates (`enforcement/gates.mjs`).
 - **Sandboxed execution & audit:** opt-in 5-backend confinement (`oci`, `bwrap`, `linux-ns`, `darwin-seatbelt`, `node-permission`), bounded self-repair (`vld build`), isolated 6-category spec review (`vld review`), continuous drift detection (`vld drift`), governed GitHub v1 delivery, and SHA-256 hash-chained `evidence.jsonl` (`vld evidence`).
 

@@ -1,0 +1,54 @@
+{
+  "id": "ccpa",
+  "layer": "domain",
+  "title": "CCPA / CPRA California consumer privacy rights",
+  "why": "California's CCPA and CPRA require notice at collection, verifiable consumer access and deletion within statutory deadlines, opt-out of sale or cross-context behavioural sharing (including Global Privacy Control signals), and non-discrimination when rights are exercised.",
+  "addRequirements": [
+    {
+      "key": "data.ccpa-notice-collection",
+      "title": "Notice at collection lists every category and retention period",
+      "area": "data",
+      "statement": "When personal information is collected from a consumer, the application shall disclose the categories collected, the business purpose, whether each category is sold or shared, and its retention period.",
+      "definition": "Every personal field gathered from a {secondary} maps to a disclosed CCPA category and retention policy before ingestion.",
+      "failurePath": "If an undisclosed category is submitted for collection, the application rejects ingestion with a typed policy error rather than storing undisclosed data.",
+      "acceptance": [
+        "Given a collection payload with an undisclosed personal category, when ingestion is attempted, then the application rejects it with a stable code.",
+        "Given the collection register, when exported, then each category names purpose, sale-or-share status and retention duration."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "data.ccpa-opt-out-gpc",
+      "title": "Do-Not-Sell-or-Share and Global Privacy Control stop downstream sharing",
+      "area": "security",
+      "statement": "When a consumer opts out of sale or sharing or sends a Sec-GPC signal, the application shall persist the opt-out immediately and suppress all third-party advertising or cross-context data sharing.",
+      "definition": "A browser signal (`Sec-GPC: 1`) or one-step opt-out choice binds without forcing account creation and overrides marketing dispatch.",
+      "failurePath": "If a downstream sharing sink is invoked for an opted-out consumer, the call is blocked and recorded in the privacy audit trail.",
+      "acceptance": [
+        "Given a request carrying `Sec-GPC: 1`, when processed, then sale-and-sharing is disabled without requiring sign-in.",
+        "Given an opted-out consumer, when an analytics or ad-sharing export runs, then their record is excluded and the suppression is logged."
+      ],
+      "verify": "automated"
+    },
+    {
+      "key": "data.ccpa-know-and-delete",
+      "title": "Verifiable consumer access and deletion cover stores and service providers",
+      "area": "data",
+      "statement": "When a verified consumer submits a right-to-know or right-to-delete request and no statutory exemption applies, the application shall export or delete their personal information and propagate deletion to registered service providers.",
+      "definition": "Requests carry an auditable verification record, 45-day deadline clock and downstream propagation receipt.",
+      "failurePath": "If a statutory exemption or legal hold blocks deletion, the application refuses deletion for the exempt scope only and returns the named exemption.",
+      "acceptance": [
+        "Given a verified right-to-delete request with no hold, when executed, then primary records are deleted and provider deletion tasks are enqueued.",
+        "Given a record under a statutory exemption, when deletion is requested, then the exempt reason is returned and non-exempt data is still deleted."
+      ],
+      "verify": "automated"
+    }
+  ],
+  "addGates": [
+    {
+      "id": "G3-SUBJECT-RIGHTS",
+      "tier": 3,
+      "statement": "Consumer right-to-know, right-to-delete and Sec-GPC opt-out are exercised by automated tests against owned stores."
+    }
+  ]
+}
