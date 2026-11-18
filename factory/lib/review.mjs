@@ -38,7 +38,10 @@ export const REVIEW_VERDICTS = Object.freeze(['approved', 'changes-requested', '
 const REQ_ID = /^REQ-(?:C\d{2,}|\d{3,})$/;
 const ASSERT_RE = /\b(?:assert(?:\.|_eq!|_ne!|\s|\()|expect\s*\(|Assert\.|assertEquals|assertThat|t\.(?:Fatal|Error)|should\b|\$this->assert)/;
 const SKIP_RE = /(?:\b(?:test|it|describe)\.(?:skip|only|todo)\b|#\[ignore\]|\bt\.Skip\s*\(|@pytest\.mark\.skip|\bxit\s*\(|\bxdescribe\s*\()/;
-const ENV_RE = /(?:process\.env\.[A-Z0-9_]+|os\.(?:environ|getenv)\s*[\[(]|os\.Getenv\s*\(|std::env::var\s*\(|System\.getenv\s*\(|ENV\[['"][A-Z0-9_]+)/g;
+const ENV_RE = /(?:process\.env\.[A-Z0-9_]+|os\.(?:environ(?:\.\w+)?|getenv)\s*[\[(]|os\.Getenv\s*\(|std::env::var\s*\(|System\.getenv\s*\(|ENV\[['"][A-Z0-9_]+)/g;
+const TAUTOLOGY_RE = /\bassert(?:\.\w+)?\(\s*(?:true|True|1)\s*\)|\bexpect\(\s*(?:true|True|1)\s*\)|\bassert(?:\.\w+)?\(\s*([A-Za-z_$][\w$]*)\s*,\s*\1\s*\)|\bassert\s+(?:True|1)\b/;
+const STRICT_ASSERT_RE = /\bassert\.(?:equal|strictEqual|deepEqual|deepStrictEqual)\s*\(|\bexpect\([^)]*\)\.(?:toBe|toEqual|toStrictEqual)\b|\bassert_(?:eq|equal)\s*\(/;
+const LOOSE_ASSERT_RE = /\bassert(?:\.ok)?\(\s*[^,;)]*\)|\bexpect\([^)]*\)\.(?:toBeTruthy|toBeDefined)\b/;
 const MANIFEST_FILES = new Set(['package.json', 'pyproject.toml', 'requirements.txt', 'go.mod', 'Cargo.toml', 'pom.xml', 'build.gradle', 'build.gradle.kts', 'Gemfile', 'composer.json']);
 const TEST_PATH_RE = /(?:^|\/)(?:tests?|spec|__tests__)\/|\.(?:test|spec)\.[^/]+$|_test\.(?:go|py|rs)$|Test\.(?:java|kt|php)$|Tests\.cs$/;
 
@@ -63,6 +66,10 @@ export function scanDiffRisks(diffText) {
   const manifestChanges = [];
   const newEnvVars = new Set();
 
+  let addedTautologies = 0;
+  let removedStrict = 0;
+  let addedStrict = 0;
+  let addedLoose = 0;
   let currentFile = null;
   let addedAssertions = 0;
   let removedAssertions = 0;
@@ -72,7 +79,8 @@ export function scanDiffRisks(diffText) {
   const flushFile = () => {
     if (!currentFile) return;
     files.push(currentFile);
-    if (TEST_PATH_RE.test(currentFile) && removedAssertions > addedAssertions) {
+    const weakenedByReplacement = addedTautologies > 0 || (removedStrict > 0 && addedLoose > 0 && addedStrict === 0);
+    if (TEST_PATH_RE.test(currentFile) && (removedAssertions > addedAssertions || weakenedByReplacement)) {
       testWeakening.push({
         file: currentFile,
         removedAssertions,
@@ -97,6 +105,10 @@ export function scanDiffRisks(diffText) {
       currentFile = header[1];
       addedAssertions = 0;
       removedAssertions = 0;
+      addedTautologies = 0;
+      removedStrict = 0;
+      addedStrict = 0;
+      addedLoose = 0;
       removedReqs = new Set();
       addedReqs = new Set();
       continue;
@@ -105,12 +117,16 @@ export function scanDiffRisks(diffText) {
     if (line.startsWith('+')) {
       const content = line.slice(1);
       if (ASSERT_RE.test(content)) addedAssertions += 1;
+      if (TAUTOLOGY_RE.test(content)) addedTautologies += 1;
+      if (STRICT_ASSERT_RE.test(content)) addedStrict += 1;
+      else if (LOOSE_ASSERT_RE.test(content)) addedLoose += 1;
       if (SKIP_RE.test(content)) skippedTests.push({ file: currentFile, snippet: content.trim().slice(0, 120) });
       for (const m of content.matchAll(/@req\s+(REQ-(?:C\d{2,}|\d{3,}))\b/g)) addedReqs.add(m[1]);
       for (const m of content.matchAll(ENV_RE)) newEnvVars.add(m[0].slice(0, 80));
     } else if (line.startsWith('-')) {
       const content = line.slice(1);
       if (ASSERT_RE.test(content)) removedAssertions += 1;
+      if (STRICT_ASSERT_RE.test(content)) removedStrict += 1;
       for (const m of content.matchAll(/@req\s+(REQ-(?:C\d{2,}|\d{3,}))\b/g)) removedReqs.add(m[1]);
     }
   }
@@ -351,5 +367,164 @@ export function recordReviewDecision({
     file: absOut,
     review: persisted,
     evidenceHash: evidence.headHash
+  };
+}
+
+/* -------------------------------------------------------------------------
+ * P3.5 additions: reviewer/model identity, seeded-defect measurement.
+ * ---------------------------------------------------------------------- */
+
+/**
+ * Normalize a `provider:model` identity ("openai:gpt-x"). Returns `null` when
+ * the value is not a plausible model id.
+ */
+export function normalizeModelId(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw || raw.length > 160) return null;
+  const match = raw.match(/^([a-z0-9][a-z0-9._-]{0,60}):([a-z0-9][a-z0-9._/-]{0,100})$/i);
+  if (!match) return null;
+  return `${match[1].toLowerCase()}:${match[2].toLowerCase()}`;
+}
+
+/** Extract the normalized model id from an agent policy (`VLD_MODEL_SPEC`). */
+export function modelIdFromPolicy(policy) {
+  return normalizeModelId(policy?.env?.VLD_MODEL_SPEC ?? policy?.environment?.VLD_MODEL_SPEC ?? '');
+}
+
+/** Count high/critical findings across the six report categories. */
+export function blockingReportFindings(categories) {
+  if (!categories || typeof categories !== 'object' || Array.isArray(categories)) return 0;
+  let count = 0;
+  for (const category of REVIEW_CATEGORIES) {
+    const value = categories[category];
+    if (!Array.isArray(value)) continue;
+    for (const finding of value) {
+      if (finding?.severity === 'high' || finding?.severity === 'critical') count += 1;
+    }
+  }
+  return count;
+}
+
+/**
+ * Seeded-defect diffs for measuring diff-risk sensitivity. Every seed embeds a
+ * `@req` anchor so requirement citation is exercised alongside detection.
+ */
+export const SEEDED_DEFECTS = Object.freeze([
+  {
+    kind: 'weakened-assertion',
+    diff: [
+      '+++ b/tests/invoice.test.ts',
+      ' test(\'marks an overdue invoice\', () => {',
+      '-  assert.equal(list.filter((i) => i.overdue).length, 1);',
+      '+  assert.ok(list.list()[0].overdue);',
+      ' });'
+    ].join('\n')
+  },
+  {
+    kind: 'weakened-assertion',
+    diff: [
+      '+++ b/tests/total.test.ts',
+      '-  assert.equal(computeTotal(cart), 4250);',
+      '+  assert.ok(true);'
+    ].join('\n')
+  },
+  {
+    kind: 'deleted-test',
+    diff: [
+      '+++ b/tests/refund.test.ts',
+      '-  // @req REQ-402',
+      '-  test(\'refuses refunds above the cap\', () => {',
+      '-    assert.equal(refund(order, 10_000), REFUSED);',
+      '-    assert.equal(audit.entries().length, 1);',
+      '-  });',
+      '-  test(\'rolls back a failed refund\', () => {',
+      '-    assert.equal(rollback(refundJob), ROLLED_BACK);',
+      '-  });'
+    ].join('\n')
+  },
+  {
+    kind: 'skipped-test',
+    diff: [
+      '+++ b/tests/signature.test.ts',
+      '+  // TODO re-enable after the migration',
+      "+  test.skip('verifies signatures', () => {",
+      '   assert.equal(verifySig(payload, sig), true);',
+      '  });'
+    ].join('\n')
+  },
+  {
+    kind: 'skipped-test',
+    diff: [
+      '+++ b/tests/test_e2e.py',
+      '+  @pytest.mark.skip(reason="flaky under load")',
+      '  def test_checkout_happy_path():',
+      '      assert checkout(cart) == "ok"'
+    ].join('\n')
+  },
+  {
+    kind: 'deleted-test',
+    diff: [
+      '+++ b/tests/audit.test.ts',
+      '-  test(\'writes an audit entry on deny\', () => {',
+      '-    assert.equal(audit.entries().length, 1);',
+      '-    assert.equal(audit.entries()[0].action, "deny");',
+      '-  });'
+    ].join('\n')
+  },
+  {
+    kind: 'new-dependency',
+    diff: [
+      '+++ b/package.json',
+      '+    "node-serialize": "0.0.4",',
+      '+    "left-pad": "1.3.0"'
+    ].join('\n')
+  },
+  {
+    kind: 'new-dependency',
+    diff: [
+      '+++ b/requirements.txt',
+      '+pickle-mixin==1.0'
+    ].join('\n')
+  },
+  {
+    kind: 'new-env-read',
+    diff: [
+      '+++ b/src/billing/charge.ts',
+      '+  const masterKey = process.env.PAYMENTS_MASTER_KEY;'
+    ].join('\n')
+  },
+  {
+    kind: 'new-env-read',
+    diff: [
+      '+++ b/src/debug.py',
+      '+  debug = os.environ.get("ADMIN_DEBUG")'
+    ].join('\n')
+  }
+]);
+
+const SEED_CATCH_GROUPS = Object.freeze({
+  'weakened-assertion': (r) => r.testWeakening.length > 0,
+  'deleted-test': (r) => r.testWeakening.length > 0,
+  'skipped-test': (r) => r.skippedTests.length > 0,
+  'new-dependency': (r) => r.manifestChanges.length > 0,
+  'new-env-read': (r) => r.newEnvVars.length > 0
+});
+
+/**
+ * Measure diff-risk scanner sensitivity over the seeded-defect corpus.
+ * Acceptance (roadmap P3.5): seeded defects caught >= 80%.
+ */
+export function measureDiffRiskSensitivity(defects = SEEDED_DEFECTS) {
+  const results = defects.map((defect) => {
+    const risks = scanDiffRisks(defect.diff);
+    const caught = (SEED_CATCH_GROUPS[defect.kind] ?? (() => false))(risks);
+    return { kind: defect.kind, caught };
+  });
+  const caught = results.filter((r) => r.caught).length;
+  return {
+    total: results.length,
+    caught,
+    ratio: results.length ? caught / results.length : 1,
+    results
   };
 }

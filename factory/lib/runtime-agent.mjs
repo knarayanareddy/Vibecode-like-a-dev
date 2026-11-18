@@ -19,6 +19,7 @@ import { executeAgentAdapter } from './agent-adapters.mjs';
 import { harvestTranscripts } from './agent-transcript.mjs';
 import { appendEvidence } from './evidence.mjs';
 import { digest, extensionError } from './extension-utils.mjs';
+import { modelIdFromPolicy } from './review.mjs';
 import { readMission } from './missions.mjs';
 import { verifySandboxReceipt, workspaceTreeDigest } from './sandbox/receipt.mjs';
 import {
@@ -95,7 +96,7 @@ function sandboxSummary(sandboxReceipt) {
   };
 }
 
-function attemptReceipt({ id, policyDigest, contextDigest, workspaceDigest, execution, attempts }) {
+function attemptReceipt({ id, policyDigest, contextDigest, workspaceDigest, execution, attempts, modelId = null }) {
   const sbx = sandboxSummary(execution.sandboxReceipt);
   return {
     id,
@@ -103,6 +104,10 @@ function attemptReceipt({ id, policyDigest, contextDigest, workspaceDigest, exec
     policyDigest,
     contextDigest,
     workspaceDigest,
+    // Which model wrote the changes (provider:model from the policy's
+    // VLD_MODEL_SPEC). Recorded so an independent review must run on a
+    // different model (P3.5 no self-review).
+    ...(modelId ? { modelId } : {}),
     outcome: execution.outcome,
     attempts,
     startedAt: execution.startedAt,
@@ -271,7 +276,8 @@ export async function runRuntimeAgent({ missionFile, packageId, policyFile, leas
     contextDigest,
     workspaceDigest,
     execution,
-    attempts
+    attempts,
+    modelId: modelIdFromPolicy(policy)
   });
   const recorded = recordRuntimeAgentReceipt({ missionFile, projectDir, packageId, runId: workPackage.run.id, agentRun: receipt });
 

@@ -71,6 +71,7 @@ Usage
   vld runtime delivery submit <mission.json> <package> --policy <delivery-policy.json> --lease-token <token> --sha <commit> [--adapter-run <id>]
   vld runtime delivery verify <mission.json> <package> --policy <delivery-policy.json> [--project <dir>] [--json]
   vld runtime delivery approve <mission.json> <package> --policy <delivery-policy.json> --candidate <id> --actor reviewer:<id> --reason <text>
+  vld runtime delivery review <mission.json> <package> --policy <delivery-policy.json> --candidate <id> --actor reviewer:<id> [--rules | --report <review.json> --reviewer-model <provider:model>]
   vld runtime delivery queue <mission.json> <package> --policy <delivery-policy.json> --candidate <id> --actor release-approver:<id>
   vld runtime delivery status <mission.json> [--project <dir>] [--json]
                                      frozen candidate/packet verification, independent review and a local queue; no merge, push or forge access

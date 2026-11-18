@@ -39,6 +39,7 @@ import { artifactStatus, initArtifact, listArtifacts, validateArtifact, verifyAr
 import { agentStatus, installAgent, listAdapters } from './lib/agents.mjs';
 import { applyBundle, getBundle, listBundles } from './lib/bundles.mjs';
 import { CHANGE_TEMPLATE, applyChange, archiveChange, emitChange, planChange, verifyChange } from './lib/change.mjs';
+import { runReviewerAgent } from './agents/reviewer.mjs';
 import { emitPacket } from './lib/emit/index.mjs';
 import { exportPacket } from './lib/exports.mjs';
 import { buildIndex, loadIndex, writeIndex } from './lib/indexer.mjs';
@@ -55,7 +56,7 @@ import { detectSpecDrift, initSemanticOracles, scaffoldDriftWorkflow } from './l
 import { runDoctor } from './lib/doctor.mjs';
 import { migrateProject } from './lib/migrate.mjs';
 import { runRuntimeAgent, runtimeAgentStatus } from './lib/runtime-agent.mjs';
-import { approveRuntimeDeliveryCandidate, queueRuntimeDeliveryCandidate, runtimeDeliveryStatus, submitRuntimeDeliveryCandidate, verifyRuntimeDeliveryCandidateAsync } from './lib/runtime-delivery.mjs';
+import { approveRuntimeDeliveryCandidate, queueRuntimeDeliveryCandidate, recordRuntimeDeliveryReview, runtimeDeliveryStatus, submitRuntimeDeliveryCandidate, verifyRuntimeDeliveryCandidateAsync } from './lib/runtime-delivery.mjs';
 import { runBuild } from './lib/build.mjs';
 import { detectSandboxBackends, runSandboxConformance } from './lib/sandbox/index.mjs';
 import { createRuntimeServer, listenRuntimeServer } from './lib/runtime-server.mjs';
@@ -174,6 +175,7 @@ Usage
   vld runtime delivery submit <mission.json> <package> --policy <delivery-policy.json> --lease-token <token> --sha <commit> [--adapter-run <id>]
   vld runtime delivery verify <mission.json> <package> --policy <delivery-policy.json> [--project <dir>] [--json]
   vld runtime delivery approve <mission.json> <package> --policy <delivery-policy.json> --candidate <id> --actor reviewer:<id> --reason <text>
+  vld runtime delivery review <mission.json> <package> --policy <delivery-policy.json> --candidate <id> --actor reviewer:<id> [--rules | --report <review.json> --reviewer-model <provider:model>]
   vld runtime delivery queue <mission.json> <package> --policy <delivery-policy.json> --candidate <id> --actor release-approver:<id>
   vld runtime delivery status <mission.json> [--project <dir>] [--json]
                                      frozen candidate/packet verification, independent review and a local queue; no merge, push or forge access
@@ -2157,8 +2159,8 @@ async function runRuntime() {
         }
         process.exit(result.ok ? 0 : 1);
       }
-      if (!['submit', 'verify', 'approve', 'queue'].includes(deliveryAction) || !deliveryMissionFile || !deliveryPackageId) {
-        fail('Usage: vld runtime delivery submit|verify|approve|queue <mission.json> <package> --policy <delivery-policy.json>');
+      if (!['submit', 'verify', 'review', 'approve', 'queue'].includes(deliveryAction) || !deliveryMissionFile || !deliveryPackageId) {
+        fail('Usage: vld runtime delivery submit|verify|review|approve|queue <mission.json> <package> --policy <delivery-policy.json>');
       }
       const policyFile = option('--policy', null);
       if (!policyFile) fail('runtime delivery requires --policy <delivery-policy.json>');
@@ -2170,6 +2172,54 @@ async function runRuntime() {
         result = submitRuntimeDeliveryCandidate({ missionFile: deliveryMissionFile, packageId: deliveryPackageId, policyFile, leaseToken, candidateSha, adapterRunId: option('--adapter-run', null), projectDir: project });
       } else if (deliveryAction === 'verify') {
         result = await verifyRuntimeDeliveryCandidateAsync({ missionFile: deliveryMissionFile, packageId: deliveryPackageId, policyFile, projectDir: project });
+      } else if (deliveryAction === 'review') {
+        const actor = runtimeActor(option('--actor', null));
+        const candidateId = option('--candidate', null);
+        if (!candidateId) fail('runtime delivery review requires --candidate');
+        const statusForReview = runtimeDeliveryStatus({ missionFile: deliveryMissionFile, projectDir: project });
+        const reviewEntry = (statusForReview.delivery ?? []).find((item) => item.candidate?.id === candidateId);
+        const reviewCandidate = reviewEntry?.candidate;
+        if (!reviewCandidate) fail(`runtime delivery review: unknown candidate ${candidateId}`);
+        const reportFile = option('--report', null);
+        if (reportFile) {
+          const reviewerModelId = option('--reviewer-model', null);
+          if (!reviewerModelId) fail('runtime delivery review --report requires --reviewer-model <provider:model>');
+          const parsed = JSON.parse(readFileSync(reportFile, 'utf8'));
+          result = recordRuntimeDeliveryReview({
+            missionFile: deliveryMissionFile,
+            packageId: deliveryPackageId,
+            candidateId,
+            policyFile,
+            reviewerModelId,
+            categories: parsed.categories,
+            verdict: parsed.verdict,
+            humanSignoff: parsed.humanSignoff ?? null,
+            riskDigest: option('--risk-digest', null),
+            actor,
+            projectDir: project
+          });
+        } else {
+          const missionRaw = JSON.parse(readFileSync(path.resolve(project, deliveryMissionFile), 'utf8'));
+          const packet = prepareReviewPacket({
+            projectDir: project,
+            packetDir: missionRaw.packet?.path ?? 'specs',
+            baseRef: reviewCandidate.targetSha,
+            headRef: reviewCandidate.candidateSha,
+            authorId: actor.id
+          });
+          const agentReview = await runReviewerAgent({ packet, provider: 'rules', reviewerId: actor.id });
+          result = recordRuntimeDeliveryReview({
+            missionFile: deliveryMissionFile,
+            packageId: deliveryPackageId,
+            candidateId,
+            policyFile,
+            reviewerModelId: agentReview.reviewerModelId,
+            categories: agentReview.categories,
+            verdict: agentReview.verdict,
+            actor,
+            projectDir: project
+          });
+        }
       } else if (deliveryAction === 'approve') {
         const actor = runtimeActor(option('--actor', null));
         const candidateId = option('--candidate', null);
