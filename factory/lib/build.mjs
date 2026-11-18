@@ -46,6 +46,26 @@ function git(cwd, args) {
   return execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 }
 
+function worktreeSnapshotTree(worktree) {
+  try {
+    git(worktree, ['add', '-A']);
+    return git(worktree, ['write-tree']);
+  } catch {
+    return null;
+  }
+}
+
+function captureRepairDelta(worktree, treeBefore, briefPath) {
+  try {
+    if (briefPath && existsSync(briefPath)) rmSync(briefPath, { force: true });
+    const treeAfter = worktreeSnapshotTree(worktree);
+    if (!treeBefore || !treeAfter || treeBefore === treeAfter) return null;
+    return git(worktree, ['diff', treeBefore, treeAfter]).slice(0, 8000);
+  } catch {
+    return null;
+  }
+}
+
 function topologicalOrder(workPackages) {
   const byId = new Map(workPackages.map((p) => [p.id, p]));
   const visited = new Set();
@@ -182,6 +202,7 @@ export async function runBuild({
   verifyGates = false,
   requireAssertions = true,
   maxRepairs = 2,
+  missionOverrides = null,
   dryRun = false,
   reportFile = null,
   model = null,
@@ -227,7 +248,7 @@ export async function runBuild({
   if (resolvedMissionRel) {
     mission = readMission(resolvedMissionRel, { projectDir: project }).mission;
   } else {
-    const def = planMissionDefinitionFromPacket({ packetDir: packetAbs });
+    const def = planMissionDefinitionFromPacket({ packetDir: packetAbs, overrides: missionOverrides });
     if (dryRun) {
       const reportBody = {
         schemaVersion: BUILD_REPORT_SCHEMA_VERSION,
@@ -351,7 +372,7 @@ export async function runBuild({
   const packageReports = [];
   let buildOk = true;
 
-  for (const pkg of schedule) {
+  const buildOne = async (pkg) => {
     const wsRes = createWorkspace({ missionFile: resolvedMissionRel, packageId: pkg.id, projectDir: project });
     const worktree = wsRes.allocation.worktree;
     const alloc = allocateRuntimePackage({
@@ -371,18 +392,20 @@ export async function runBuild({
     });
 
     if (!agentRunRes.ok) {
-      buildOk = false;
-      packageReports.push({
-        packageId: pkg.id,
+      return {
         ok: false,
-        stage: 'agent-run',
-        agentRunId: agentRunRes.agentRun?.id ?? null,
-        sandboxReceiptDigest: agentRunRes.agentRun?.sandbox?.receiptDigest ?? null,
-        repairsUsed: 0,
-        candidateId: null,
-        verificationOutcome: null
-      });
-      break;
+        entry: {
+          packageId: pkg.id,
+          ok: false,
+          stage: 'agent-run',
+          agentRunId: agentRunRes.agentRun?.id ?? null,
+          sandboxReceiptDigest: agentRunRes.agentRun?.sandbox?.receiptDigest ?? null,
+          repairsUsed: 0,
+          candidateId: null,
+          verificationOutcome: null,
+          usage: agentRunRes.agentRun?.usage ?? null
+        }
+      };
     }
 
     let repairOutcome = null;
@@ -395,6 +418,8 @@ export async function runBuild({
         packageId: pkg.id,
         requirements: pkgReqs,
         maxRepairs,
+        budget: pkg.budget ?? mission.budget ?? null,
+        initialUsage: agentRunRes.agentRun?.usage ?? null,
         verify: async () => verifyPackageWorktree({
           worktree,
           packetRel,
@@ -407,6 +432,7 @@ export async function runBuild({
           requireAssertions
         }),
         repair: async ({ attempt, prompt }) => {
+          const treeBefore = worktreeSnapshotTree(worktree);
           writeFileSync(repairBriefPath, prompt, 'utf8');
           try {
             if (adapter === 'sandboxed-agent') {
@@ -447,7 +473,9 @@ export async function runBuild({
               return {
                 sandboxReceipt: execution.sandboxReceipt,
                 receiptDigest: execution.sandboxReceipt.receiptDigest,
-                transcriptDigest: execution.transcriptDigest
+                transcriptDigest: execution.transcriptDigest,
+                usage: execution.usage ?? null,
+                diffSinceLastAttempt: captureRepairDelta(worktree, treeBefore, repairBriefPath)
               };
             }
             const run = await runSandboxed({
@@ -472,7 +500,12 @@ export async function runBuild({
               limits: agentPolicy.limits
             });
             latestSandboxAfterDigest = workspaceTreeDigest(worktree);
-            return { sandboxReceipt: run.receipt, receiptDigest: run.receipt.receiptDigest };
+            return {
+              sandboxReceipt: run.receipt,
+              receiptDigest: run.receipt.receiptDigest,
+              usage: null,
+              diffSinceLastAttempt: captureRepairDelta(worktree, treeBefore, repairBriefPath)
+            };
           } finally {
             if (existsSync(repairBriefPath)) rmSync(repairBriefPath, { force: true });
           }
@@ -482,20 +515,24 @@ export async function runBuild({
       if (existsSync(repairBriefPath)) rmSync(repairBriefPath, { force: true });
 
       if (!repairOutcome.ok) {
-        buildOk = false;
-        packageReports.push({
-          packageId: pkg.id,
+        return {
           ok: false,
-          stage: 'repair-loop',
-          agentRunId: agentRunRes.agentRun.id,
-          sandboxReceiptDigest: agentRunRes.agentRun.sandbox?.receiptDigest ?? null,
-          repairOutcome: repairOutcome.outcome,
-          repairsUsed: repairOutcome.repairsUsed,
-          repairLedgerDigest: repairOutcome.ledgerDigest,
-          candidateId: null,
-          verificationOutcome: 'failed'
-        });
-        break;
+          entry: {
+            packageId: pkg.id,
+            ok: false,
+            stage: 'repair-loop',
+            agentRunId: agentRunRes.agentRun.id,
+            sandboxReceiptDigest: agentRunRes.agentRun.sandbox?.receiptDigest ?? null,
+            repairOutcome: repairOutcome.outcome,
+            repairsUsed: repairOutcome.repairsUsed,
+            repairLedgerDigest: repairOutcome.ledgerDigest,
+            failureDigest: repairOutcome.ledger?.at(-1)?.failureDigest ?? null,
+            escalated: Boolean(repairOutcome.escalated),
+            candidateId: null,
+            verificationOutcome: 'failed',
+            usage: repairOutcome.usage ?? agentRunRes.agentRun?.usage ?? null
+          }
+        };
       }
     }
 
@@ -542,28 +579,70 @@ export async function runBuild({
     });
 
     const pkgPassed = verified.verification.outcome === 'passed';
-    if (!pkgPassed) buildOk = false;
-    packageReports.push({
-      packageId: pkg.id,
-      requirements: pkg.requirements,
+    return {
       ok: pkgPassed,
-      stage: pkgPassed ? 'verified' : 'integration-verify',
-      agentRunId: agentRunRes.agentRun.id,
-      sandboxBackend: agentRunRes.agentRun.sandbox?.backend ?? (adapter === 'fake' ? 'fake' : null),
-      confinementClass: agentRunRes.agentRun.sandbox?.confinementClass ?? null,
-      sandboxReceiptDigest: agentRunRes.agentRun.sandbox?.receiptDigest ?? null,
-      repairOutcome: repairOutcome?.outcome ?? 'not-needed',
-      repairsUsed: repairOutcome?.repairsUsed ?? 0,
-      repairLedgerDigest: repairOutcome?.ledgerDigest ?? null,
-      candidateId: submitted.candidate.id,
-      candidateSha,
-      verificationId: verified.verification.id,
-      verificationOutcome: verified.verification.outcome,
-      checks: verified.verification.checks.map((c) => ({ id: c.id, kind: c.kind, passed: c.passed }))
-    });
+      entry: {
+        packageId: pkg.id,
+        requirements: pkg.requirements,
+        ok: pkgPassed,
+        stage: pkgPassed ? 'verified' : 'integration-verify',
+        agentRunId: agentRunRes.agentRun.id,
+        sandboxBackend: agentRunRes.agentRun.sandbox?.backend ?? (adapter === 'fake' ? 'fake' : null),
+        confinementClass: agentRunRes.agentRun.sandbox?.confinementClass ?? null,
+        sandboxReceiptDigest: agentRunRes.agentRun.sandbox?.receiptDigest ?? null,
+        repairOutcome: repairOutcome?.outcome ?? 'not-needed',
+        repairsUsed: repairOutcome?.repairsUsed ?? 0,
+        repairLedgerDigest: repairOutcome?.ledgerDigest ?? null,
+        escalated: Boolean(repairOutcome?.escalated),
+        candidateId: submitted.candidate.id,
+        candidateSha,
+        verificationId: verified.verification.id,
+        verificationOutcome: verified.verification.outcome,
+        usage: repairOutcome?.usage ?? agentRunRes.agentRun?.usage ?? null,
+        checks: verified.verification.checks.map((c) => ({ id: c.id, kind: c.kind, passed: c.passed }))
+      }
+    };
+  };
 
-    if (!pkgPassed) break;
+  // Run ready packages concurrently up to the mission's worktree cap
+  // (roadmap P3.4): a package starts once its dependencies have finished and
+  // a slot is free; the first failure stops new launches and drains in flight.
+  const concurrencyCap = Math.max(1, Math.min(mission.maxConcurrentWorktrees ?? 1, 4));
+  const outcomesById = new Map();
+  const completedIds = new Set();
+  const inFlight = new Map();
+  let failureSeen = false;
+  while (!failureSeen) {
+    let launched = false;
+    for (const candidate of schedule) {
+      if (inFlight.size >= concurrencyCap) break;
+      if (completedIds.has(candidate.id) || inFlight.has(candidate.id)) continue;
+      if (!(candidate.dependsOn ?? []).every((dep) => completedIds.has(dep))) continue;
+      launched = true;
+      const startedAt = new Date().toISOString();
+      const promise = buildOne(candidate)
+        .then((result) => ({ result }))
+        .catch((error) => ({ error }))
+        .then((outcome) => {
+          inFlight.delete(candidate.id);
+          completedIds.add(candidate.id);
+          outcomesById.set(candidate.id, { ...outcome, startedAt, finishedAt: new Date().toISOString() });
+          if (outcome.error || !outcome.result.ok) failureSeen = true;
+          return outcome;
+        });
+      inFlight.set(candidate.id, promise);
+    }
+    if (inFlight.size === 0) break;
+    if (!launched && inFlight.size > 0) await Promise.race([...inFlight.values()]);
   }
+  if (inFlight.size > 0) await Promise.allSettled([...inFlight.values()]);
+  for (const pkg of schedule) {
+    const outcome = outcomesById.get(pkg.id);
+    if (outcome) packageReports.push({ ...outcome.result.entry, startedAt: outcome.startedAt, finishedAt: outcome.finishedAt });
+  }
+  const firstError = schedule.map((pkg) => outcomesById.get(pkg.id)?.error).find(Boolean);
+  if (firstError) throw firstError;
+  for (const outcome of outcomesById.values()) if (outcome.error || !outcome.result.ok) buildOk = false;
 
   const finalStatus = runtimeStatus({ missionFile: resolvedMissionRel, projectDir: project });
   const reportBody = {
@@ -579,6 +658,7 @@ export async function runBuild({
     missionFile: resolvedMissionRel,
     packet: mission.packet,
     order: schedule.map((p) => p.id),
+    maxConcurrentWorktrees: concurrencyCap,
     packages: packageReports,
     runtimeSequence: finalStatus.runtime.sequence
   };

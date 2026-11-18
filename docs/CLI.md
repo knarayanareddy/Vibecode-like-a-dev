@@ -96,7 +96,7 @@ Usage
                                      rebase a mission onto an updated target commit and/or recompiled packet without dropping coverage
   vld sandbox probe|conformance [--backend <auto|oci|bwrap|linux-ns|darwin-seatbelt|node-permission>] [--json]
                                      inspect host sandbox backends or execute the 8 live confinement probes (ADR 0011)
-  vld build [--profile <file>] [--packet <dir>] [--mission <file>] [--adapter <sandboxed-cli|sandboxed-acp|sandboxed-agent|fake>] [--executable <path>] [--arg <value>] [--backend <id>] [--max-repairs <0-5>] [--gates] [--require-os] [--dry-run] [--project <dir>] [--model <provider:model>] [--cassette <dir>] [--cassette-mode <replay|record|auto|off>] [--test-cmd <json>] [--json]
+  vld build [--profile <file>] [--packet <dir>] [--mission <file>] [--mission-overrides <file>] [--adapter <sandboxed-cli|sandboxed-acp|sandboxed-agent|fake>] [--executable <path>] [--arg <value>] [--backend <id>] [--max-repairs <0-5>] [--gates] [--require-os] [--dry-run] [--project <dir>] [--model <provider:model>] [--cassette <dir>] [--cassette-mode <replay|record|auto|off>] [--test-cmd <json>] [--json]
                                      compile/verify spec, partition mission DAG, run sandboxed packages with bounded repair and emit build-report.json
   vld mcp                            run the MCP server over stdio
   vld index [--check]                rebuild primitives/index.json

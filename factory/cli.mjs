@@ -199,7 +199,7 @@ Usage
                                      rebase a mission onto an updated target commit and/or recompiled packet without dropping coverage
   vld sandbox probe|conformance [--backend <auto|oci|bwrap|linux-ns|darwin-seatbelt|node-permission>] [--json]
                                      inspect host sandbox backends or execute the 8 live confinement probes (ADR 0011)
-  vld build [--profile <file>] [--packet <dir>] [--mission <file>] [--adapter <sandboxed-cli|sandboxed-acp|sandboxed-agent|fake>] [--executable <path>] [--arg <value>] [--backend <id>] [--max-repairs <0-5>] [--gates] [--require-os] [--dry-run] [--project <dir>] [--model <provider:model>] [--cassette <dir>] [--cassette-mode <replay|record|auto|off>] [--test-cmd <json>] [--json]
+  vld build [--profile <file>] [--packet <dir>] [--mission <file>] [--mission-overrides <file>] [--adapter <sandboxed-cli|sandboxed-acp|sandboxed-agent|fake>] [--executable <path>] [--arg <value>] [--backend <id>] [--max-repairs <0-5>] [--gates] [--require-os] [--dry-run] [--project <dir>] [--model <provider:model>] [--cassette <dir>] [--cassette-mode <replay|record|auto|off>] [--test-cmd <json>] [--json]
                                      compile/verify spec, partition mission DAG, run sandboxed packages with bounded repair and emit build-report.json
   vld mcp                            run the MCP server over stdio
   vld index [--check]                rebuild primitives/index.json
@@ -2478,11 +2478,22 @@ async function runBuildCommand() {
       fail('--test-cmd must be a JSON object like {"executable":"node","args":["--test","tests/"]}');
     }
   }
+  let missionOverrides = null;
+  const overridesFile = option('--mission-overrides', null);
+  if (overridesFile) {
+    const overridesPath = path.resolve(project, overridesFile);
+    try {
+      missionOverrides = JSON.parse(readFileSync(overridesPath, 'utf8'));
+    } catch (error) {
+      fail(`--mission-overrides must be readable JSON: ${error.message}`);
+    }
+  }
   const report = await runBuild({
     projectDir: project,
     profileFile: option('--profile', null),
     packetDir: option('--packet', 'specs'),
     missionFile: option('--mission', null),
+    missionOverrides,
     adapter,
     executable: option('--executable', null),
     args: argValue ? [argValue] : [],
