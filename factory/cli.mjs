@@ -39,6 +39,7 @@ import { artifactStatus, initArtifact, listArtifacts, validateArtifact, verifyAr
 import { agentStatus, installAgent, listAdapters } from './lib/agents.mjs';
 import { applyBundle, getBundle, listBundles } from './lib/bundles.mjs';
 import { CHANGE_TEMPLATE, applyChange, archiveChange, emitChange, planChange, verifyChange } from './lib/change.mjs';
+import { runPlannerAgent } from './agents/planner.mjs';
 import { runReviewerAgent } from './agents/reviewer.mjs';
 import { emitPacket } from './lib/emit/index.mjs';
 import { exportPacket } from './lib/exports.mjs';
@@ -102,7 +103,8 @@ const VALUE_FLAGS = new Set([
   '--backend', '--adapter', '--executable', '--arg', '--mission', '--max-repairs', '--assign-added', '--test-cmd',
   '--action', '--pr', '--token-env', '--author', '--report', '--cron', '--kind', '--subject', '--format', '--from',
   '--provider', '--model', '--base-url', '--cassette', '--cassette-mode', '--answer', '--waive',
-  '--budget-usd', '--max-tokens', '--concurrency', '--test-cmd', '--mutation-report', '--diff-base', '--reviewer-provider', '--reviewer-model', '--reviewer-id', '--requirements', '--api-url'
+  '--budget-usd', '--max-tokens', '--concurrency', '--test-cmd', '--mutation-report', '--diff-base', '--reviewer-provider', '--reviewer-model', '--reviewer-id', '--requirements', '--api-url',
+  '--mission-id', '--max-turns', '--max-chars'
 ]);
 const isValueFlag = (token) => VALUE_FLAGS.has(token) && !(command === 'verify' && token === '--run');
 const positional = rest.filter((item, index) => !item.startsWith('-') && !(index > 0 && isValueFlag(rest[index - 1])));
@@ -157,6 +159,7 @@ Usage
                                      install or inspect generated Codex, Claude Code or Copilot handoffs
   vld workflow list|lint|run|status|complete <id> [step] [--project <dir>]
                                      typed resumable workflows; \`run\` previews unless --execute is supplied
+  vld mission plan <packet-dir> [-o <definition.json>] [--mission-id <id>] [--title <t>] [--offline] [--provider <id> --model <id>] [--cassette <dir> --cassette-mode <m>] [--max-turns <n>] [--max-chars <n>] [--json]
   vld mission init <definition.json> --packet <dir> [--target HEAD] [--project <dir>] [-o <file>]
   vld mission validate|status <mission.json> [--project <dir>] [--json]
                                      freeze a verified packet and Git target into versioned work packages; no agent is run
@@ -1907,10 +1910,58 @@ function printMissionReport(label, report) {
   console.log(`\n${report.ok ? 'PASS' : 'FAIL'}${requirements}\n`);
 }
 
-function runMission() {
+async function runMission() {
   const [action, file] = positional;
   const project = option('--project', '.');
   try {
+    if (action === 'plan') {
+      const packet = file ?? 'specs';
+      const outFile = option('-o', option('--out', 'mission-definition.json'));
+      const maxTurns = Number(option('--max-turns', '3'));
+      const maxChars = Number(option('--max-chars', '24000'));
+      const result = await runPlannerAgent({
+        packetDir: path.resolve(project, packet),
+        missionId: option('--mission-id', null),
+        title: option('--title', null),
+        offline: hasFlag('--offline'),
+        provider: option('--provider', null),
+        model: option('--model', null),
+        tokenEnv: option('--token-env', undefined),
+        baseUrl: option('--base-url', null),
+        cassetteDir: option('--cassette', null),
+        cassetteMode: option('--cassette-mode', null),
+        maxTurns,
+        maxChars,
+        budget: {
+          ...(option('--budget-usd', null) !== null ? { maxCostUsd: Number(option('--budget-usd', null)) } : {}),
+          ...(option('--max-tokens', null) !== null ? { maxTokens: Number(option('--max-tokens', null)) } : {})
+        }
+      });
+      if (!result.ok) {
+        fail(`mission planning failed (${result.mode}):\n${result.errors.map((error) => `- ${error}`).join('\n')}`);
+      }
+      const outPath = path.resolve(project, outFile);
+      writeFileSync(outPath, `${JSON.stringify(result.definition, null, 2)}\n`, 'utf8');
+      const summary = {
+        ok: true,
+        mode: result.mode,
+        definitionFile: displayPath(outPath),
+        contextDigest: result.context.digest,
+        contextChars: result.context.chars,
+        contextTruncated: result.context.truncated,
+        turns: result.turns.map((turn) => ({ index: turn.index, cached: turn.cached, validationErrors: turn.validationErrors })),
+        workPackageContexts: result.workPackageContexts,
+        validation: result.validation,
+        usage: result.usage
+      };
+      if (hasFlag('--json')) console.log(JSON.stringify(summary, null, 2));
+      else {
+        console.log(`\n✓ planned ${result.definition.workPackages.length} work package(s) -> ${displayPath(outPath)} (${result.mode})`);
+        for (const pkg of result.workPackageContexts) console.log(`  · ${pkg.packageId}: context ${pkg.digest.slice(0, 12)}… (${pkg.chars} chars)`);
+        console.log('');
+      }
+      return;
+    }
     if (action === 'init') {
       if (!file) fail('Usage: vld mission init <definition.json> --packet <dir> [--target HEAD] [--project <dir>]');
       const packet = option('--packet', null);
@@ -1975,7 +2026,7 @@ function runMission() {
       }
       return;
     }
-    fail('Usage: vld mission init|validate|status <definition-or-mission.json>');
+    fail('Usage: vld mission plan <packet-dir>|init <definition.json>|validate|status|rebase');
   } catch (error) {
     fail(error.message);
   }
@@ -2876,7 +2927,7 @@ switch (command) {
     runWorkflowCommand();
     break;
   case 'mission':
-    runMission();
+    runMission().catch((error) => fail(error.message));
     break;
   case 'workspace':
     runWorkspace();

@@ -4,9 +4,13 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) pr
 
 ## [Unreleased]
 
+### Added
+
+- **Multi-turn mission planner & context assembly (roadmap P4.2):** `vld mission plan` turns a verified packet into a mission definition through a bounded plan → validate → critique → refine model session (`factory/agents/planner.mjs`) whose every turn is gated by Core's `validateMissionDefinition` plus a full-coverage rule (each packet requirement assigned exactly once, repair turn on defects, fail-closed after `--max-turns`). `factory/lib/context.mjs` assembles the deterministic, digest-pinned, character-bounded packet context (project, requirements, product rules, gates, rule-lint, tier scope) with per-work-package slice bundles and explicit truncation reports. Keyless runs fall back to the deterministic `planMissionDefinitionFromPacket` output byte-identically; `--cassette-mode record|replay` gives the session the same record/replay parity as intake and review.
+
 ### Changed
 
-- No unreleased changes recorded yet.
+- No other unreleased changes recorded yet.
 
 ## [0.21.0] - 2026-11-16
 

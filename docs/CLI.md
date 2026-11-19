@@ -53,6 +53,7 @@ Usage
                                      install or inspect generated Codex, Claude Code or Copilot handoffs
   vld workflow list|lint|run|status|complete <id> [step] [--project <dir>]
                                      typed resumable workflows; `run` previews unless --execute is supplied
+  vld mission plan <packet-dir> [-o <definition.json>] [--mission-id <id>] [--title <t>] [--offline] [--provider <id> --model <id>] [--cassette <dir> --cassette-mode <m>] [--max-turns <n>] [--max-chars <n>] [--json]
   vld mission init <definition.json> --packet <dir> [--target HEAD] [--project <dir>] [-o <file>]
   vld mission validate|status <mission.json> [--project <dir>] [--json]
                                      freeze a verified packet and Git target into versioned work packages; no agent is run
