@@ -156,6 +156,11 @@ export function normalizeToolOutput(text) {
     .replace(/\(node:\d+\)/g, '(node:0)')
     .replace(/duration_ms:?\s+[0-9.]+/g, 'duration_ms: 0')
     .replace(/^# (?:start|end|duration)[^\n]*\n?/gm, '')
+    // TAP YAML diagnostics vary across Node releases (e.g. `type: 'test'`
+    // appeared in the reporter after 22.0) and absolute location paths vary
+    // across machines; neither belongs in a replay-stable conversation.
+    .replace(/^[ \t]+type: '[^'\n]+'[ \t]*\n?/gm, '')
+    .replace(/location: '[^'\n]*[/\\]([^/'\n]+)'/g, "location: '$1'")
     .replace(/\r\n/g, '\n');
 }
 
@@ -342,7 +347,7 @@ async function main() {
     '',
     `Write globs: ${writeGlobs.join(', ')}`,
     `Allow-listed commands: ${allowCmds.length ? allowCmds.join(' | ') : '(none)'}`,
-    `Test command: ${testCmd ? `${testCmd.executable} ${testCmd.args.join(' ')}` : '(none declared)'}`
+    `Test command: ${testCmd ? `${path.basename(testCmd.executable)} ${testCmd.args.join(' ')}` : '(none declared)'}`
   ].join('\n');
 
   // ---- Model client (broker env or cassette supplied by the adapter) --------

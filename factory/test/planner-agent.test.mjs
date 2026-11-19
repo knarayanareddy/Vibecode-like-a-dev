@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import test, { after, before } from 'node:test';
+import test, { after } from 'node:test';
 import { runPlannerAgent } from '../agents/planner.mjs';
 import { assemblePacketContext, assembleWorkPackageContext } from '../lib/context.mjs';
 import { planMissionDefinitionFromPacket, validateMissionDefinition } from '../lib/missions.mjs';
@@ -40,7 +40,10 @@ const definitionWith = (requirements) => ({
   }]
 });
 
-before(async () => {
+// Root `before()` hooks that await do not delay test start on Node 22.0 (fixed
+// in later 22.x), which would race tests against unfinished fixture setup. A
+// module-scope top-level await is awaited during module evaluation everywhere.
+await (async () => {
   root = mkdtempSync(path.join(os.tmpdir(), 'vld-p42-'));
   writeFileSync(path.join(root, 'profile.json'), `${JSON.stringify({
     name: 'context-demo',
@@ -66,7 +69,7 @@ before(async () => {
   const spec = JSON.parse(readFileSync(path.join(packetDir, 'spec.json'), 'utf8'));
   requirementIds = spec.requirements.map((r) => r?.id).filter((id) => REQUIREMENT.test(String(id))).sort();
   assert.ok(requirementIds.includes('REQ-C01'), `expected custom rule ids in ${requirementIds.join(',')}`);
-});
+})();
 
 after(() => rmSync(root, { recursive: true, force: true }));
 

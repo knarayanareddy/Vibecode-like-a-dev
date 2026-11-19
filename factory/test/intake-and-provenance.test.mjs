@@ -343,7 +343,7 @@ test('P1.5 production defaulted tier fields blocked, dependent questions unlock 
   const missionRel = path.relative(dir, mission.file);
   initializeRuntime({ missionFile: missionRel, projectDir: dir });
 
-  const token = 'studio-q-token-1234567890';
+  const token = 'example-auth-material';
   const srv = createRuntimeServer({
     missionFile: missionRel,
     projectDir: dir,

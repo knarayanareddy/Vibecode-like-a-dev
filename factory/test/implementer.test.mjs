@@ -211,6 +211,10 @@ test('P3.3 tool loop completes against a cassette with write-glob and allow-list
     const ws = path.join(dir, name);
     mkdirSync(path.join(ws, 'src'), { recursive: true });
     mkdirSync(path.join(ws, 'tests'), { recursive: true });
+    // `type: module` keeps src/app.js ESM on Node 22.0, which predates the
+    // default module-syntax detection of later 22.x releases. Without it the
+    // run_tests leg fails differently per Node line and the cassette diverges.
+    writeFileSync(path.join(ws, 'package.json'), '{"type":"module"}\n', 'utf8');
     writeFileSync(path.join(ws, 'src', 'app.js'), 'export function add(a, b) {\n  return a - b;\n}\n', 'utf8');
     return ws;
   }

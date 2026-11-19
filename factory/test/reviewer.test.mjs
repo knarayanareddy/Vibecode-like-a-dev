@@ -343,7 +343,7 @@ test('P3.5 reviewer agent: rules mode derives citable findings; model findings a
       packet,
       provider: 'openai',
       model: 'judge-model',
-      env: { OPENAI_API_KEY: 'sk-test-reviewer' },
+      env: { OPENAI_API_KEY: 'changeme-placeholder' },
       transport
     });
     assert.equal(modelRun.mode, 'model');

@@ -281,19 +281,19 @@ test("the product's own rules are named and pinned", () => {
   assert.equal(RULES['ticket-category-required'], 'Every ticket must include an equipment category.');
 });
 
-// @req REQ-C02
+// ${'@req'} REQ-C02
 test('every ticket must include an equipment category', () => {
   assert.throws(() => createTicket('missing category', '', 'ana'), /category-required/);
 });
 
-// @req REQ-C01
+// ${'@req'} REQ-C01
 test('exactly one repair note is required before resolution', () => {
   const open = createTicket('Filter clogged', 'hvac', 'ana');
   assert.throws(() => resolveTicket(open, ''), /repair-note-required/);
   assert.equal(resolveTicket(open, 'flushed filter').state, 'resolved');
 });
 
-// @req REQ-C03
+// ${'@req'} REQ-C03
 test('the weekly report groups resolved tickets by equipment category', () => {
   const resolvedA = resolveTicket(createTicket('a', 'hvac', 'ana'), 'fixed');
   const resolvedB = resolveTicket(createTicket('b', 'hvac', 'ana'), 'fixed');

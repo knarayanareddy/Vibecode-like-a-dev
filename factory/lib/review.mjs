@@ -438,7 +438,7 @@ export const SEEDED_DEFECTS = Object.freeze([
     kind: 'deleted-test',
     diff: [
       '+++ b/tests/refund.test.ts',
-      '-  // @req REQ-402',
+      '-  // @req REQ-402', // @req-ignore (template example emitted into generated user tests)
       '-  test(\'refuses refunds above the cap\', () => {',
       '-    assert.equal(refund(order, 10_000), REFUSED);',
       '-    assert.equal(audit.entries().length, 1);',

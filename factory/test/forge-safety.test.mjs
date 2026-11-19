@@ -217,7 +217,7 @@ const forgeArgs = (seed, mock) => ({
   baseRef: 'main',
   action: 'publish',
   postEvidence: false,
-  token: 'ghp_EphemeralForgeSafety99',
+  token: 'example-auth-material',
   fetchImpl: mock.mockFetch,
   projectDir: seed.repo
 });
