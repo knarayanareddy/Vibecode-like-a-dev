@@ -358,7 +358,13 @@ export function recordReviewDecision({
       humanSignoffId: report.humanSignoff?.reviewerId ?? null,
       packetDigest: persisted.packetDigest,
       reviewDigest: persisted.reviewDigest,
-      blockingFindings: checked.blockingFindings
+      blockingFindings: checked.blockingFindings,
+      provenance: {
+        modelId: report.reviewerModelId ?? null,
+        promptHash: null,
+        transcriptDigest: null,
+        usage: report.usage ?? null
+      }
     }
   });
 

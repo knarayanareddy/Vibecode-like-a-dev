@@ -120,6 +120,7 @@ function attemptReceipt({ id, policyDigest, contextDigest, workspaceDigest, exec
     ...(execution.transcriptDigest
       ? {
           transcriptDigest: execution.transcriptDigest,
+          ...(execution.promptHash ? { promptHash: execution.promptHash } : {}),
           ...(execution.usage
             ? {
                 usage: {

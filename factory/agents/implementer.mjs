@@ -457,6 +457,7 @@ async function main() {
   }
 
   // ---- Tool loop -----------------------------------------------------------
+  const requestDigests = [];
   try {
     for (let step = 1; step <= args.maxSteps; step += 1) {
       if (Date.now() - started > args.timeLimitMs) {
@@ -470,6 +471,7 @@ async function main() {
         maxTokens: 2048,
         temperature: 0
       });
+      if (response.requestDigest) requestDigests.push(response.requestDigest);
       const usage = client.getUsageSummary();
       const totalTokens = Number(usage.totals?.totalTokens ?? 0);
       if (totalTokens > args.maxTokens) {
@@ -505,6 +507,10 @@ async function main() {
     ok,
     finish: finishResult,
     limitError,
+    // Roadmap 4.3: verifiable provenance — the prompt hash covers every model
+    // request of this run in order; requestDigests make it re-computable.
+    promptHash: requestDigests.length > 0 ? digest(requestDigests) : null,
+    requestDigests: requestDigests.slice(0, 64),
     usage: {
       inputTokens: Number(totals.inputTokens ?? 0),
       outputTokens: Number(totals.outputTokens ?? 0),

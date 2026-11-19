@@ -301,8 +301,13 @@ export async function runBuild({
   const agentPolicyRel = path.join(policyDirRel, 'agent-policy.json');
   const deliveryPolicyRel = path.join(policyDirRel, 'delivery-policy.json');
 
+  const missionBudget = mission.budget ?? null;
   const agentEnvironment = {
     ...environment,
+    // Roadmap 4.3: the frozen mission budget bounds every model run — an
+    // overrun aborts the run (and with it the mission build).
+    ...(missionBudget?.maxCostUsd ? { VLD_MODEL_MAX_COST_USD: String(missionBudget.maxCostUsd) } : {}),
+    ...(missionBudget?.maxTokens ? { VLD_MODEL_MAX_TOKENS: String(missionBudget.maxTokens) } : {}),
     ...(model ? { VLD_MODEL_SPEC: model } : {}),
     ...(cassetteDir ? { VLD_MODEL_CASSETTE_DIR: path.resolve(project, cassetteDir) } : {}),
     ...(cassetteMode ? { VLD_MODEL_CASSETTE_MODE: cassetteMode } : {}),
@@ -597,6 +602,7 @@ export async function runBuild({
         escalated: Boolean(repairOutcome?.escalated),
         candidateId: submitted.candidate.id,
         candidateSha,
+        provenance: submitted.candidate.provenance ?? null,
         verificationId: verified.verification.id,
         verificationOutcome: verified.verification.outcome,
         usage: repairOutcome?.usage ?? agentRunRes.agentRun?.usage ?? null,
@@ -683,7 +689,12 @@ export async function runBuild({
         packages: packageReports.length,
         verifiedPackages: packageReports.filter((p) => p.ok).length,
         packetDigest: mission.packet?.digest ?? null,
-        reportDigest: report.reportDigest
+        reportDigest: report.reportDigest,
+        // Roadmap 4.3: each model-produced evidence entry records the model id,
+        // prompt hash, tool-call transcript digest and token/cost ledger.
+        provenance: packageReports
+          .filter((entry) => entry.provenance)
+          .map((entry) => ({ packageId: entry.packageId, ...entry.provenance }))
       }
     });
   } catch {}

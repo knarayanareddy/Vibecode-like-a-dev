@@ -414,6 +414,10 @@ async function runSandboxedAgent({ spec, policy, signal = null, onEvent = null }
     transcriptVerified,
     transcriptErrors,
     agentSummary,
+    ...(agentSummary?.promptHash ? { promptHash: agentSummary.promptHash } : {}),
+    ...(Array.isArray(agentSummary?.requestDigests) && agentSummary.requestDigests.length > 0
+      ? { requestDigests: agentSummary.requestDigests }
+      : {}),
     usage: agentSummary?.usage ?? null
   };
 }

@@ -27,7 +27,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "1dc670130bee30199b008a694519dfb0f86e8e2090911756a20c7cb4256351a1"
+          "content": "0f2bda8ca44d153baa16fb715764a88309452773c078f867ccb0f2102dd2b211"
         }
       ],
       "properties": [
@@ -41,7 +41,7 @@
         },
         {
           "name": "vld:shippedFileCount",
-          "value": "479"
+          "value": "480"
         }
       ]
     }

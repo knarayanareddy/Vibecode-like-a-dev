@@ -178,6 +178,15 @@ export function submitRuntimeDeliveryCandidate({ missionFile, packageId, candida
     adapterRunId,
     transcriptDigest: transcriptRun?.transcriptDigest ?? null,
     implementerModelId: linkedRun?.modelId ?? transcriptRun?.modelId ?? null,
+    // Roadmap 4.3: every candidate carries a verifiable provenance block —
+    // which model produced it, the prompt hash over its model requests, the
+    // tool-call transcript digest and the token/cost ledger for the run.
+    provenance: {
+      modelId: (linkedRun ?? transcriptRun)?.modelId ?? null,
+      promptHash: (linkedRun ?? transcriptRun)?.promptHash ?? null,
+      transcriptDigest: (linkedRun ?? transcriptRun)?.transcriptDigest ?? null,
+      usage: (linkedRun ?? transcriptRun)?.usage ?? null
+    },
     generatedAt: now()
   };
   return submitRuntimeCandidate({

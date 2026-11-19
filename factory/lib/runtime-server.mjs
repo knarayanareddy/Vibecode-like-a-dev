@@ -18,6 +18,7 @@ import { catalogStatus, readCatalogState } from './catalog.mjs';
 import { appendEvidence, studioEvidenceProjection } from './evidence.mjs';
 import { approveRuntimeDeliveryCandidate, queueRuntimeDeliveryCandidate } from './runtime-delivery.mjs';
 import { execFileSync } from 'node:child_process';
+import { readMission } from './missions.mjs';
 import { STUDIO_PATH, studioCapabilities, studioContentSecurityPolicy, studioHtml, studioNonce } from './studio.mjs';
 import {
   allocateRuntimePackage,
@@ -174,6 +175,38 @@ function reqAnchorsInTree(projectDir, commitSha) {
  * and the evidence-chain badge — everything a reviewer needs to approve from
  * Studio alone.
  */
+/**
+ * Roadmap 4.3 cost panel: per-run model provenance + token/cost totals with
+ * the frozen mission budget and an over-budget alert.
+ */
+function costProjection({ status, missionFile, projectDir }) {
+  const runs = (status.agentRuns ?? []).map((run) => ({
+    id: run.id,
+    packageId: run.packageId ?? null,
+    adapter: run.adapter,
+    outcome: run.outcome,
+    modelId: run.modelId ?? null,
+    promptHash: run.promptHash ?? null,
+    transcriptDigest: run.transcriptDigest ?? null,
+    usage: run.usage ?? null
+  }));
+  const totals = runs.reduce((sum, run) => ({
+    totalTokens: sum.totalTokens + (run.usage?.totalTokens ?? 0),
+    costUsd: Number((sum.costUsd + (run.usage?.costUsd ?? 0)).toFixed(8))
+  }), { totalTokens: 0, costUsd: 0 });
+  let budget = null;
+  try {
+    budget = readMission(missionFile, { projectDir }).mission.budget ?? null;
+  } catch {
+    budget = null;
+  }
+  const overBudget = Boolean(
+    (Number.isFinite(budget?.maxTokens) && totals.totalTokens > budget.maxTokens)
+    || (Number.isFinite(budget?.maxCostUsd) && totals.costUsd > budget.maxCostUsd)
+  );
+  return { runs, totals, budget, overBudget };
+}
+
 function candidateDetail({ missionFile, projectDir, packageId, candidateId = null }) {
   const status = runtimeStatus({ missionFile, projectDir });
   const workPackage = (status.packages ?? []).find((entry) => entry.id === packageId);
@@ -207,7 +240,7 @@ function candidateDetail({ missionFile, projectDir, packageId, candidateId = nul
 
   const runCosts = (status.agentRuns ?? [])
     .filter((run) => run.packageId === packageId)
-    .map((run) => ({ id: run.id, adapter: run.adapter, outcome: run.outcome, modelId: run.modelId ?? null, usage: run.usage ?? null }));
+    .map((run) => ({ id: run.id, adapter: run.adapter, outcome: run.outcome, modelId: run.modelId ?? null, promptHash: run.promptHash ?? null, transcriptDigest: run.transcriptDigest ?? null, usage: run.usage ?? null }));
   const totals = runCosts.reduce((sum, run) => ({
     totalTokens: sum.totalTokens + (run.usage?.totalTokens ?? 0),
     costUsd: sum.costUsd + (run.usage?.costUsd ?? 0)
@@ -225,7 +258,7 @@ function candidateDetail({ missionFile, projectDir, packageId, candidateId = nul
     queue,
     coverage,
     mutation,
-    cost: { runs: runCosts, totals },
+    cost: { runs: runCosts, totals, ...(() => { const c = costProjection({ status, missionFile, projectDir }); return { budget: c.budget, overBudget: c.overBudget }; })() },
     diff: { text: diffText, truncated },
     evidenceChain: studioEvidenceProjection({ projectDir })
   };
@@ -247,7 +280,8 @@ function dispatch({ request, actor, missionFile, projectDir, close }) {
           actor: { ...actor },
           actions: studioCapabilities(actor),
           ...(catalog.exists ? { catalog: studioCatalogProjection(catalogStatus(projectDir), projectDir) } : {}),
-          evidenceChain: studioEvidenceProjection({ projectDir })
+          evidenceChain: studioEvidenceProjection({ projectDir }),
+          costs: costProjection({ status, missionFile, projectDir })
         }
       };
     }
