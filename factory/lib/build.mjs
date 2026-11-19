@@ -19,7 +19,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { executeAgentAdapter } from './agent-adapters.mjs';
@@ -309,7 +309,15 @@ export async function runBuild({
     ...(missionBudget?.maxCostUsd ? { VLD_MODEL_MAX_COST_USD: String(missionBudget.maxCostUsd) } : {}),
     ...(missionBudget?.maxTokens ? { VLD_MODEL_MAX_TOKENS: String(missionBudget.maxTokens) } : {}),
     ...(model ? { VLD_MODEL_SPEC: model } : {}),
-    ...(cassetteDir ? { VLD_MODEL_CASSETTE_DIR: path.resolve(project, cassetteDir) } : {}),
+    ...(cassetteDir ? {
+      // Carry the REAL path: the sandbox read grant is realpath-based (macOS
+      // /var -> /private/var), so a symlinked env value misses the grant and
+      // the node-permission model rejects every cassette read.
+      VLD_MODEL_CASSETTE_DIR: (() => {
+        const abs = path.resolve(project, cassetteDir);
+        try { return realpathSync(abs); } catch { return abs; }
+      })()
+    } : {}),
     ...(cassetteMode ? { VLD_MODEL_CASSETTE_MODE: cassetteMode } : {}),
     ...(testCommand ? {
       VLD_TEST_COMMAND: JSON.stringify({
