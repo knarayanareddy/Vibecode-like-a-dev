@@ -10,6 +10,7 @@
   "files": [
     "factory/cli.mjs",
     "factory/adapters",
+    "factory/agents",
     "factory/bundles",
     "factory/catalog",
     "factory/evals",
@@ -37,6 +38,7 @@
     "factory/test",
     "factory/workflows",
     "primitives",
+    "packages/analysis",
     "docs",
     "prompts",
     "examples/ideas/01-photo-sorter.json",

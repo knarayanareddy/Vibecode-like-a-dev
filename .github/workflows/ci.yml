@@ -167,7 +167,7 @@ jobs:
             '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
             '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
             | node factory/cli.mjs mcp 2>/dev/null \
-            | node -e 'let b="";process.stdin.on("data",d=>b+=d).on("end",()=>{const lines=b.trim().split("\n").map(JSON.parse);const tools=lines.find(l=>l.id===2);if(tools.result.tools.length!==8)process.exit(1);console.log("8 MCP tools advertised")})'
+            | node -e 'let b="";process.stdin.on("data",d=>b+=d).on("end",()=>{const lines=b.trim().split("\n").map(JSON.parse);const tools=lines.find(l=>l.id===2);if(tools.result.tools.length!==10)process.exit(1);console.log("10 MCP tools advertised")})'
 
       # A generated delta starts with pending evidence by design. A minimal reviewed-record
       # fixture proves the positive evidence lifecycle; it is test data, never a CI release approval.
