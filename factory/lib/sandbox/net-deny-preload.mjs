@@ -107,22 +107,29 @@ function networkDeniedError(surface) {
   return error;
 }
 
+function isLoopbackHost(host) {
+  return !host || host === '127.0.0.1' || host === 'localhost' || host === '::1';
+}
+
 function isAllowedBrokerConnectArgs(args) {
   const first = Array.isArray(args[0]) ? args[0][0] : args[0];
   if (ALLOWED_BROKER_SOCKET) {
     if (typeof first === 'string' && path.resolve(first) === ALLOWED_BROKER_SOCKET) return true;
-    if (first && typeof first === 'object' && typeof first.path === 'string' && path.resolve(first.path) === ALLOWED_BROKER_SOCKET) {
-      return !first.port && !first.host;
+    if (first && typeof first === 'object') {
+      // Depending on the Node release, http internals hand createConnection the
+      // raw request options (socketPath + URL path) or a normalized one; accept
+      // either shape so only the exact broker socket ever passes.
+      const candidate = typeof first.socketPath === 'string' ? first.socketPath
+        : (typeof first.path === 'string' && !first.port ? first.path : null);
+      if (candidate !== null && path.resolve(candidate) === ALLOWED_BROKER_SOCKET && !first.port) return true;
     }
   }
   if (ALLOWED_BROKER_PORT !== null) {
     if (typeof first === 'number' && first === ALLOWED_BROKER_PORT) {
-      const host = typeof args[1] === 'string' ? args[1] : '127.0.0.1';
-      return host === '127.0.0.1';
+      return isLoopbackHost(typeof args[1] === 'string' ? args[1] : '127.0.0.1');
     }
     if (first && typeof first === 'object' && Number(first.port) === ALLOWED_BROKER_PORT) {
-      const host = first.host ?? first.hostname ?? '127.0.0.1';
-      return host === '127.0.0.1' && !first.path;
+      return isLoopbackHost(first.host ?? first.hostname ?? '127.0.0.1') && !first.socketPath;
     }
   }
   return false;

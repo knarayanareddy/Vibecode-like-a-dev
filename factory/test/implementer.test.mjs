@@ -424,7 +424,12 @@ test('P3.3 acceptance: Todo CLI from Test F builds green with adapter sandboxed-
     requireAssertions: true,
     maxRepairs: 1
   });
-  assert.equal(live.ok, true, JSON.stringify({ packages: live.packages, errors: live.errors ?? null }, null, 2));
+  const tSummaries = readdirSync(path.join(proj, '.vld', 'agent-transcripts'), { withFileTypes: true })
+    .filter((e) => e.isDirectory())
+    .flatMap((e) => readdirSync(path.join(proj, '.vld', 'agent-transcripts', e.name)).filter((f) => f.endsWith('.summary.json')).map((f) => path.join(e.name, f)))
+    .concat(readdirSync(path.join(proj, '.vld', 'agent-transcripts')).filter((f) => f.endsWith('.summary.json')))
+    .map((f) => JSON.parse(readFileSync(path.join(proj, '.vld', 'agent-transcripts', f), 'utf8')));
+  assert.equal(live.ok, true, JSON.stringify({ packages: live.packages, transcripts: tSummaries }, null, 2));
   assert.ok(live.packages.length >= 1);
   for (const pkg of live.packages) {
     assert.equal(pkg.verificationOutcome, 'passed', JSON.stringify(pkg));
