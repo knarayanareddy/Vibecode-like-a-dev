@@ -424,7 +424,7 @@ test('P3.3 acceptance: Todo CLI from Test F builds green with adapter sandboxed-
     requireAssertions: true,
     maxRepairs: 1
   });
-  assert.equal(live.ok, true, JSON.stringify(live, null, 2));
+  assert.equal(live.ok, true, JSON.stringify({ packages: live.packages, errors: live.errors ?? null }, null, 2));
   assert.ok(live.packages.length >= 1);
   for (const pkg of live.packages) {
     assert.equal(pkg.verificationOutcome, 'passed', JSON.stringify(pkg));
