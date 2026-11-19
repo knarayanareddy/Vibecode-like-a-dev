@@ -190,6 +190,7 @@ export async function executeRuntimeForgePlan({
   postEvidence = true,
   token,
   fetchImpl = globalThis.fetch,
+  apiUrl = null,
   projectDir = '.'
 } = {}) {
   const root = ensureProjectDir(projectDir);
@@ -212,7 +213,7 @@ export async function executeRuntimeForgePlan({
   const { createGitHubV1Client, executeGitHubDelivery } = await import('../integrations/github-v1/index.mjs');
   const { appendEvidence, verifyEvidenceChain } = await import('./evidence.mjs');
   const chainBefore = verifyEvidenceChain({ projectDir: root });
-  const client = createGitHubV1Client({ token, fetchImpl });
+  const client = createGitHubV1Client({ token, fetchImpl, ...(apiUrl ? { apiUrl } : {}) });
 
   const evidenceLines = [
     `**Mission / package:** \`${evidence.mission.id}\` / \`${evidence.package.id}\``,

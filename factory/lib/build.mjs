@@ -527,6 +527,7 @@ export async function runBuild({
             repairsUsed: repairOutcome.repairsUsed,
             repairLedgerDigest: repairOutcome.ledgerDigest,
             failureDigest: repairOutcome.ledger?.at(-1)?.failureDigest ?? null,
+            failureKinds: (repairOutcome.ledger?.at(-1)?.failures ?? []).map((f) => `${f.kind}: ${f.detail ?? f.message ?? ''}`),
             escalated: Boolean(repairOutcome.escalated),
             candidateId: null,
             verificationOutcome: 'failed',
@@ -638,7 +639,9 @@ export async function runBuild({
   if (inFlight.size > 0) await Promise.allSettled([...inFlight.values()]);
   for (const pkg of schedule) {
     const outcome = outcomesById.get(pkg.id);
-    if (outcome) packageReports.push({ ...outcome.result.entry, startedAt: outcome.startedAt, finishedAt: outcome.finishedAt });
+    if (outcome) packageReports.push(outcome.result
+      ? { ...outcome.result.entry, startedAt: outcome.startedAt, finishedAt: outcome.finishedAt }
+      : { packageId: pkg.id, ok: false, stage: 'error', error: String(outcome.error?.message ?? outcome.error ?? 'unknown build error'), startedAt: outcome.startedAt, finishedAt: outcome.finishedAt });
   }
   const firstError = schedule.map((pkg) => outcomesById.get(pkg.id)?.error).find(Boolean);
   if (firstError) throw firstError;

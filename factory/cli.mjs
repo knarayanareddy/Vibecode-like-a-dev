@@ -102,7 +102,7 @@ const VALUE_FLAGS = new Set([
   '--backend', '--adapter', '--executable', '--arg', '--mission', '--max-repairs', '--assign-added', '--test-cmd',
   '--action', '--pr', '--token-env', '--author', '--report', '--cron', '--kind', '--subject', '--format', '--from',
   '--provider', '--model', '--base-url', '--cassette', '--cassette-mode', '--answer', '--waive',
-  '--budget-usd', '--max-tokens', '--concurrency', '--test-cmd', '--mutation-report', '--diff-base', '--reviewer-provider', '--reviewer-model'
+  '--budget-usd', '--max-tokens', '--concurrency', '--test-cmd', '--mutation-report', '--diff-base', '--reviewer-provider', '--reviewer-model', '--reviewer-id', '--requirements', '--api-url'
 ]);
 const isValueFlag = (token) => VALUE_FLAGS.has(token) && !(command === 'verify' && token === '--run');
 const positional = rest.filter((item, index) => !item.startsWith('-') && !(index > 0 && isValueFlag(rest[index - 1])));
@@ -181,9 +181,9 @@ Usage
                                      frozen candidate/packet verification, independent review and a local queue; no merge, push or forge access
   vld runtime forge plan-export <mission.json> <package> --candidate <id> --actor release-approver:<id> --repository <owner/repo> --head-ref <branch> [--base-ref <branch>] [--checks <name,...>] [--title <text>] [--out <file>] [--dry-run] [--json]
                                      derive a durable, offline GitHub v1 plan; never reads credentials, invokes gh, pushes, changes a PR, or requests merge
-  vld runtime forge execute <mission.json> <package> --candidate <id> --actor release-approver:<id> --repository <owner/repo> --head-ref <branch> [--action publish|inspect|merge] [--pr <n>] [--allow-merge] [--token-env GITHUB_TOKEN]
+  vld runtime forge execute <mission.json> <package> --candidate <id> --actor release-approver:<id> --repository <owner/repo> --head-ref <branch> [--action publish|inspect|merge] [--pr <n>] [--allow-merge] [--token-env GITHUB_TOKEN] [--api-url <url>]
                                      opt-in governed GitHub v1 delivery using an explicit memory-only token; records hash-chained receipt
-  vld review prepare|verify|record [--packet <dir>] [--project <dir>] [--report <review.json>] [--base-ref <ref>] [--head-ref <ref>] [--json]
+  vld review prepare|run|verify|record [--packet <dir>] [--project <dir>] [--report <review.json>] [--base-ref <ref>] [--head-ref <ref>] [--json]
                                      context-isolated six-category spec review and high-rigor human escalation
   vld drift check|init-workflow|init-oracles [--packet <dir>] [--project <dir>] [--base-ref <ref>] [--record] [--force] [--json]
                                      continuous specification-to-code drift checks, CI workflow, and semantic oracles
@@ -2275,7 +2275,8 @@ async function runRuntime() {
           allowMergeRequest: hasFlag('--allow-merge'),
           pullNumber: Number.isSafeInteger(pullNumber) ? pullNumber : null,
           postEvidence: !hasFlag('--no-comment'),
-          token
+          token,
+          apiUrl: option('--api-url', null)
         });
         console.log(JSON.stringify(executed, null, 2));
         return;
@@ -2573,7 +2574,7 @@ async function runBuildCommand() {
   process.exit(report.ok ? 0 : 1);
 }
 
-function runReviewCommand() {
+async function runReviewCommand() {
   const [sub = 'prepare'] = positional;
   const project = option('--project', '.');
   const packet = option('--packet', 'specs');
@@ -2619,7 +2620,53 @@ function runReviewCommand() {
       else console.log(`\n✓ recorded review (${result.review.verdict}) → ${path.relative(path.resolve(project), result.file)} · evidence ${result.evidenceHash.slice(0, 12)}\n`);
       return;
     }
-    fail('Usage: vld review <prepare|verify|record> [--packet <dir>] [--project <dir>] [--report <review.json>] [--json]');
+    if (sub === 'run') {
+      const provider = option('--provider', 'rules');
+      const model = option('--model', null);
+      const prepared = prepareReviewPacket({
+        projectDir: project,
+        packetDir: packet,
+        baseRef: option('--base-ref', 'HEAD~1'),
+        headRef: option('--head-ref', 'HEAD'),
+        authorId: option('--author', 'unknown-author'),
+        requirementIds: option('--requirements', null) ? option('--requirements', '').split(',').map((v) => v.trim()).filter(Boolean) : undefined
+      });
+      const run = await runReviewerAgent({
+        packet: prepared,
+        provider,
+        model,
+        env: process.env,
+        cassetteDir: option('--cassette', null),
+        cassetteMode: option('--cassette-mode', null),
+        reviewerId: option('--reviewer-id', `reviewer:${provider === 'rules' ? 'diff-risk-v1' : String(model ?? 'model')}`),
+        maxTokens: 2048
+      });
+      const out = option('-o', option('--out', null));
+      const recorded = recordReviewDecision({ projectDir: project, packetDir: packet, report: run.report, outFile: out });
+      const summary = {
+        ok: recorded.review.verdict !== 'changes-requested',
+        mode: run.mode,
+        reviewerModelId: run.reviewerModelId,
+        verdict: recorded.review.verdict,
+        categories: recorded.review.categories,
+        blocking: run.blocking,
+        findings: run.report.findings ?? [],
+        humanEscalation: prepared.humanEscalation,
+        reviewFile: recorded.file,
+        evidenceHash: recorded.evidenceHash,
+        warnings: run.warnings
+      };
+      if (json) console.log(JSON.stringify(summary, null, 2));
+      else {
+        console.log(`\nreview run · ${run.mode} · ${run.reviewerModelId}\n`);
+        console.log(`  verdict   ${summary.verdict} (${summary.blocking} blocking)`);
+        console.log(`  recorded  ${path.relative(path.resolve(project), recorded.file)} · evidence ${recorded.evidenceHash.slice(0, 12)}`);
+        if (prepared.humanEscalation.required) console.log('  ! human escalation required by risk tier');
+        for (const warning of run.warnings) console.log(`  ! ${warning}`);
+      }
+      return;
+    }
+    fail('Usage: vld review <prepare|run|verify|record> [--packet <dir>] [--project <dir>] [--report <review.json>] [--provider rules|openai|...] [--model <id>] [--cassette <dir>] [--cassette-mode <replay|record|auto|off>] [--json]');
   } catch (error) {
     fail(error.message);
   }
@@ -2847,7 +2894,7 @@ switch (command) {
     runBuildCommand().catch((error) => fail(error.message));
     break;
   case 'review':
-    runReviewCommand();
+    await runReviewCommand();
     break;
   case 'drift':
     runDriftCommand();

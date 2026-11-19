@@ -384,6 +384,7 @@ export function buildSandboxCommand({
   network = false,
   allowChildProcess = false,
   extraReadPaths = [],
+  extraWritePaths = [],
   broker = null,
   env = {},
   ociImage = DEFAULT_OCI_IMAGE,
@@ -426,7 +427,7 @@ export function buildSandboxCommand({
   }
 
   const mergedEnv = { ...env, ...brokerEnv };
-  const extraWritePaths = brokerSocketDir ? [brokerSocketDir] : [];
+  const writeRoots = [...extraWritePaths.map(safeRealpath).filter((p) => existsSync(p)), ...(brokerSocketDir ? [brokerSocketDir] : [])];
   const nodeTarget = isNodeExecutable(executable);
 
   const innerArgs = nodeTarget
@@ -436,7 +437,7 @@ export function buildSandboxCommand({
           workspace: realWorkspace,
           mode,
           extraReadPaths: cleanExtra,
-          extraWritePaths,
+          extraWritePaths: writeRoots,
           allowChildProcess,
           includeNetDeny: backend.id === 'node-permission' && !network
         }),
@@ -446,7 +447,7 @@ export function buildSandboxCommand({
 
   if (backend.id === 'linux-ns') {
     const allReadMounts = [...new Set([...execBindRoots, ...cleanExtra])].filter((p) => !p.includes(':'));
-    const allWriteMounts = extraWritePaths.filter((p) => !p.includes(':'));
+    const allWriteMounts = writeRoots.filter((p) => !p.includes(':'));
     const safeBinPath = execBinDir.includes(':') ? '' : execBinDir;
     const nsFlags = network ? ['-Urm', '--fork'] : ['-Urnm', '--fork'];
     return {
@@ -494,7 +495,7 @@ export function buildSandboxCommand({
         bwrapArgs.push('--ro-bind', root, root);
       } catch {}
     }
-    for (const rw of extraWritePaths) {
+    for (const rw of writeRoots) {
       bwrapArgs.push('--bind', rw, rw);
     }
     bwrapArgs.push(mode === 'write-workspace' ? '--bind' : '--ro-bind', realWorkspace, realWorkspace);
@@ -535,7 +536,7 @@ export function buildSandboxCommand({
     for (const extra of cleanExtra) {
       ociArgs.push('--mount', `type=bind,source=${extra},target=${extra},readonly`);
     }
-    for (const rw of extraWritePaths) {
+    for (const rw of writeRoots) {
       ociArgs.push('--mount', `type=bind,source=${rw},target=${rw}`);
     }
     for (const [k, v] of Object.entries(mergedEnv)) {

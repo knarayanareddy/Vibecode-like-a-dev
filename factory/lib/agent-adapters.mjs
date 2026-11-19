@@ -319,8 +319,12 @@ async function runSandboxedAgent({ spec, policy, signal = null, onEvent = null }
   let broker = null;
   if (brokerSpec) {
     const nonce = randomBytes(32).toString('hex');
+    // Network-isolated backends (linux-ns) run with loopback down, so the
+    // broker must be a bind-mounted unix socket there; loopback TCP works
+    // under seatbelt/node-permission and on Windows where AF_UNIX is dicey.
+    const brokerMode = process.platform === 'linux' ? 'unix-socket' : 'loopback-port';
     broker = createModelBroker({
-      mode: 'loopback-port',
+      mode: brokerMode,
       nonce,
       providers: {
         [brokerSpec.provider]: brokerSpec.baseUrl ? { baseUrl: brokerSpec.baseUrl } : {}
@@ -330,7 +334,8 @@ async function runSandboxedAgent({ spec, policy, signal = null, onEvent = null }
     });
     await broker.start();
     const binding = broker.binding();
-    env.VLD_MODEL_BROKER_URL = `http://127.0.0.1:${binding.port}`;
+    if (binding.socketPath) env.VLD_MODEL_BROKER_SOCKET = binding.socketPath;
+    else env.VLD_MODEL_BROKER_URL = `http://127.0.0.1:${binding.port}`;
     env.VLD_MODEL_BROKER_NONCE = binding.nonce;
     env.VLD_MODEL_BROKER_TOKEN = binding.nonce;
   }
@@ -338,6 +343,10 @@ async function runSandboxedAgent({ spec, policy, signal = null, onEvent = null }
   let run;
   try {
     const cassetteRead = env.VLD_MODEL_CASSETTE_DIR ? [path.resolve(env.VLD_MODEL_CASSETTE_DIR)] : [];
+    // Record/auto modes write cassette entries from inside the sandbox.
+    const cassetteWrite = env.VLD_MODEL_CASSETTE_DIR && (env.VLD_MODEL_CASSETTE_MODE === 'record' || env.VLD_MODEL_CASSETTE_MODE === 'auto')
+      ? [path.resolve(env.VLD_MODEL_CASSETTE_DIR)]
+      : [];
     run = await runSandboxed({
       id: `sbx-${spec.id}`,
       executable: command.executable,
@@ -348,6 +357,7 @@ async function runSandboxedAgent({ spec, policy, signal = null, onEvent = null }
       broker: broker ? broker.binding() : undefined,
       allowChildProcess: Boolean(sbx.allowChildProcess),
       extraReadPaths: [...(sbx.extraReadPaths ?? []), ...cassetteRead],
+      extraWritePaths: cassetteWrite,
       ociImage: sbx.ociImage,
       backend: sbx.backend ?? 'auto',
       requireOs: Boolean(sbx.requireOs),

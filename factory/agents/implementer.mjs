@@ -149,6 +149,9 @@ function truncate(text, limit = MAX_RESULT_CHARS) {
 export function normalizeToolOutput(text) {
   return String(text ?? '')
     .replace(/^\(node:\d+\) SecurityWarning:[^\n]*\n?/gm, '')
+    .replace(/^\(node:\d+\) \[MODULE_TYPELESS_PACKAGE_JSON\][^\n]*\n?/gm, '')
+    .replace(/^Reparsing as ES module because module syntax was detected\.[^\n]*\n?/gm, '')
+    .replace(/^To eliminate this warning, add "type": "module" to [^\n]*\n?/gm, '')
     .replace(/^\(Use `node --trace-warnings[^\n]*\n?/gm, '')
     .replace(/\(node:\d+\)/g, '(node:0)')
     .replace(/duration_ms:?\s+[0-9.]+/g, 'duration_ms: 0')
@@ -492,7 +495,7 @@ async function main() {
     }
     if (!finishResult && !limitError) limitError = `step limit exceeded (${args.maxSteps})`;
   } catch (error) {
-    limitError = `model/tool failure: ${String(error.message ?? error)}`;
+    limitError = `model/tool failure: ${String(error.message ?? error)}${error?.stack ? ` | ${String(error.stack).split('\n').slice(1, 4).join(' <- ').trim()}` : ''}`;
   }
 
   const usage = client.getUsageSummary();
