@@ -468,7 +468,6 @@ export async function probeBrokerConformance({
 
   const brokerScript = [
     "const http = require('node:http');",
-    "console.error('ENV:' + JSON.stringify({ s: process.env.VLD_MODEL_BROKER_SOCKET ?? null, p: process.env.VLD_MODEL_BROKER_PORT ?? null, n: (process.env.VLD_MODEL_BROKER_NONCE ?? '').length }));",
     "const socket = process.env.VLD_MODEL_BROKER_SOCKET || null;",
     "const port = Number(process.env.VLD_MODEL_BROKER_PORT || 0);",
     "const nonce = process.env.VLD_MODEL_BROKER_NONCE || '';",

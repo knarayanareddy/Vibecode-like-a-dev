@@ -119,9 +119,13 @@ function isAllowedBrokerConnectArgs(args) {
       // Depending on the Node release, http internals hand createConnection the
       // raw request options (socketPath + URL path) or a normalized one; accept
       // either shape so only the exact broker socket ever passes.
-      const candidate = typeof first.socketPath === 'string' ? first.socketPath
-        : (typeof first.path === 'string' && !first.port ? first.path : null);
-      if (candidate !== null && path.resolve(candidate) === ALLOWED_BROKER_SOCKET && !first.port) return true;
+      if (typeof first.socketPath === 'string') {
+        // socketPath is decisive at the net layer (port/host are ignored for
+        // unix-socket dials); newer Node http internals may leave a default
+        // port in the normalized options, so never require !first.port here.
+        return path.resolve(first.socketPath) === ALLOWED_BROKER_SOCKET;
+      }
+      if (typeof first.path === 'string' && !first.port && path.resolve(first.path) === ALLOWED_BROKER_SOCKET) return true;
     }
   }
   if (ALLOWED_BROKER_PORT !== null) {

@@ -64,6 +64,10 @@ HOME_REAL=""
 if [ -n "${HOME:-}" ] && [ -d "${HOME}" ]; then
   HOME_REAL="$("$NODE_BIN" -e "console.log(require('node:fs').realpathSync(process.argv[1]))" "$HOME" 2>/dev/null || printf '%s' "$HOME")"
 fi
+TMPDIR_REAL=""
+if [ -n "${TMPDIR:-}" ] && [ -d "${TMPDIR}" ]; then
+  TMPDIR_REAL="$("$NODE_BIN" -e "console.log(require('node:fs').realpathSync(process.argv[1]))" "$TMPDIR" 2>/dev/null || printf '%s' "$TMPDIR")"
+fi
 
 case "$NODE_REAL" in
   /tmp/*|/var/tmp/*)
@@ -76,7 +80,9 @@ case "$NODE_REAL" in
     MASKED_REASON="/run (masked by tmpfs inside linux-ns/bwrap sandboxes)"
     ;;
   *)
-    if [ -n "${HOME:-}" ] && [[ "$NODE_REAL" == "$HOME/"* ]]; then
+    if [ -n "${TMPDIR_REAL:-}" ] && [[ "$NODE_REAL" == "$TMPDIR_REAL/"* ]]; then
+      MASKED_REASON="$TMPDIR_REAL (${TMPDIR}, masked by tmpfs inside linux-ns/bwrap sandboxes)"
+    elif [ -n "${HOME:-}" ] && [[ "$NODE_REAL" == "$HOME/"* ]]; then
       MASKED_REASON="\$HOME (${HOME}, masked by tmpfs inside linux-ns/bwrap sandboxes)"
     elif [ -n "$HOME_REAL" ] && [[ "$NODE_REAL" == "$HOME_REAL/"* ]]; then
       MASKED_REASON="\$HOME (${HOME_REAL}, masked by tmpfs inside linux-ns/bwrap sandboxes)"

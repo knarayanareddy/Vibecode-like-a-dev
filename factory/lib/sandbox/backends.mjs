@@ -175,6 +175,13 @@ export function inspectMaskedNodePrefix(executable = process.execPath) {
       return { masked: true, category: dir.slice(1), reason: `under ${dir}`, realPath: realExec, prefix };
     }
   }
+  // The OS tmp root is not always /tmp: macOS uses /var/folders/... (realpath
+  // /private/var/folders/...). Node installs there are equally at risk of
+  // tmpfs masking inside linux-ns/bwrap sandboxes.
+  const tmpReal = safeRealpath(os.tmpdir());
+  if (tmpReal && tmpReal !== '/tmp' && realExec.startsWith(`${tmpReal}/`)) {
+    return { masked: true, category: 'tmp', reason: `under ${tmpReal}`, realPath: realExec, prefix };
+  }
   return { masked: false, category: null, reason: null, realPath: realExec, prefix };
 }
 
