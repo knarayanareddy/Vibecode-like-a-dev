@@ -92,7 +92,15 @@ export async function publishGitHubPullRequest({ client, plan } = {}) {
   checkedPlan(plan);
   const expected = { headRef: plan.headRef, headSha: plan.headSha, baseRef: plan.baseRef };
   const resource = `/repos/${plan.repository}/pulls${plan.existingPullNumber ? `/${safeNumber(plan.existingPullNumber)}` : ''}`;
-  const raw = await client.request(plan.existingPullNumber ? 'PATCH' : 'POST', resource, plan.existingPullNumber ? { title: plan.title, body: plan.body, base: plan.baseRef } : { title: plan.title, body: plan.body, head: plan.headRef, base: plan.baseRef });
+  const raw = await client.request(
+    plan.existingPullNumber ? 'PATCH' : 'POST',
+    resource,
+    plan.existingPullNumber
+      ? { title: plan.title, body: plan.body, base: plan.baseRef }
+      // Roadmap 4.2: governed publishes are draft PRs unless the reviewed plan
+      // explicitly says ready (draft === false).
+      : { title: plan.title, body: plan.body, head: plan.headRef, base: plan.baseRef, draft: plan.draft !== false }
+  );
   return { planDigest: plan.digest, pullRequest: validatePull(raw, expected) };
 }
 
@@ -212,6 +220,7 @@ export async function postGitHubEvidenceComment({ client, plan, pullNumber, summ
 export async function requestGitHubMerge({ client, plan, pullNumber } = {}) {
   if (plan?.allowMergeRequest !== true) throw extensionError('GitHub merge request is not enabled by the reviewed plan', 'GITHUB_MERGE_NOT_ALLOWED');
   const facts = await inspectGitHubPullRequest({ client, plan, pullNumber });
+  if (facts.pullRequest?.draft) throw extensionError('draft pull requests cannot be merged; republish the pull request as ready first', 'GITHUB_MERGE_DRAFT');
   if (!facts.requiredChecksPassed || (plan.requireGitHubApproval && !facts.githubApproval)) throw extensionError('GitHub remote checks/review facts do not satisfy the reviewed plan', 'GITHUB_MERGE_GATES_UNMET');
   const merged = await client.request('PUT', `/repos/${plan.repository}/pulls/${safeNumber(pullNumber)}/merge`, { sha: plan.headSha, merge_method: 'merge' });
   if (!object(merged) || merged.merged !== true || !SHA.test(String(merged.sha ?? ''))) throw extensionError('GitHub did not confirm an exact merge result; inspect the forge before retrying', 'GITHUB_MERGE_AMBIGUOUS');

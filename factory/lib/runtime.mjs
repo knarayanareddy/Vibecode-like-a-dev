@@ -1192,6 +1192,9 @@ export function runtimeForgeEvidence({ missionFile, packageId, candidateId, proj
     const verification = events.find((event) => event.type === 'verification' && event.packageId === packageId && event.verification?.candidateId === candidateId)?.verification;
     const approval = events.find((event) => event.type === 'approval' && event.packageId === packageId && event.approval?.candidateId === candidateId)?.approval;
     const queue = events.find((event) => event.type === 'queue' && event.packageId === packageId && event.queue?.candidateId === candidateId)?.queue;
+    // Roadmap 4.2: the publish gate re-checks the human sign-off record from
+    // the ledger's latest independent review of this exact candidate.
+    const review = events.filter((event) => event.type === 'review' && event.packageId === packageId && event.review?.candidateId === candidateId).at(-1)?.review ?? null;
     if (!candidate || !verification || verification.outcome !== 'passed' || !approval || !queue) throw extensionError('forge plan requires one passed verification, independent approval and queue receipt', 'RUNTIME_FORGE_TUPLE_INVALID');
     if (candidate.candidateSha !== verification.candidateSha || candidate.targetSha !== verification.targetSha || candidate.policyDigest !== verification.policyDigest || candidate.candidateSha !== approval.candidateSha || candidate.targetSha !== approval.targetSha || candidate.policyDigest !== approval.policyDigest || candidate.candidateSha !== queue.candidateSha || candidate.targetSha !== queue.targetSha || candidate.policyDigest !== queue.policyDigest) throw extensionError('forge plan tuple authority does not match', 'RUNTIME_FORGE_TUPLE_INVALID');
     return {
@@ -1205,7 +1208,8 @@ export function runtimeForgeEvidence({ missionFile, packageId, candidateId, proj
       candidate: publicDeliveryReceipt(candidate),
       verification: publicDeliveryReceipt(verification),
       approval: publicDeliveryReceipt(approval),
-      queue: publicDeliveryReceipt(queue)
+      queue: publicDeliveryReceipt(queue),
+      review: review ? publicDeliveryReceipt(review) : null
     };
   });
 }

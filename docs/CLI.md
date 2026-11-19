@@ -78,7 +78,7 @@ Usage
                                      frozen candidate/packet verification, independent review and a local queue; no merge, push or forge access
   vld runtime forge plan-export <mission.json> <package> --candidate <id> --actor release-approver:<id> --repository <owner/repo> --head-ref <branch> [--base-ref <branch>] [--checks <name,...>] [--title <text>] [--out <file>] [--dry-run] [--json]
                                      derive a durable, offline GitHub v1 plan; never reads credentials, invokes gh, pushes, changes a PR, or requests merge
-  vld runtime forge execute <mission.json> <package> --candidate <id> --actor release-approver:<id> --repository <owner/repo> --head-ref <branch> [--action publish|inspect|merge] [--pr <n>] [--allow-merge] [--token-env GITHUB_TOKEN] [--api-url <url>]
+  vld runtime forge execute <mission.json> <package> --candidate <id> --actor release-approver:<id> --repository <owner/repo> --head-ref <branch> [--action publish|inspect|merge] [--pr <n>] [--ready] [--allow-merge] [--checks <a,b>] [--token-env GITHUB_TOKEN] [--api-url <url>]   (publish creates a draft PR unless --ready)
                                      opt-in governed GitHub v1 delivery using an explicit memory-only token; records hash-chained receipt
   vld review prepare|run|verify|record [--packet <dir>] [--project <dir>] [--report <review.json>] [--base-ref <ref>] [--head-ref <ref>] [--json]
                                      context-isolated six-category spec review and high-rigor human escalation

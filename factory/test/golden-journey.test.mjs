@@ -189,6 +189,7 @@ test('P4.1 golden journey: paragraph to PR with receipts and a verified evidence
   // PR metadata contains the receipts.
   const prCreate = stub.captured.find((c) => c.method === 'POST' && /\/pulls$/.test(c.url));
   assert.ok(prCreate, 'the forge must create the pull request');
+  assert.equal(prCreate.body.draft, true, 'governed publishes default to a draft PR (roadmap 4.2)');
   const prBody = String(prCreate.body.body);
   assert.match(prBody, /Passed verification: verification-[a-f0-9-]+/, `PR body must carry the verification receipt:\n${prBody}`);
   const approvalId = /Independent approval: (approval-[a-f0-9-]+)/.exec(prBody)?.[1];
