@@ -368,9 +368,14 @@ function buildSeatbeltProfile({
     lines.push('(allow network*)');
   } else if (broker?.mode === 'unix-socket' && broker.socketPath) {
     const sockDir = safeRealpath(path.dirname(broker.socketPath));
+    const sockReal = path.join(sockDir, path.basename(broker.socketPath));
     lines.push(`(allow file-read* (subpath ${seatbeltLiteral(sockDir)}))`);
     lines.push(`(allow file-write* (subpath ${seatbeltLiteral(sockDir)}))`);
-    lines.push(`(allow network-outbound (remote unix-socket (path-literal ${seatbeltLiteral(broker.socketPath)})))`);
+    // Allow both spellings: the child dials the realpath-normalized socket
+    // (macOS /var -> /private/var), while callers may hold the original path.
+    for (const sockTarget of new Set([broker.socketPath, sockReal])) {
+      lines.push(`(allow network-outbound (remote unix-socket (path-literal ${seatbeltLiteral(sockTarget)})))`);
+    }
   } else if (broker?.mode === 'loopback-port' && Number.isInteger(broker.port)) {
     lines.push(`(allow network-outbound (remote ip "localhost:${broker.port}"))`);
   } else {
