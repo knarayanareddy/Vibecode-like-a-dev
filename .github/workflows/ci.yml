@@ -138,7 +138,7 @@ jobs:
           set -e
           cat "$log"
           if [ "$status" -ne 0 ]; then
-            failure=$(grep -m1 -A 30 '^not ok' "$log" | tr '\n' ' ' || true)
+            failure=$(grep -m1 -A 60 '^not ok' "$log" | tr '\n' ' ' || true)
             echo "::error title=Minimum Node test failure::${failure:-npm test failed without a TAP failure record}"
             exit "$status"
           fi
@@ -418,7 +418,7 @@ jobs:
           set -e
           cat "$log"
           if [ "$status" -ne 0 ]; then
-            failure=$(grep -m1 -A 30 '^not ok' "$log" | tr '\n' ' ' || true)
+            failure=$(grep -m1 -A 60 '^not ok' "$log" | tr '\n' ' ' || true)
             echo "::error title=Portable Node test failure::${failure:-npm test failed without a TAP failure record}"
             exit "$status"
           fi
@@ -455,7 +455,7 @@ jobs:
           status=$?
           set -e
           if [ "$status" -ne 0 ]; then
-            failure=$(grep -m1 -A 30 '^not ok' /tmp/vld-container-check.tap | tr '\n' ' ' || true)
+            failure=$(grep -m1 -A 60 '^not ok' /tmp/vld-container-check.tap | tr '\n' ' ' || true)
             echo "::error title=Container check failure::${failure:-npm run check failed without a TAP failure record}"
             exit "$status"
           fi
