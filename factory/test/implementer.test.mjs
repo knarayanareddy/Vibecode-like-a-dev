@@ -386,7 +386,9 @@ test('P3.3 acceptance: Todo CLI from Test F builds green with adapter sandboxed-
   t.after(() => upstream.close());
   for (const pkg of definition.workPackages) {
     const twin = path.join(dir, `twin-${pkg.id}`);
-    cpSync(proj, twin, { recursive: true });
+    // Exclude .git: fs.cpSync recursive can race on .git/objects (ENOENT on
+  // macOS and overlayfs) and the recording twin never needs git state.
+  cpSync(proj, twin, { recursive: true, filter: (src) => path.basename(src) !== '.git' });
     const recorded = await runImplementer({
       workspace: twin,
       model: `openai:test-model:${upstream.url}/v1`,

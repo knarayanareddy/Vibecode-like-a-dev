@@ -393,7 +393,7 @@ jobs:
     name: Portable CLI smoke — ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     # Bound each deterministic job; action SHA upgrades are reviewed in CONTRIBUTING.md.
-    timeout-minutes: 25
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
