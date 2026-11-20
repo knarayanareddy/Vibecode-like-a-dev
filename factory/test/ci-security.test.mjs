@@ -58,7 +58,7 @@ test('CI separates deterministic evaluations/stress work and validates the porta
   mustMatch(ci, /^  stress:/m);
   mustMatch(ci, /^  portable-smoke:/m);
   mustMatch(ci, /os: \[macos-latest, windows-latest\]/);
-  mustMatch(ci, /name: Full portable test suite[\s\S]*?shell: bash[\s\S]*?log=\/tmp\/vld-portable-test-\$\{\{ matrix\.shard \}\}\.log[\s\S]*?node --test --test-concurrency=1 \$files[\s\S]*?Portable Node test failure/);
+  mustMatch(ci, /name: Full portable test suite[\s\S]*?shell: bash[\s\S]*?log=\/tmp\/vld-portable-test-\$\{\{ matrix\.shard \}\}\.log[\s\S]*?node --test --test-concurrency=1 --test-timeout=180000 \$files[\s\S]*?Portable Node test failure/);
   mustNotMatch(ci, /tee portable-test\.log|NODE_OPTIONS=--test-reporter=dot/);
   mustMatch(ci, /deterministic outcome calibration/);
   mustNotMatch(ci, /--runner cmd|--unsafe-command/);

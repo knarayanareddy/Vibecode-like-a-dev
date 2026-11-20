@@ -416,7 +416,7 @@ jobs:
           log=/tmp/vld-portable-test-${{ matrix.shard }}.log
           files=$(node -e "const fs=require('node:fs');const all=fs.readdirSync('factory/test').filter((f)=>f.endsWith('.test.mjs')).sort();const mine=all.filter((_,i)=>i%8===${{ matrix.shard }}-1);process.stdout.write(mine.map((f)=>'factory/test/'+f).join(' '))")
           set +e
-          node --test --test-concurrency=1 $files >"$log" 2>&1
+          node --test --test-concurrency=1 --test-timeout=180000 $files >"$log" 2>&1
           status=$?
           if [ "${{ matrix.shard }}" = "1" ]; then
             node --test factory/studio/vscode/test/*.test.cjs >>"$log" 2>&1
