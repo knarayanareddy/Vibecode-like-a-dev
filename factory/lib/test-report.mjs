@@ -18,17 +18,26 @@
  *   - `static-asserted` / `anchored-only`: anchored test was never observed running
  */
 
+function normalizeSlashes(p) {
+  // Node TAP diagnostics can carry single, doubled (YAML-escaped) or mixed
+  // backslashes; collapse every separator run so all spellings compare equal.
+  return String(p ?? '').replace(/\\+/g, '/').replace(/\/+/g, '/');
+}
+
 function normalizeRelFile(raw, repoRoot = '') {
-  let s = String(raw ?? '').trim().replace(/^file:\/\//, '').replace(/\\/g, '/');
+  let s = normalizeSlashes(String(raw ?? '').trim().replace(/^file:\/\//, ''));
   // file:///D:/x strips to /D:/x — drop the phantom leading slash before a drive letter.
   s = s.replace(/^\/(?=[A-Za-z]:\/)/, '');
   if (repoRoot) {
-    const normRoot = String(repoRoot).replace(/\\/g, '/').replace(/\/+$/, '');
-    if (normRoot && s.startsWith(`${normRoot}/`)) {
+    const normRoot = normalizeSlashes(repoRoot).replace(/\/+$/, '');
+    const caseInsensitive = /^[A-Za-z]:\//.test(s) || /^[A-Za-z]:\//.test(normRoot);
+    const hay = caseInsensitive ? s.toLowerCase() : s;
+    const needle = caseInsensitive ? normRoot.toLowerCase() : normRoot;
+    if (normRoot && hay.startsWith(`${needle}/`)) {
       s = s.slice(normRoot.length + 1);
     }
   }
-  return s.replace(/^\.\//, '');
+  return s.replace(/^\.\/+/, '');
 }
 
 function normalizeTestName(name) {
@@ -308,8 +317,8 @@ export function parseTestReport(content, { format = 'auto', repoRoot = '' } = {}
 
 function filesMatch(reportFile, anchorFile) {
   if (!reportFile || !anchorFile) return false;
-  const a = reportFile.replace(/\\/g, '/').replace(/^\.\//, '');
-  const b = anchorFile.replace(/\\/g, '/').replace(/^\.\//, '');
+  const a = normalizeSlashes(reportFile).replace(/^\.\/+/, '');
+  const b = normalizeSlashes(anchorFile).replace(/^\.\/+/, '');
   return a === b || a.endsWith(`/${b}`) || b.endsWith(`/${a}`);
 }
 
