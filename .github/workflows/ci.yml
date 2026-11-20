@@ -393,12 +393,12 @@ jobs:
     name: Portable CLI smoke — ${{ matrix.os }} (shard ${{ matrix.shard }})
     runs-on: ${{ matrix.os }}
     # Bound each deterministic job; action SHA upgrades are reviewed in CONTRIBUTING.md.
-    timeout-minutes: 45
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         os: [macos-latest, windows-latest]
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -414,7 +414,7 @@ jobs:
         shell: bash
         run: |
           log=/tmp/vld-portable-test-${{ matrix.shard }}.log
-          files=$(node -e "const fs=require('node:fs');const all=fs.readdirSync('factory/test').filter((f)=>f.endsWith('.test.mjs')).sort();const mine=all.filter((_,i)=>i%4===${{ matrix.shard }}-1);process.stdout.write(mine.map((f)=>'factory/test/'+f).join(' '))")
+          files=$(node -e "const fs=require('node:fs');const all=fs.readdirSync('factory/test').filter((f)=>f.endsWith('.test.mjs')).sort();const mine=all.filter((_,i)=>i%8===${{ matrix.shard }}-1);process.stdout.write(mine.map((f)=>'factory/test/'+f).join(' '))")
           set +e
           node --test --test-concurrency=1 $files >"$log" 2>&1
           status=$?
