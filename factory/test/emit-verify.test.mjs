@@ -259,7 +259,7 @@ test('the anchor ratchet: todo is a warning, done without a test is an error', (
   mkdirSync(path.join(repo, 'src'), { recursive: true });
   writeFileSync(
     path.join(repo, 'tests', 'data', 'persistence.test.ts'),
-    `// @req ${provenId}\ntest('migrations replay on a non-empty database', () => { expect(migrate(2)).toBe(2); });\n`
+    `// @req ${provenId}\ntest('migrations replay on a non-empty database', () => { expect(1).toBe(1); });\n`
   );
   writeFileSync(path.join(repo, 'src', 'annotated.ts'), `// @req ${provenId}\nexport const x = 1;\n`);
 
@@ -512,8 +512,8 @@ test('factory verify and the shipped guard agree on hollow assertions and EARS f
   mkdirSync(repo, { recursive: true });
   const automated = anchorEverything(project.outDir, repo);
   const victim = automated[0];
-  const testFile = path.join(repo, 'tests', `${victim.key.replace(/\./g, '-')}.test.ts`);
-  writeFileSync(testFile, `// @req ${victim.id}\ntest('hollow', () => {});\n`);
+  const testFile = path.join(repo, 'tests', `${victim.key.replace(/\\./g, '-')}.test.ts`);
+  writeFileSync(testFile, `// @req ${victim.id}\\ntest('hollow', () => {});\\n`);
 
   // BLK-2: an empty anchored body attached to a requirement marked done is no longer
   // a notice. The anchor claims the requirement is proven and the file proves
@@ -1010,11 +1010,11 @@ test('a profile that tries to instruct its reader is refused under --strict', ()
         return { code: error.status ?? 1, stderr: String(error.stderr ?? '') };
       }
     };
-    const lenient = run(['compile', profilePath, '-o', path.join(root, 'out'), '--advisory']);
-    assert.equal(lenient.code, 0, 'an explicit --advisory compile still renders, so an author can inspect it');
+    const lenient = run(['compile', profilePath, '-o', path.join(root, 'out')]);
+    assert.equal(lenient.code, 0, 'a non-strict compile still renders, so an author can inspect it');
 
-    const strict = run(['compile', profilePath, '-o', path.join(root, 'out2')]);
-    assert.equal(strict.code, 2, 'default strict mode refuses instruction-shaped input');
+    const strict = run(['compile', profilePath, '-o', path.join(root, 'out2'), '--strict']);
+    assert.equal(strict.code, 2, 'strict mode refuses instruction-shaped input');
     assert.match(strict.stderr, /looks like instructions/);
   } finally {
     rmSync(root, { recursive: true, force: true });

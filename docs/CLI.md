@@ -13,20 +13,16 @@ Usage
                                      safely upgrade legacy profiles, runtime policies and packets to current VLD
   vld adopt <repo-or-url> [-o <file>] [--name <slug>] [--idea <text>] [--force] [--json]
                                      infer a profile from a local path or Git repository URL
-  vld intake [idea] [--file <path>] [--offline] [--provider <id>] [--model <id>] [-o profile.draft.json]
-                                     extract an evidence-grounded draft profile and <=7 questions from prose or stdin
-  vld intake accept [profile.draft.json] [-o profile.json] [--answer k=v] [--waive flag:reason:date]
-                                     promote a reviewed draft to a strict-ready profile.json with full provenance
-  vld plan <profile.json> [--explain] [--json] [--advisory]
-                                     strict by default: blocks unwaived risks, rule conflicts & defaulted production fields (--advisory downgrades to warnings)
-  vld compile <profile.json> -o <dir> [--force] [--advisory] [--packet-dir <label>] [--lean]
-                                     strict by default; --advisory permits unwaived warnings with an advisory banner
+  vld plan <profile.json> [--explain] [--json] [--strict]
+                                     show selection, risk/regime hints and domain-noun confidence; --strict refuses unwaived risks and TODO ideas
+  vld compile <profile.json> -o <dir> [--force] [--strict] [--packet-dir <label>] [--lean]
                                      --packet-dir overrides the directory name embedded in generated commands
                                      --lean emits AGENTS.md and spec.json only, for a token-budgeted reader
+                                     render the specification packet
   vld ci init [--project <dir>] [--packet <dir>] [--node <version>] [--force]
                                      write the required pull-request check that runs the packet's enforcement
-  vld verify <packet-dir> [--repo <path>] [--run] [--report <file>] [--require-report] [--mutation] [--strict] [--require-assertions] [--json]
-                                     verify packet, AST non-tautological assertions, and executed test/mutation proof
+  vld verify <packet-dir> [--repo <path>] [--strict] [--require-assertions] [--json]
+                                     check a packet, optionally against code; --require-assertions rejects hollow anchored tests
   vld change <packet-dir> <change.json> -o <dir> [--apply] [--force] [--json] [--repo <dir>]
                                      render a delta spec for a brownfield change
   vld change verify <change-dir> [--project <dir>]
@@ -53,7 +49,6 @@ Usage
                                      install or inspect generated Codex, Claude Code or Copilot handoffs
   vld workflow list|lint|run|status|complete <id> [step] [--project <dir>]
                                      typed resumable workflows; `run` previews unless --execute is supplied
-  vld mission plan <packet-dir> [-o <definition.json>] [--mission-id <id>] [--title <t>] [--offline] [--provider <id> --model <id>] [--cassette <dir> --cassette-mode <m>] [--max-turns <n>] [--max-chars <n>] [--json]
   vld mission init <definition.json> --packet <dir> [--target HEAD] [--project <dir>] [-o <file>]
   vld mission validate|status <mission.json> [--project <dir>] [--json]
                                      freeze a verified packet and Git target into versioned work packages; no agent is run
@@ -72,15 +67,14 @@ Usage
   vld runtime delivery submit <mission.json> <package> --policy <delivery-policy.json> --lease-token <token> --sha <commit> [--adapter-run <id>]
   vld runtime delivery verify <mission.json> <package> --policy <delivery-policy.json> [--project <dir>] [--json]
   vld runtime delivery approve <mission.json> <package> --policy <delivery-policy.json> --candidate <id> --actor reviewer:<id> --reason <text>
-  vld runtime delivery review <mission.json> <package> --policy <delivery-policy.json> --candidate <id> --actor reviewer:<id> [--rules | --report <review.json> --reviewer-model <provider:model>]
   vld runtime delivery queue <mission.json> <package> --policy <delivery-policy.json> --candidate <id> --actor release-approver:<id>
   vld runtime delivery status <mission.json> [--project <dir>] [--json]
                                      frozen candidate/packet verification, independent review and a local queue; no merge, push or forge access
   vld runtime forge plan-export <mission.json> <package> --candidate <id> --actor release-approver:<id> --repository <owner/repo> --head-ref <branch> [--base-ref <branch>] [--checks <name,...>] [--title <text>] [--out <file>] [--dry-run] [--json]
                                      derive a durable, offline GitHub v1 plan; never reads credentials, invokes gh, pushes, changes a PR, or requests merge
-  vld runtime forge execute <mission.json> <package> --candidate <id> --actor release-approver:<id> --repository <owner/repo> --head-ref <branch> [--action publish|inspect|merge] [--pr <n>] [--ready] [--allow-merge] [--checks <a,b>] [--token-env GITHUB_TOKEN] [--api-url <url>]   (publish creates a draft PR unless --ready)
+  vld runtime forge execute <mission.json> <package> --candidate <id> --actor release-approver:<id> --repository <owner/repo> --head-ref <branch> [--action publish|inspect|merge] [--pr <n>] [--allow-merge] [--token-env GITHUB_TOKEN]
                                      opt-in governed GitHub v1 delivery using an explicit memory-only token; records hash-chained receipt
-  vld review prepare|run|verify|record [--packet <dir>] [--project <dir>] [--report <review.json>] [--base-ref <ref>] [--head-ref <ref>] [--json]
+  vld review prepare|verify|record [--packet <dir>] [--project <dir>] [--report <review.json>] [--base-ref <ref>] [--head-ref <ref>] [--json]
                                      context-isolated six-category spec review and high-rigor human escalation
   vld drift check|init-workflow|init-oracles [--packet <dir>] [--project <dir>] [--base-ref <ref>] [--record] [--force] [--json]
                                      continuous specification-to-code drift checks, CI workflow, and semantic oracles
@@ -98,7 +92,7 @@ Usage
                                      rebase a mission onto an updated target commit and/or recompiled packet without dropping coverage
   vld sandbox probe|conformance [--backend <auto|oci|bwrap|linux-ns|darwin-seatbelt|node-permission>] [--json]
                                      inspect host sandbox backends or execute the 8 live confinement probes (ADR 0011)
-  vld build [--profile <file>] [--packet <dir>] [--mission <file>] [--mission-overrides <file>] [--adapter <sandboxed-cli|sandboxed-acp|sandboxed-agent|fake>] [--executable <path>] [--arg <value>] [--backend <id>] [--max-repairs <0-5>] [--gates] [--require-os] [--dry-run] [--project <dir>] [--model <provider:model>] [--cassette <dir>] [--cassette-mode <replay|record|auto|off>] [--test-cmd <json>] [--json]
+  vld build [--profile <file>] [--packet <dir>] [--mission <file>] [--adapter <sandboxed-cli|sandboxed-acp|fake>] [--executable <path>] [--arg <value>] [--backend <id>] [--max-repairs <0-5>] [--gates] [--require-os] [--dry-run] [--project <dir>] [--json]
                                      compile/verify spec, partition mission DAG, run sandboxed packages with bounded repair and emit build-report.json
   vld mcp                            run the MCP server over stdio
   vld index [--check]                rebuild primitives/index.json

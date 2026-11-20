@@ -96,10 +96,6 @@ export function renderPacket(plan, outDir, { packetDir, lean = false } = {}) {
     files.set('AGENTS.md', agentsMd(emitted, d));
   }
 
-  if (!lean && emitted.ruleLint) {
-    files.set('rule-lint.json', `${JSON.stringify(emitted.ruleLint, null, 2)}\n`);
-  }
-
   const checker = path.join(TEMPLATES, 'spec-check.mjs');
   if (existsSync(checker)) {
     files.set('spec-check.mjs', readFileSync(checker, 'utf8'));

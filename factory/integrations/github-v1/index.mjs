@@ -16,19 +16,6 @@ export { assertGitHubPullRequestPlan, createGitHubPullRequestPlan } from '../../
 const SHA = /^[a-f0-9]{40}$/;
 const API = 'https://api.github.com';
 
-/** Loopback endpoints (local stubs/fixtures) cannot exfiltrate the token, so the
- * adapter permits them alongside the public API while still rejecting any other
- * origin. Roadmap P4.1 runs `forge execute` against a local bare remote + stub. */
-function loopbackOrigin(value) {
-  try {
-    const url = new URL(String(value));
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
-    return ['127.0.0.1', 'localhost', '::1'].includes(url.hostname) ? url.origin : null;
-  } catch {
-    return null;
-  }
-}
-
 function object(value) { return Boolean(value) && typeof value === 'object' && !Array.isArray(value); }
 function safeLine(value, maximum = 240) { return typeof value === 'string' && value.trim().length > 0 && value.length <= maximum && !/[\r\n\0]/.test(value); }
 function safeNumber(value) { if (!Number.isSafeInteger(value) || value < 1) throw extensionError('GitHub pull request number is invalid', 'INVALID_GITHUB_PULL_REQUEST'); return value; }
@@ -46,9 +33,7 @@ function checkedPlan(plan) { return assertGitHubPullRequestPlan(plan); }
 export function createGitHubV1Client({ token, fetchImpl = globalThis.fetch, apiUrl = API, timeoutMs = 15_000 } = {}) {
   if (typeof token !== 'string' || token.length < 8 || token.length > 8_192 || /[\r\n\0]/.test(token)) throw extensionError('GitHub adapter needs an explicit in-memory token', 'GITHUB_TOKEN_REQUIRED');
   if (typeof fetchImpl !== 'function') throw extensionError('GitHub adapter fetch implementation is invalid', 'INVALID_GITHUB_CLIENT');
-  const localOrigin = loopbackOrigin(apiUrl);
-  if (apiUrl !== API && !localOrigin) throw extensionError('GitHub adapter only permits the public GitHub REST API endpoint or a loopback development endpoint', 'INVALID_GITHUB_ENDPOINT');
-  const apiOrigin = apiUrl === API ? API : localOrigin;
+  if (apiUrl !== API) throw extensionError('GitHub adapter only permits the public GitHub REST API endpoint', 'INVALID_GITHUB_ENDPOINT');
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 60_000) throw extensionError('GitHub adapter timeout must be 100ms to 60s', 'INVALID_GITHUB_CLIENT');
   async function requestPage(method, pathname, body = null) {
     // Pagination links are accepted only when they remain on the public GitHub
@@ -56,7 +41,7 @@ export function createGitHubV1Client({ token, fetchImpl = globalThis.fetch, apiU
     if (typeof pathname !== 'string' || !pathname.startsWith('/')) throw extensionError('GitHub request path is invalid', 'GITHUB_RESPONSE_INVALID');
     const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), timeoutMs); let response;
     try {
-      response = await fetchImpl(`${apiOrigin}${pathname}`, {
+      response = await fetchImpl(`${API}${pathname}`, {
         method,
         headers: { accept: 'application/vnd.github+json', authorization: `Bearer ${token}`, 'user-agent': 'vld-github-v1', ...(body ? { 'content-type': 'application/json' } : {}) },
         ...(body ? { body: JSON.stringify(body) } : {}),
@@ -77,7 +62,7 @@ export function createGitHubV1Client({ token, fetchImpl = globalThis.fetch, apiU
     if (nextMatch) {
       try {
         const url = new URL(nextMatch[1]);
-        if (url.origin !== apiOrigin || !url.pathname.startsWith('/')) throw new Error('foreign link');
+        if (url.origin !== API || !url.pathname.startsWith('/')) throw new Error('foreign link');
         next = `${url.pathname}${url.search}`;
       } catch { throw extensionError('GitHub pagination link is invalid', 'GITHUB_RESPONSE_INVALID'); }
     }
@@ -92,15 +77,7 @@ export async function publishGitHubPullRequest({ client, plan } = {}) {
   checkedPlan(plan);
   const expected = { headRef: plan.headRef, headSha: plan.headSha, baseRef: plan.baseRef };
   const resource = `/repos/${plan.repository}/pulls${plan.existingPullNumber ? `/${safeNumber(plan.existingPullNumber)}` : ''}`;
-  const raw = await client.request(
-    plan.existingPullNumber ? 'PATCH' : 'POST',
-    resource,
-    plan.existingPullNumber
-      ? { title: plan.title, body: plan.body, base: plan.baseRef }
-      // Roadmap 4.2: governed publishes are draft PRs unless the reviewed plan
-      // explicitly says ready (draft === false).
-      : { title: plan.title, body: plan.body, head: plan.headRef, base: plan.baseRef, draft: plan.draft !== false }
-  );
+  const raw = await client.request(plan.existingPullNumber ? 'PATCH' : 'POST', resource, plan.existingPullNumber ? { title: plan.title, body: plan.body, base: plan.baseRef } : { title: plan.title, body: plan.body, head: plan.headRef, base: plan.baseRef });
   return { planDigest: plan.digest, pullRequest: validatePull(raw, expected) };
 }
 
@@ -220,7 +197,6 @@ export async function postGitHubEvidenceComment({ client, plan, pullNumber, summ
 export async function requestGitHubMerge({ client, plan, pullNumber } = {}) {
   if (plan?.allowMergeRequest !== true) throw extensionError('GitHub merge request is not enabled by the reviewed plan', 'GITHUB_MERGE_NOT_ALLOWED');
   const facts = await inspectGitHubPullRequest({ client, plan, pullNumber });
-  if (facts.pullRequest?.draft) throw extensionError('draft pull requests cannot be merged; republish the pull request as ready first', 'GITHUB_MERGE_DRAFT');
   if (!facts.requiredChecksPassed || (plan.requireGitHubApproval && !facts.githubApproval)) throw extensionError('GitHub remote checks/review facts do not satisfy the reviewed plan', 'GITHUB_MERGE_GATES_UNMET');
   const merged = await client.request('PUT', `/repos/${plan.repository}/pulls/${safeNumber(pullNumber)}/merge`, { sha: plan.headSha, merge_method: 'merge' });
   if (!object(merged) || merged.merged !== true || !SHA.test(String(merged.sha ?? ''))) throw extensionError('GitHub did not confirm an exact merge result; inspect the forge before retrying', 'GITHUB_MERGE_AMBIGUOUS');

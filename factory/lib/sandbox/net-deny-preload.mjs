@@ -1,14 +1,12 @@
 /**
- * Preload network-egress and symlink-escape guard for the portable
- * `node-permission` sandbox tier (ADR 0011, roadmap 2.2 & P3.2).
+ * Preload network-egress guard for the portable `node-permission` sandbox tier.
  *
  * Linux (`oci`, `bwrap`, `linux-ns`) and macOS (`darwin-seatbelt`) deny network
- * egress at the OS kernel layer. On hosts where only Node's permission model is
- * available (for example hosted Windows runners), Node >=22 confines filesystem
- * reads/writes, child processes and workers natively, and this preload denies
- * all outbound TCP, TLS, UDP, DNS and `fetch` calls — optionally permitting
- * connections ONLY to the single host-managed model broker socket or loopback
- * port captured at startup when brokered egress is explicitly configured.
+ * egress at the OS kernel layer. On hosts where only Node's `--permission` model
+ * is available (for example hosted Windows runners), Node >=22 confines
+ * filesystem reads/writes, child processes and workers natively, and this frozen
+ * preload denies outbound TCP, TLS, UDP, DNS and `fetch` calls before any socket
+ * leaves the process.
  */
 
 import dgram from 'node:dgram';
@@ -19,15 +17,8 @@ import https from 'node:https';
 import net from 'node:net';
 import path from 'node:path';
 import tls from 'node:tls';
-import { fileURLToPath } from 'node:url';
 
-// Capture immutable broker target once before any user script loads.
-const ALLOWED_BROKER_SOCKET = typeof process.env.VLD_MODEL_BROKER_SOCKET === 'string' && process.env.VLD_MODEL_BROKER_SOCKET.length > 0
-  ? path.resolve(process.env.VLD_MODEL_BROKER_SOCKET)
-  : null;
-const ALLOWED_BROKER_PORT = typeof process.env.VLD_MODEL_BROKER_PORT === 'string' && /^\d+$/.test(process.env.VLD_MODEL_BROKER_PORT)
-  ? Number.parseInt(process.env.VLD_MODEL_BROKER_PORT, 10)
-  : null;
+import { fileURLToPath } from 'node:url';
 
 const origLstatSync = fs.lstatSync.bind(fs);
 const origReadlinkSync = fs.readlinkSync.bind(fs);
@@ -38,16 +29,13 @@ const origReadFileAsync = fs.promises.readFile.bind(fs.promises);
 const origOpenAsync = fs.promises.open.bind(fs.promises);
 const origWriteFileAsync = fs.promises.writeFile.bind(fs.promises);
 
-const origSocketConnect = net.Socket.prototype.connect;
-const origNetConnect = net.connect.bind(net);
-const origNetCreateConnection = net.createConnection.bind(net);
-const origHttpRequest = http.request.bind(http);
-
 function assertNoSymlinkEscape(filePath, mode = 'fs.read') {
   if (typeof filePath !== 'string' && !Buffer.isBuffer(filePath) && !(filePath instanceof URL)) return;
   if (!process.permission?.has) return;
   try {
     const abs = path.resolve(filePath instanceof URL ? fileURLToPath(filePath) : String(filePath));
+    // Walk candidate and ancestors inside cwd so both leaf symlinks and Windows
+    // directory junctions pointing outside allowed roots are rejected.
     const chain = [];
     let cur = abs;
     while (true) {
@@ -107,100 +95,37 @@ function networkDeniedError(surface) {
   return error;
 }
 
-function isLoopbackHost(host) {
-  return !host || host === '127.0.0.1' || host === 'localhost' || host === '::1';
-}
-
-function isAllowedBrokerConnectArgs(args) {
-  const first = Array.isArray(args[0]) ? args[0][0] : args[0];
-  if (ALLOWED_BROKER_SOCKET) {
-    if (typeof first === 'string' && path.resolve(first) === ALLOWED_BROKER_SOCKET) return true;
-    if (first && typeof first === 'object') {
-      // Depending on the Node release, http internals hand createConnection the
-      // raw request options (socketPath + URL path) or a normalized one; accept
-      // either shape so only the exact broker socket ever passes.
-      if (typeof first.socketPath === 'string') {
-        // socketPath is decisive at the net layer (port/host are ignored for
-        // unix-socket dials); newer Node http internals may leave a default
-        // port in the normalized options, so never require !first.port here.
-        return path.resolve(first.socketPath) === ALLOWED_BROKER_SOCKET;
-      }
-      if (typeof first.path === 'string' && !first.port && path.resolve(first.path) === ALLOWED_BROKER_SOCKET) return true;
-    }
-  }
-  if (ALLOWED_BROKER_PORT !== null) {
-    if (typeof first === 'number' && first === ALLOWED_BROKER_PORT) {
-      return isLoopbackHost(typeof args[1] === 'string' ? args[1] : '127.0.0.1');
-    }
-    if (first && typeof first === 'object' && Number(first.port) === ALLOWED_BROKER_PORT) {
-      return isLoopbackHost(first.host ?? first.hostname ?? '127.0.0.1') && !first.socketPath;
-    }
-  }
-  return false;
-}
-
-function isAllowedBrokerHttpArgs(args) {
-  const first = args[0];
-  const opts = typeof first === 'string' || first instanceof URL ? (args[1] ?? {}) : (first ?? {});
-  if (ALLOWED_BROKER_SOCKET && opts && typeof opts.socketPath === 'string') {
-    return path.resolve(opts.socketPath) === ALLOWED_BROKER_SOCKET;
-  }
-  if (ALLOWED_BROKER_PORT !== null) {
-    if (typeof first === 'string' || first instanceof URL) {
-      try {
-        const u = new URL(String(first));
-        return u.protocol === 'http:' && u.hostname === '127.0.0.1' && Number(u.port) === ALLOWED_BROKER_PORT;
-      } catch {
-        return false;
-      }
-    }
-    if (opts && typeof opts === 'object') {
-      const host = opts.hostname ?? opts.host ?? '127.0.0.1';
-      return host === '127.0.0.1' && Number(opts.port) === ALLOWED_BROKER_PORT;
-    }
-  }
-  return false;
-}
-
 const denySync = (surface) => function deniedNetworkCall() {
   throw networkDeniedError(surface);
 };
-const denyAsync = (surface) => async function deniedAsyncNetworkCall() {
-  throw networkDeniedError(surface);
-};
 
-net.Socket.prototype.connect = function guardedSocketConnect(...args) {
-  if (isAllowedBrokerConnectArgs(args)) return origSocketConnect.apply(this, args);
-  throw networkDeniedError('net.Socket.connect');
-};
-net.connect = function guardedNetConnect(...args) {
-  if (isAllowedBrokerConnectArgs(args)) return origNetConnect(...args);
-  throw networkDeniedError('net.connect');
-};
-net.createConnection = function guardedCreateConnection(...args) {
-  if (isAllowedBrokerConnectArgs(args)) return origNetCreateConnection(...args);
-  throw networkDeniedError('net.createConnection');
-};
-http.request = function guardedHttpRequest(...args) {
-  if (isAllowedBrokerHttpArgs(args)) return origHttpRequest(...args);
-  throw networkDeniedError('http.request');
-};
-http.get = denySync('http.get');
+net.Socket.prototype.connect = denySync('net.Socket.connect');
+net.connect = denySync('net.connect');
+net.createConnection = denySync('net.createConnection');
 tls.connect = denySync('tls.connect');
+http.request = denySync('http.request');
+http.get = denySync('http.get');
 https.request = denySync('https.request');
 https.get = denySync('https.get');
-dgram.createSocket = denySync('dgram.createSocket');
+dgram.Socket.prototype.send = denySync('dgram.Socket.send');
+dgram.Socket.prototype.connect = denySync('dgram.Socket.connect');
 dns.lookup = denySync('dns.lookup');
 dns.resolve = denySync('dns.resolve');
-dns.resolve4 = denySync('dns.resolve4');
-dns.resolve6 = denySync('dns.resolve6');
 if (dns.promises) {
-  dns.promises.lookup = denyAsync('dns.promises.lookup');
-  dns.promises.resolve = denyAsync('dns.promises.resolve');
+  dns.promises.lookup = async () => { throw networkDeniedError('dns.promises.lookup'); };
+  dns.promises.resolve = async () => { throw networkDeniedError('dns.promises.resolve'); };
 }
 if (typeof globalThis.fetch === 'function') {
-  globalThis.fetch = denyAsync('fetch');
+  Object.defineProperty(globalThis, 'fetch', {
+    value: async () => { throw networkDeniedError('fetch'); },
+    writable: false,
+    configurable: false
+  });
 }
 if (typeof globalThis.WebSocket === 'function') {
-  globalThis.WebSocket = denySync('WebSocket');
+  Object.defineProperty(globalThis, 'WebSocket', {
+    value: function DeniedWebSocket() { throw networkDeniedError('WebSocket'); },
+    writable: false,
+    configurable: false
+  });
 }

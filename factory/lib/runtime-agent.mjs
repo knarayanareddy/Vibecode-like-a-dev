@@ -8,7 +8,6 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import path from 'node:path';
 import {
   agentPolicyDigest,
   assertAgentPolicy,
@@ -16,13 +15,14 @@ import {
   SANDBOXED_AGENT_ADAPTER_IDS
 } from './agent-policy.mjs';
 import { executeAgentAdapter } from './agent-adapters.mjs';
-import { harvestTranscripts } from './agent-transcript.mjs';
-import { appendEvidence } from './evidence.mjs';
 import { digest, extensionError } from './extension-utils.mjs';
-import { modelIdFromPolicy } from './review.mjs';
 import { readMission } from './missions.mjs';
 import { verifySandboxReceipt, workspaceTreeDigest } from './sandbox/receipt.mjs';
-import { recordRuntimeAgentReceipt, runtimeRunStops, runtimeStatus, transitionRuntimePackage } from './runtime.mjs';
+import {
+  recordRuntimeAgentReceipt,
+  runtimeStatus,
+  transitionRuntimePackage
+} from './runtime.mjs';
 import { runtimeWorkspaceAllocation } from './workspaces.mjs';
 
 function now() {
@@ -92,7 +92,7 @@ function sandboxSummary(sandboxReceipt) {
   };
 }
 
-function attemptReceipt({ id, policyDigest, contextDigest, workspaceDigest, execution, attempts, modelId = null }) {
+function attemptReceipt({ id, policyDigest, contextDigest, workspaceDigest, execution, attempts }) {
   const sbx = sandboxSummary(execution.sandboxReceipt);
   return {
     id,
@@ -100,10 +100,6 @@ function attemptReceipt({ id, policyDigest, contextDigest, workspaceDigest, exec
     policyDigest,
     contextDigest,
     workspaceDigest,
-    // Which model wrote the changes (provider:model from the policy's
-    // VLD_MODEL_SPEC). Recorded so an independent review must run on a
-    // different model (P3.5 no self-review).
-    ...(modelId ? { modelId } : {}),
     outcome: execution.outcome,
     attempts,
     startedAt: execution.startedAt,
@@ -117,22 +113,6 @@ function attemptReceipt({ id, policyDigest, contextDigest, workspaceDigest, exec
       // outcome label in the Runtime ledger.
       summary: receiptOutputSummary(execution.outcome)
     },
-    ...(execution.transcriptDigest
-      ? {
-          transcriptDigest: execution.transcriptDigest,
-          ...(execution.promptHash ? { promptHash: execution.promptHash } : {}),
-          ...(execution.usage
-            ? {
-                usage: {
-                  inputTokens: Number(execution.usage.inputTokens ?? 0),
-                  outputTokens: Number(execution.usage.outputTokens ?? 0),
-                  totalTokens: Number(execution.usage.totalTokens ?? 0),
-                  costUsd: Number(execution.usage.costUsd ?? 0)
-                }
-              }
-            : {})
-        }
-      : {}),
     ...(sbx ? { sandbox: sbx } : {})
   };
 }
@@ -196,7 +176,6 @@ export async function runRuntimeAgent({ missionFile, packageId, policyFile, leas
   const contextDigest = digest(context);
   const workspaceDigest = digest({ id: workspace.id, missionDigest: workspace.missionDigest, packageId: workspace.packageId, branch: workspace.branch, baseCommit: workspace.baseCommit });
   const agentRunId = `agent-run-${randomUUID()}`;
-  const missionPackage = readMission(missionFile, { projectDir }).mission.workPackages.find((p) => p.id === packageId) ?? null;
   const spec = {
     id: agentRunId,
     missionId: before.runtime.missionId,
@@ -204,7 +183,6 @@ export async function runRuntimeAgent({ missionFile, packageId, policyFile, leas
     packetDigest: context.packetDigest,
     contextDigest,
     requirementIds: [...workPackage.requirements].sort(),
-    resourceClaims: [...(missionPackage?.resourceClaims?.paths ?? [])],
     workspace: workspace.worktree
   };
 
@@ -221,59 +199,24 @@ export async function runRuntimeAgent({ missionFile, packageId, policyFile, leas
   let attempts = 0;
   const events = [];
   const startedAt = now();
-  // P3.6 stop watchdog: a run-stop recorded against this run (Studio pause or
-  // kill) aborts the adapter immediately for 'kill', or stops the retry loop at
-  // the next attempt boundary for 'pause'.
-  const stopController = new AbortController();
-  const forwardAbort = () => stopController.abort();
-  if (signal) {
-    if (signal.aborted) stopController.abort();
-    else signal.addEventListener('abort', forwardAbort, { once: true });
-  }
-  const liveRunId = workPackage.run.id;
-  let stopAction = null;
-  const checkStop = () => {
-    const stops = runtimeRunStops({ missionFile, projectDir, runId: liveRunId });
-    const latest = stops.at(-1);
-    if (!latest) return null;
-    stopAction = latest.action;
-    if (latest.action === 'kill') stopController.abort();
-    return latest.action;
-  };
-  checkStop();
-  const stopPoller = setInterval(checkStop, 50);
   try {
     do {
       attempts += 1;
       const result = await executeAgentAdapter({
         spec,
         policy,
-        signal: stopController.signal,
+        signal,
         onEvent: (event) => {
           // Events returned to the local caller are already schema-validated and
           // redacted by the adapter layer. Keep only bounded metadata in memory.
           if (events.length < 64) events.push(event);
           if (typeof onEvent === 'function') onEvent(event);
-          // A stop recorded mid-attempt (Studio pause/kill) is honoured at this
-          // step boundary as well as by the background poller.
-          if (stopAction === null) {
-            const action = checkStop();
-            if (action === 'kill') stopController.abort();
-          }
         }
       });
       execution = { ...result, adapter: policy.adapter };
-    } while (retryable(execution.outcome) && attempts <= policy.limits.retryBudget && !stopController.signal.aborted && stopAction !== 'pause');
+    } while (retryable(execution.outcome) && attempts <= policy.limits.retryBudget && !signal?.aborted);
   } catch (error) {
     execution = { ...safeFailureResult(error, startedAt), adapter: policy.adapter };
-  } finally {
-    clearInterval(stopPoller);
-    if (signal) signal.removeEventListener('abort', forwardAbort);
-  }
-  if (stopAction && execution && execution.outcome !== 'cancelled') {
-    // A recorded pause or kill owns the outcome: the run stopped because the
-    // reviewer/operator asked it to stop, not because the adapter failed.
-    execution = { ...execution, outcome: 'cancelled', signal: 'SIGTERM' };
   }
 
   const policyHash = agentPolicyDigest(policy);
@@ -292,43 +235,15 @@ export async function runRuntimeAgent({ missionFile, packageId, policyFile, leas
     }
   }
 
-  // Preserve tool transcripts as durable project evidence and leave the
-  // worktree deliverable-clean (resource-claim and candidate gates).
-  if (execution && execution.transcriptDigest) {
-    harvestTranscripts({
-      from: path.join(workspace.worktree, '.vld', 'agent-transcripts'),
-      to: path.join(projectDir, '.vld', 'agent-transcripts'),
-      runId: spec.id
-    });
-  }
-
   const receipt = attemptReceipt({
     id: agentRunId,
     policyDigest: policyHash,
     contextDigest,
     workspaceDigest,
     execution,
-    attempts,
-    modelId: modelIdFromPolicy(policy)
+    attempts
   });
   const recorded = recordRuntimeAgentReceipt({ missionFile, projectDir, packageId, runId: workPackage.run.id, agentRun: receipt });
-
-  // Tool-loop transcript digests are appended to the tamper-evident evidence
-  // chain so the exact tool sequence behind every change stays verifiable.
-  if (receipt.transcriptDigest) {
-    appendEvidence({
-      projectDir,
-      kind: 'agent-transcript',
-      actor: `agent:${receipt.id}`,
-      subject: packageId,
-      payload: {
-        runId: receipt.id,
-        packageId,
-        transcriptDigest: receipt.transcriptDigest,
-        ...(receipt.usage ?? {})
-      }
-    });
-  }
 
   let settled;
   if (receiptGateError) {

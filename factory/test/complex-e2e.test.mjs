@@ -52,7 +52,6 @@ const COMPLEX_PROFILE = {
   users: { scale: 'large' },
   traits: ['auth', 'admin', 'payments', 'realtime', 'search', 'upload', 'notifications', 'webhooks', 'offline', 'ai', 'i18n', 'persistence', 'background-jobs'],
   risks: { pii: true, payments: true, regulated: true, multiTenant: true, destructiveWrites: true, publicFacing: true, integrations: true },
-  regulation: ['hipaa', 'pci-dss', 'eu-ai-act'],
   constraints: { team: 8, weeks: 20, stack: 'typescript', mustUse: ['postgres', 'stripe'] },
   overlays: ['org-baseline', 'health-data', 'two-person-review']
 };
@@ -170,11 +169,6 @@ test('complex public information flow preserves profile, packet, mission, delive
   const verified = json(await cli(['runtime', 'delivery', 'verify', missionFile, 'payment-orchestrator', '--policy', 'delivery-policy.json', '--project', project, '--json']));
   assert.equal(verified.verification.outcome, 'passed');
   assert.equal(verified.verification.candidateId, submitted.candidate.id);
-  const reviewed = json(await cli(['runtime', 'delivery', 'review', missionFile, 'payment-orchestrator', '--policy', 'delivery-policy.json', '--candidate', submitted.candidate.id, '--actor', 'reviewer:reviewer-beta', '--project', project, '--json']));
-  assert.equal(reviewed.review.reviewerModelId, 'rules:diff-risk-v1');
-  assert.equal(reviewed.review.requiresHumanSignoff, true, 'care-payments packet escalates to human sign-off');
-  assert.equal(reviewed.review.verdict, 'escalated-to-human');
-  assert.equal(reviewed.review.blockingFindings, 0);
   const approved = json(await cli(['runtime', 'delivery', 'approve', missionFile, 'payment-orchestrator', '--policy', 'delivery-policy.json', '--candidate', submitted.candidate.id, '--actor', 'reviewer:reviewer-beta', '--reason', 'Independent review confirms the frozen candidate and complex packet evidence.', '--project', project, '--json']));
   assert.equal(approved.approval.candidateId, submitted.candidate.id);
   const queued = json(await cli(['runtime', 'delivery', 'queue', missionFile, 'payment-orchestrator', '--policy', 'delivery-policy.json', '--candidate', submitted.candidate.id, '--actor', 'release-approver:release-gamma', '--project', project, '--json']));
@@ -185,7 +179,7 @@ test('complex public information flow preserves profile, packet, mission, delive
   const forgeArgs = ['runtime', 'forge', 'plan-export', missionFile, 'payment-orchestrator', '--candidate', submitted.candidate.id, '--actor', 'release-approver:release-gamma', '--repository', 'example-org/care-payments', '--head-ref', 'vld/care-delivery/payment-orchestrator', '--base-ref', 'main', '--checks', 'packet-check,lint', '--project', project, '--json'];
   const dry = json(await cli([...forgeArgs, '--dry-run']));
   assert.equal(dry.dryRun, true);
-  assert.equal(json(await cli(['runtime', 'delivery', 'status', missionFile, '--project', project, '--json'])).delivery.length, 5);
+  assert.equal(json(await cli(['runtime', 'delivery', 'status', missionFile, '--project', project, '--json'])).delivery.length, 4);
   const forge = json(await cli([...forgeArgs, '--out', 'docs/review/care-payments-plan.json']));
   assert.equal(forge.plan.allowMergeRequest, false);
   assert.equal(forge.plan.headSha, candidateSha);
@@ -199,7 +193,7 @@ test('complex public information flow preserves profile, packet, mission, delive
   assert.deepEqual(JSON.parse(readFileSync(path.join(project, forge.output.file), 'utf8')), forge.plan);
 
   const delivery = json(await cli(['runtime', 'delivery', 'status', missionFile, '--project', project, '--json']));
-  assert.deepEqual(delivery.delivery.map((entry) => entry.candidate ? 'candidate' : entry.verification ? 'verification' : entry.review ? 'review' : entry.approval ? 'approval' : entry.queue ? 'queue' : 'forge-plan'), ['candidate', 'verification', 'review', 'approval', 'queue', 'forge-plan']);
+  assert.deepEqual(delivery.delivery.map((entry) => entry.candidate ? 'candidate' : entry.verification ? 'verification' : entry.approval ? 'approval' : entry.queue ? 'queue' : 'forge-plan'), ['candidate', 'verification', 'approval', 'queue', 'forge-plan']);
   assert.equal(delivery.delivery.at(-1).forge.plan.digest, forge.plan.digest);
   const publicText = JSON.stringify(delivery);
   assert.equal(publicText.includes(allocated.leaseToken), false, 'status does not leak the lease secret');

@@ -240,46 +240,6 @@
       "mechanism": "`spec-check.mjs`, shipped with the packet. This gate is the one check that needs no project code to be honest.",
       "phase": 3
     },
-    "G2-MUTATION": {
-      "check": {
-        "kind": "mutation",
-        "glob": [
-          "enforcement/mutation.config.json",
-          "mutation.config.*",
-          "**/mutation.config.*",
-          "stryker.config.*",
-          "**/stryker.config.*",
-          "stryker.conf.*",
-          "**/stryker.conf.*",
-          ".mutmut*",
-          "**/.mutmut*",
-          "cosmic-ray*.toml",
-          ".gremlins.yml",
-          ".gremlins.yaml",
-          ".cargo/mutants.toml",
-          "mutants.toml",
-          "pitest*",
-          "infection.json*"
-        ],
-        "pythonGlob": [
-          "pyproject.toml",
-          "**/pyproject.toml",
-          "setup.cfg"
-        ],
-        "pythonPatterns": [
-          "mutmut|cosmic.ray"
-        ]
-      },
-      "files": [
-        {
-          "template": "mutation.config.json",
-          "path": "enforcement/mutation.config.json"
-        }
-      ],
-      "how": "Mutation testing runs against domain modules and kills at least 60% of mutants (or records an explicit dated waiver).",
-      "mechanism": "`vld verify --run --mutation` or Stryker / mutmut / gremlins / cargo-mutants report enforcing a 60% kill floor.",
-      "phase": 3
-    },
     "G3-MUTATION": {
       "check": {
         "kind": "semantic-oracles",

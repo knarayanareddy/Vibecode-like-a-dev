@@ -39,8 +39,6 @@ import { artifactStatus, initArtifact, listArtifacts, validateArtifact, verifyAr
 import { agentStatus, installAgent, listAdapters } from './lib/agents.mjs';
 import { applyBundle, getBundle, listBundles } from './lib/bundles.mjs';
 import { CHANGE_TEMPLATE, applyChange, archiveChange, emitChange, planChange, verifyChange } from './lib/change.mjs';
-import { runPlannerAgent } from './agents/planner.mjs';
-import { runReviewerAgent } from './agents/reviewer.mjs';
 import { emitPacket } from './lib/emit/index.mjs';
 import { exportPacket } from './lib/exports.mjs';
 import { buildIndex, loadIndex, writeIndex } from './lib/indexer.mjs';
@@ -57,18 +55,14 @@ import { detectSpecDrift, initSemanticOracles, scaffoldDriftWorkflow } from './l
 import { runDoctor } from './lib/doctor.mjs';
 import { migrateProject } from './lib/migrate.mjs';
 import { runRuntimeAgent, runtimeAgentStatus } from './lib/runtime-agent.mjs';
-import { approveRuntimeDeliveryCandidate, queueRuntimeDeliveryCandidate, recordRuntimeDeliveryReview, runtimeDeliveryStatus, submitRuntimeDeliveryCandidate, verifyRuntimeDeliveryCandidateAsync } from './lib/runtime-delivery.mjs';
+import { approveRuntimeDeliveryCandidate, queueRuntimeDeliveryCandidate, runtimeDeliveryStatus, submitRuntimeDeliveryCandidate, verifyRuntimeDeliveryCandidateAsync } from './lib/runtime-delivery.mjs';
 import { runBuild } from './lib/build.mjs';
 import { detectSandboxBackends, runSandboxConformance } from './lib/sandbox/index.mjs';
 import { createRuntimeServer, listenRuntimeServer } from './lib/runtime-server.mjs';
 import { createRuntimeClient } from './lib/runtime-client.mjs';
 import { buildPlan, loadPolicy } from './lib/planner.mjs';
-import { defaultedProductionTierFields, injectionFindings, loadProfile, KINDS, STAGES, SCALES, TRAITS, RISK_FLAGS, REGULATIONS } from './lib/profile.mjs';
-import { acceptIntakeDraft, runIntake } from './lib/intake.mjs';
-import { parseMutationReport, runMutationGate } from './lib/mutation-runner.mjs';
-import { runRepositoryTests } from './lib/test-runner.mjs';
-import { formatRuleLintFindings } from './lib/rule-lint.mjs';
-import { scanAllIdeaCues, scanRiskHints } from './lib/risk-hints.mjs';
+import { injectionFindings, loadProfile, KINDS, STAGES, SCALES, TRAITS, RISK_FLAGS, REGULATIONS } from './lib/profile.mjs';
+import { scanRiskHints } from './lib/risk-hints.mjs';
 import { completeWorkflowStep, getWorkflow, listWorkflows, runWorkflow, workflowStatus } from './lib/workflows.mjs';
 import { verifyPacket } from './lib/verify.mjs';
 import { writeAbsoluteManagedFileAtomic } from './lib/extension-utils.mjs';
@@ -88,26 +82,14 @@ const option = (name, fallback) => {
   const index = rest.indexOf(name);
   return index === -1 || index === rest.length - 1 ? fallback : rest[index + 1];
 };
-const optionAll = (name) => {
-  const out = [];
-  for (let i = 0; i < rest.length - 1; i += 1) {
-    if (rest[i] === name) out.push(rest[i + 1]);
-  }
-  return out;
-};
-const REPEATABLE_FLAGS = new Set(['--answer', '--waive', '--arg']);
 const VALUE_FLAGS = new Set([
   '-o', '--out', '--repo', '--name', '--idea', '--profile', '--packet',
   '--project', '--modules', '--evidence', '--file', '--ref', '--title', '--from-store', '--types', '--acknowledge', '--target', '--packet-dir',
   '--assignee', '--lease-ms', '--run', '--lease-token', '--to', '--actor', '--expected-version', '--port', '--token', '--policy', '--sha', '--adapter-run', '--candidate', '--reason', '--repository', '--head-ref', '--base-ref', '--checks', '--id', '--runtime-url', '--runtime-token', '--request-id', '--after', '--limit', '--max-bytes', '--node', '--owner', '--expires',
-  '--backend', '--adapter', '--executable', '--arg', '--mission', '--max-repairs', '--assign-added', '--test-cmd',
-  '--action', '--pr', '--token-env', '--author', '--report', '--cron', '--kind', '--subject', '--format', '--from',
-  '--provider', '--model', '--base-url', '--cassette', '--cassette-mode', '--answer', '--waive',
-  '--budget-usd', '--max-tokens', '--concurrency', '--test-cmd', '--mutation-report', '--diff-base', '--reviewer-provider', '--reviewer-model', '--reviewer-id', '--requirements', '--api-url',
-  '--mission-id', '--max-turns', '--max-chars'
+  '--backend', '--adapter', '--executable', '--arg', '--mission', '--max-repairs', '--assign-added',
+  '--action', '--pr', '--token-env', '--author', '--report', '--cron', '--kind', '--subject', '--format', '--from'
 ]);
-const isValueFlag = (token) => VALUE_FLAGS.has(token) && !(command === 'verify' && token === '--run');
-const positional = rest.filter((item, index) => !item.startsWith('-') && !(index > 0 && isValueFlag(rest[index - 1])));
+const positional = rest.filter((item, index) => !item.startsWith('-') && !(index > 0 && VALUE_FLAGS.has(rest[index - 1])));
 
 const USAGE = `vibecode like a dev — from one paragraph to a spec an agent can execute
 
@@ -119,20 +101,16 @@ Usage
                                      safely upgrade legacy profiles, runtime policies and packets to current VLD
   vld adopt <repo-or-url> [-o <file>] [--name <slug>] [--idea <text>] [--force] [--json]
                                      infer a profile from a local path or Git repository URL
-  vld intake [idea] [--file <path>] [--offline] [--provider <id>] [--model <id>] [-o profile.draft.json]
-                                     extract an evidence-grounded draft profile and <=7 questions from prose or stdin
-  vld intake accept [profile.draft.json] [-o profile.json] [--answer k=v] [--waive flag:reason:date]
-                                     promote a reviewed draft to a strict-ready profile.json with full provenance
-  vld plan <profile.json> [--explain] [--json] [--advisory]
-                                     strict by default: blocks unwaived risks, rule conflicts & defaulted production fields (--advisory downgrades to warnings)
-  vld compile <profile.json> -o <dir> [--force] [--advisory] [--packet-dir <label>] [--lean]
-                                     strict by default; --advisory permits unwaived warnings with an advisory banner
+  vld plan <profile.json> [--explain] [--json] [--strict]
+                                     show selection, risk/regime hints and domain-noun confidence; --strict refuses unwaived risks and TODO ideas
+  vld compile <profile.json> -o <dir> [--force] [--strict] [--packet-dir <label>] [--lean]
                                      --packet-dir overrides the directory name embedded in generated commands
                                      --lean emits AGENTS.md and spec.json only, for a token-budgeted reader
+                                     render the specification packet
   vld ci init [--project <dir>] [--packet <dir>] [--node <version>] [--force]
                                      write the required pull-request check that runs the packet's enforcement
-  vld verify <packet-dir> [--repo <path>] [--run] [--report <file>] [--require-report] [--mutation] [--strict] [--require-assertions] [--json]
-                                     verify packet, AST non-tautological assertions, and executed test/mutation proof
+  vld verify <packet-dir> [--repo <path>] [--strict] [--require-assertions] [--json]
+                                     check a packet, optionally against code; --require-assertions rejects hollow anchored tests
   vld change <packet-dir> <change.json> -o <dir> [--apply] [--force] [--json] [--repo <dir>]
                                      render a delta spec for a brownfield change
   vld change verify <change-dir> [--project <dir>]
@@ -159,7 +137,6 @@ Usage
                                      install or inspect generated Codex, Claude Code or Copilot handoffs
   vld workflow list|lint|run|status|complete <id> [step] [--project <dir>]
                                      typed resumable workflows; \`run\` previews unless --execute is supplied
-  vld mission plan <packet-dir> [-o <definition.json>] [--mission-id <id>] [--title <t>] [--offline] [--provider <id> --model <id>] [--cassette <dir> --cassette-mode <m>] [--max-turns <n>] [--max-chars <n>] [--json]
   vld mission init <definition.json> --packet <dir> [--target HEAD] [--project <dir>] [-o <file>]
   vld mission validate|status <mission.json> [--project <dir>] [--json]
                                      freeze a verified packet and Git target into versioned work packages; no agent is run
@@ -178,15 +155,14 @@ Usage
   vld runtime delivery submit <mission.json> <package> --policy <delivery-policy.json> --lease-token <token> --sha <commit> [--adapter-run <id>]
   vld runtime delivery verify <mission.json> <package> --policy <delivery-policy.json> [--project <dir>] [--json]
   vld runtime delivery approve <mission.json> <package> --policy <delivery-policy.json> --candidate <id> --actor reviewer:<id> --reason <text>
-  vld runtime delivery review <mission.json> <package> --policy <delivery-policy.json> --candidate <id> --actor reviewer:<id> [--rules | --report <review.json> --reviewer-model <provider:model>]
   vld runtime delivery queue <mission.json> <package> --policy <delivery-policy.json> --candidate <id> --actor release-approver:<id>
   vld runtime delivery status <mission.json> [--project <dir>] [--json]
                                      frozen candidate/packet verification, independent review and a local queue; no merge, push or forge access
   vld runtime forge plan-export <mission.json> <package> --candidate <id> --actor release-approver:<id> --repository <owner/repo> --head-ref <branch> [--base-ref <branch>] [--checks <name,...>] [--title <text>] [--out <file>] [--dry-run] [--json]
                                      derive a durable, offline GitHub v1 plan; never reads credentials, invokes gh, pushes, changes a PR, or requests merge
-  vld runtime forge execute <mission.json> <package> --candidate <id> --actor release-approver:<id> --repository <owner/repo> --head-ref <branch> [--action publish|inspect|merge] [--pr <n>] [--ready] [--allow-merge] [--checks <a,b>] [--token-env GITHUB_TOKEN] [--api-url <url>]   (publish creates a draft PR unless --ready)
+  vld runtime forge execute <mission.json> <package> --candidate <id> --actor release-approver:<id> --repository <owner/repo> --head-ref <branch> [--action publish|inspect|merge] [--pr <n>] [--allow-merge] [--token-env GITHUB_TOKEN]
                                      opt-in governed GitHub v1 delivery using an explicit memory-only token; records hash-chained receipt
-  vld review prepare|run|verify|record [--packet <dir>] [--project <dir>] [--report <review.json>] [--base-ref <ref>] [--head-ref <ref>] [--json]
+  vld review prepare|verify|record [--packet <dir>] [--project <dir>] [--report <review.json>] [--base-ref <ref>] [--head-ref <ref>] [--json]
                                      context-isolated six-category spec review and high-rigor human escalation
   vld drift check|init-workflow|init-oracles [--packet <dir>] [--project <dir>] [--base-ref <ref>] [--record] [--force] [--json]
                                      continuous specification-to-code drift checks, CI workflow, and semantic oracles
@@ -204,7 +180,7 @@ Usage
                                      rebase a mission onto an updated target commit and/or recompiled packet without dropping coverage
   vld sandbox probe|conformance [--backend <auto|oci|bwrap|linux-ns|darwin-seatbelt|node-permission>] [--json]
                                      inspect host sandbox backends or execute the 8 live confinement probes (ADR 0011)
-  vld build [--profile <file>] [--packet <dir>] [--mission <file>] [--mission-overrides <file>] [--adapter <sandboxed-cli|sandboxed-acp|sandboxed-agent|fake>] [--executable <path>] [--arg <value>] [--backend <id>] [--max-repairs <0-5>] [--gates] [--require-os] [--dry-run] [--project <dir>] [--model <provider:model>] [--cassette <dir>] [--cassette-mode <replay|record|auto|off>] [--test-cmd <json>] [--json]
+  vld build [--profile <file>] [--packet <dir>] [--mission <file>] [--adapter <sandboxed-cli|sandboxed-acp|fake>] [--executable <path>] [--arg <value>] [--backend <id>] [--max-repairs <0-5>] [--gates] [--require-os] [--dry-run] [--project <dir>] [--json]
                                      compile/verify spec, partition mission DAG, run sandboxed packages with bounded repair and emit build-report.json
   vld mcp                            run the MCP server over stdio
   vld index [--check]                rebuild primitives/index.json
@@ -267,13 +243,7 @@ function fail(message, error = null) {
 // A misspelled option used to be silently ignored because every command read the
 // shared argv array opportunistically. Reject it before a command can perform a
 // side effect; command-specific arity is checked by the command handlers below.
-const BOOLEAN_FLAGS = new Set([
-  '--apply', '--check', '--debug', '--discard', '--drop-removed', '--dry-run', '--execute', '--explain',
-  '--force', '--gates', '--interactive', '--json', '--require-assertions', '--require-os', '--reset',
-  '--strict', '--advisory', '--offline', '--accept-suggested', '--require-report', '--static-only', '--mutation',
-  '--attest', '--draft', '--to-profile-rules', '--lean', '--allow-merge', '--no-comment', '--record',
-  '--run', '--help', '-h'
-]);
+const BOOLEAN_FLAGS = new Set(['--apply', '--check', '--debug', '--discard', '--drop-removed', '--dry-run', '--execute', '--explain', '--force', '--gates', '--interactive', '--json', '--require-assertions', '--require-os', '--reset', '--strict', '--to-profile-rules', '--lean', '--allow-merge', '--no-comment', '--record', '--help', '-h']);
 function validateCliTokens() {
   const seen = new Set();
   const canonical = (flag) => flag === '-o' ? '--out' : flag;
@@ -281,9 +251,9 @@ function validateCliTokens() {
     const token = rest[index];
     if (!token.startsWith('-')) continue;
     const flag = canonical(token);
-    if (seen.has(flag) && !REPEATABLE_FLAGS.has(flag)) fail(`option supplied more than once: ${flag}`);
+    if (seen.has(flag)) fail(`option supplied more than once: ${flag}`);
     seen.add(flag);
-    if (isValueFlag(token)) {
+    if (VALUE_FLAGS.has(token)) {
       const value = rest[index + 1];
       // Mission init gives --target a more precise public diagnostic ("ref value").
       // Preserve that command contract while every other value flag fails here.
@@ -307,17 +277,12 @@ function requirePositionals(usage, { min = 0, max = min } = {}) {
 // subcommand validation while this parser rejects every unknown token globally.
 const TOP_LEVEL_FLAGS = {
   init: new Set(['--interactive', '--force']),
-  intake: new Set([
-    '-o', '--out', '--file', '--name', '--project', '--report', '--offline',
-    '--provider', '--model', '--token-env', '--base-url', '--cassette', '--cassette-mode',
-    '--answer', '--waive', '--accept-suggested', '--budget-usd', '--max-tokens', '--force', '--json'
-  ]),
   doctor: new Set(['--project', '--profile', '--packet', '--json']),
   migrate: new Set(['--project', '--profile', '--packet', '--dry-run', '--json']),
   adopt: new Set(['-o', '--out', '--name', '--idea', '--force', '--json']),
-  plan: new Set(['--explain', '--json', '--strict', '--advisory']),
-  compile: new Set(['-o', '--out', '--force', '--strict', '--advisory', '--packet-dir', '--lean']),
-  verify: new Set(['--repo', '--strict', '--require-assertions', '--run', '--report', '--require-report', '--test-cmd', '--mutation', '--mutation-report', '--backend', '--static-only', '--gates', '--json']),
+  plan: new Set(['--explain', '--json', '--strict']),
+  compile: new Set(['-o', '--out', '--force', '--strict', '--packet-dir', '--lean']),
+  verify: new Set(['--repo', '--strict', '--require-assertions', '--json']),
   ci: new Set(['--project', '--packet', '--node', '--force']),
   index: new Set(['--check']),
   mcp: new Set()
@@ -484,24 +449,6 @@ function printPlan(plan) {
           `${plan.vocabulary.candidates.length ? ` · candidates=[${plan.vocabulary.candidates.join(', ')}]` : ''}`
       );
     }
-    const rl = plan.explain.ruleLint ?? plan.ruleLint;
-    if (rl) {
-      const unresolved = [...(rl.contradictions ?? []), ...(rl.infeasible ?? [])];
-      lines.push(`  rule lint (${rl.rulesChecked} rule(s) checked · ${unresolved.length} blocking · ${(rl.duplicates ?? []).length} duplicate/subsumed):`);
-      if (unresolved.length === 0 && (rl.resolvedConflicts ?? []).length === 0 && (rl.duplicates ?? []).length === 0) {
-        lines.push('    (clean)');
-      }
-      for (const c of unresolved) lines.push(`    ✗ ${c.reason}`);
-      for (const r of rl.resolvedConflicts ?? []) lines.push(`    ✓ ${r.label} resolved -> winner ${r.winner} (${r.resolutionReason})`);
-      for (const d of rl.duplicates ?? []) lines.push(`    ! ${d.label}: ${d.reason}`);
-    }
-    const prov = plan.explain.provenance ?? plan.provenance;
-    if (prov) {
-      lines.push('  field provenance (user | inferred | default | waived):');
-      for (const [field, src] of Object.entries(prov)) {
-        lines.push(`    ${field.padEnd(22)} ${src}`);
-      }
-    }
   }
 
   lines.push('');
@@ -559,33 +506,11 @@ async function runInit(dir) {
       template.risks.pii = /^y/i.test(piiAns);
       const payAns = await ask('Moves money or processes payments? (y/n)', 'n');
       template.risks.payments = /^y/i.test(payAns);
-      // Roadmap P1.2: ask targeted inline risk & regime questions for every cue detected in the idea.
-      const detected = scanAllIdeaCues(template.idea);
-      template.provenance = {
-        kind: 'user',
-        stage: 'user',
-        'users.scale': 'user',
-        traits: 'user',
-        'constraints.stack': 'user',
-        'risks.pii': 'user',
-        'risks.payments': 'user'
-      };
-      for (const hit of detected.risks) {
-        if (template.risks[hit.flag] === true) continue;
-        const ans = await ask(`Idea mentions "${hit.phrase}" — enable risks.${hit.flag}=true? (y/n)`, 'y');
-        template.risks[hit.flag] = /^y/i.test(ans);
-        template.provenance[`risks.${hit.flag}`] = 'user';
-      }
-      for (const flag of RISK_FLAGS) {
-        if (!template.provenance[`risks.${flag}`]) template.provenance[`risks.${flag}`] = 'user';
-      }
-      const suggestedRegs = detected.regimes.map((r) => r.regime).join(',');
-      const regAns = await ask(`Regulatory overlays comma-separated (${REGULATIONS.join(',')})`, suggestedRegs);
+      const regAns = await ask(`Regulatory overlays comma-separated (${REGULATIONS.join(',')})`, '');
       const regs = regAns.split(',').map((r) => r.trim().toLowerCase()).filter((r) => REGULATIONS.includes(r));
       if (regs.length > 0) {
         template.risks.regulated = true;
         template.regulation = regs;
-        template.provenance.regulation = 'user';
       }
     } finally {
       if (rl) rl.close();
@@ -601,7 +526,7 @@ async function runInit(dir) {
 
   const hints = hasFlag('--interactive') ? scanRiskHints(template) : null;
   console.log(`\n✓ wrote ${file}`);
-  for (const h of hints?.unflaggedRisks ?? []) console.log(`  ! hint: idea mentions "${h.phrase}" — set risks.${h.flag}=true or record a riskWaivers entry`);
+  for (const h of hints?.undeclaredFlags ?? []) console.log(`  ! hint: idea mentions "${h.phrase}" — consider setting risks.${h.flag}=true`);
   console.log(`\nFill in or refine fields, then:\n  vld plan ${path.relative(process.cwd(), file) || 'profile.json'}\n  vld compile ${path.relative(process.cwd(), file) || 'profile.json'} -o specs\n`);
 }
 
@@ -723,9 +648,7 @@ function adoptedIdeaWarning(plan) {
 
 function enforceAdoptedIdea(plan) {
   const warning = adoptedIdeaWarning(plan);
-  if (warning && isCompilerStrict()) {
-    fail(`${warning} Replace TODO in profile.idea or pass --advisory for an explicitly advisory preview.`);
-  }
+  if (warning && hasFlag('--strict')) fail(`${warning} Remove TODO from profile.idea or run without --strict for an explicitly advisory draft.`);
   return warning;
 }
 
@@ -744,77 +667,34 @@ function regulatedWithoutRegime(plan) {
   return `risks.regulated is true but profile.regulation is empty: the tier rises, but no regime-specific obligation is added. Name the regime (${REGULATIONS.join(', ')}) so its overlay applies.${hint}`;
 }
 
-const ADVISORY_BANNER =
-  '⚠ ADVISORY MODE (--advisory): strict compiler guards (unwaived risks, missing regimes, rule conflicts, defaulted production fields) were downgraded to warnings. Do not ship advisory packets.';
-
-/** Roadmap P1.2: `vld plan` and `vld compile` are strict by default; `--advisory` opts out. */
-function isCompilerStrict() {
-  if (hasFlag('--strict') && hasFlag('--advisory')) {
-    fail('cannot combine --strict and --advisory on the same invocation');
-  }
-  return !hasFlag('--advisory');
-}
-
 function enforceStrictCompilerGuards(plan) {
-  const strict = isCompilerStrict();
   const today = new Date().toISOString().slice(0, 10);
   const liveRiskScan = scanRiskHints(plan.profile, { referenceDate: today });
   const extraWarnings = [];
-  const strictViolations = [];
 
-  if (!strict) {
-    console.error(`\n${ADVISORY_BANNER}\n`);
-  }
-
-  // 1. P1.1 & P1.2: unwaived risk cues (including waivers expired as of today).
+  // Surface risk hints that are not waived (including waivers expired as of today).
   const unwaived = liveRiskScan.unflaggedRisks.filter((hit) => !hit.traitPresent);
-  if (unwaived.length > 0) {
-    strictViolations.push(`unflagged risk signal(s): ${unwaived.map((hit) => `risks.${hit.flag}`).join(', ')}`);
-    for (const hit of unwaived) {
-      const phrases = [...new Set((hit.matches ?? [{ phrase: hit.phrase }]).map((m) => `"${m.phrase}"`))].join(', ');
-      strictViolations.push(
-        `risks.${hit.flag}: idea mentions ${phrases} (cue: ${(hit.cues ?? [hit.cue]).join(', ')})${hit.expiredWaiver ? ` (waiver expired ${hit.expiredWaiver})` : ''} — set "risks.${hit.flag}": true or add a dated entry in "riskWaivers"`
-      );
-    }
-  }
-
-  // 2. P1.3: cross-rule contradictions and physically infeasible latency bounds.
-  if (plan.ruleLint && !plan.ruleLint.ok) {
-    const formatted = formatRuleLintFindings(plan.ruleLint);
-    strictViolations.push(...formatted.errors);
-  }
-
-  // 3. P1.5: production profiles cannot leave tier-driving fields at default provenance.
-  const defaultedProd = defaultedProductionTierFields(plan.profile);
-  if (defaultedProd.length > 0) {
-    strictViolations.push(
-      `provenance: stage is "production" but tier-driving field(s) remain at default (${defaultedProd.join(', ')}) — declare them explicitly in profile.json, run \`vld migrate\`, or record dated waivers`
+  if (unwaived.length > 0 && hasFlag('--strict')) {
+    const details = unwaived.map(
+      (hit) =>
+        `risks.${hit.flag}: idea mentions "${hit.phrase}"${hit.expiredWaiver ? ` (waiver expired ${hit.expiredWaiver})` : ''} — set "risks.${hit.flag}": true or add a dated entry in "riskWaivers"`
     );
+    fail(`unflagged risk signal(s) detected in profile.idea under --strict:\n  - ${details.join('\n  - ')}`);
   }
 
-  // 4. Tier >= 2 with low primary-noun confidence requires explicit profile.domain.
-  if (plan.rigor.tier >= 2 && plan.vocabulary?.lowConfidence && !plan.profile?.domain?.entity) {
+  // Roadmap 1.3 (F-03): tier >= 2 with low primary-noun confidence requires explicit profile.domain.
+  if (plan.rigor.tier >= 2 && plan.vocabulary?.lowConfidence && !plan.profile?.domain?.entity && hasFlag('--strict')) {
     const candidates = plan.vocabulary.candidates?.length ? ` Candidates: ${plan.vocabulary.candidates.join(', ')}.` : '';
-    strictViolations.push(
-      `domain: primary domain noun confidence is ${plan.vocabulary.confidence.toFixed(2)} (< 0.60) at tier ${plan.rigor.tier}.${candidates} ` +
-        'Set profile.domain: { "entity": "<noun>", "actors": ["<actor>"] }'
-    );
-  }
-
-  // 5. Adopted placeholder idea & regulated-without-regime & prompt-injection guards.
-  const unregulated = regulatedWithoutRegime(plan);
-  if (unregulated) strictViolations.push(unregulated);
-
-  if (strict && strictViolations.length > 0) {
     fail(
-      `strict profile check failed (${strictViolations.length} finding(s); fix below or pass --advisory to preview):\n  - ${strictViolations.join('\n  - ')}`
+      `primary domain noun confidence is ${plan.vocabulary.confidence.toFixed(2)} (< 0.60) at tier ${plan.rigor.tier}.${candidates} ` +
+        'Set profile.domain: { "entity": "<noun>", "actors": ["<actor>"] } before running with --strict.'
     );
   }
 
   for (const expired of liveRiskScan.expiredWaivers) {
     extraWarnings.push(`riskWaivers: waiver for risks.${expired.flag} expired on ${expired.expires}; renew or set risks.${expired.flag}: true.`);
   }
-  return { liveRiskScan, extraWarnings, advisory: !strict };
+  return { liveRiskScan, extraWarnings };
 }
 
 /**
@@ -824,146 +704,26 @@ function enforceStrictCompilerGuards(plan) {
 function injectionWarning(plan) {
   const findings = injectionFindings(plan.profile);
   if (findings.length === 0) return [];
-  if (isCompilerStrict()) {
+  if (hasFlag('--strict')) {
     fail(`the profile's text looks like instructions, not a product description:\n  - ${findings.join('\n  - ')}`);
   }
   return findings.map((finding) => `untrusted idea text: ${finding} It is quoted as data in the packet; remove it if it was not meant literally.`);
 }
 
-async function runIntakeCommand() {
-  const json = hasFlag('--json');
-  const projectDir = option('--project', '.');
-
-  if (positional[0] === 'accept') {
-    const draftFile = positional[1] ?? 'profile.draft.json';
-    const outFile = option('-o', option('--out', 'profile.json'));
-    const answers = optionAll('--answer').map((raw) => {
-      const eq = raw.indexOf('=');
-      if (eq === -1) fail(`--answer expects field=value (got "${raw}")`);
-      const field = raw.slice(0, eq).trim();
-      const rawVal = raw.slice(eq + 1).trim();
-      let value = rawVal;
-      if (rawVal === 'true') value = true;
-      else if (rawVal === 'false') value = false;
-      else if (rawVal.startsWith('[') || rawVal.startsWith('{')) {
-        try { value = JSON.parse(rawVal); } catch {}
-      } else if (field === 'regulation' || field === 'traits') {
-        value = rawVal.split(',').map((s) => s.trim()).filter(Boolean);
-      }
-      return { field, value };
-    });
-    const waivers = optionAll('--waive').map((raw) => {
-      const parts = raw.split(':');
-      if (parts.length < 3) fail(`--waive expects flag:reason:YYYY-MM-DD (got "${raw}")`);
-      const flag = parts[0].trim();
-      const expires = parts[parts.length - 1].trim();
-      const reason = parts.slice(1, -1).join(':').trim();
-      return { flag, reason, expires };
-    });
-    const accepted = acceptIntakeDraft({
-      projectDir,
-      draftFile,
-      outFile,
-      answers,
-      waivers,
-      acceptSuggested: hasFlag('--accept-suggested'),
-      force: hasFlag('--force')
-    });
-    if (json) {
-      console.log(JSON.stringify(accepted, null, 2));
-    } else {
-      console.log(`\n✓ accepted ${draftFile} -> ${displayPath(accepted.profileFile)} (${accepted.answeredCount} recorded answer(s))\n`);
-      console.log(`Next:\n  vld plan ${displayPath(accepted.profileFile)} --explain\n  vld compile ${displayPath(accepted.profileFile)} -o specs\n`);
-    }
-    return;
-  }
-
-  let inputText = positional[0] ?? null;
-  const fromFile = option('--file', null);
-  if (fromFile) {
-    const abs = path.resolve(fromFile);
-    if (!existsSync(abs)) fail(`intake input file not found: ${fromFile}`);
-    inputText = readFileSync(abs, 'utf8');
-  } else if (!inputText && !process.stdin.isTTY) {
-    inputText = readFileSync(0, 'utf8');
-  }
-  if (!inputText || !inputText.trim()) {
-    fail('Usage: vld intake "<idea prose>" | --file <path> | (stdin) [--offline] [--provider anthropic|openai|openai-compatible|command] [-o profile.draft.json]');
-  }
-
-  const outFile = option('-o', option('--out', 'profile.draft.json'));
-  const reportFile = option('--report', 'intake-report.json');
-  const budgetUsd = option('--budget-usd', null);
-  const maxTok = option('--max-tokens', null);
-  const result = await runIntake({
-    text: inputText,
-    name: option('--name', null),
-    projectDir,
-    outFile,
-    reportFile,
-    offline: hasFlag('--offline'),
-    provider: option('--provider', null),
-    model: option('--model', null),
-    tokenEnv: option('--token-env', undefined),
-    baseUrl: option('--base-url', null),
-    cassetteDir: option('--cassette', null),
-    cassetteMode: option('--cassette-mode', null),
-    budget: {
-      ...(budgetUsd !== null ? { maxCostUsd: Number(budgetUsd) } : {}),
-      ...(maxTok !== null ? { maxTotalTokens: Number(maxTok) } : {})
-    }
-  });
-
-  if (json) {
-    console.log(JSON.stringify({
-      ok: result.ok,
-      mode: result.mode,
-      draftFile: displayPath(result.draftFile),
-      reportFile: displayPath(result.reportFile),
-      pendingQuestionCount: result.questions.length,
-      questions: result.questions,
-      disagreements: result.report.disagreements,
-      ruleLint: result.report.ruleLint
-    }, null, 2));
-    return;
-  }
-
-  console.log(`\n✓ wrote ${displayPath(result.draftFile)} and ${displayPath(result.reportFile)} (${result.mode})`);
-  if (result.questions.length > 0) {
-    console.log(`\nQuestions requiring confirmation (${result.questions.length}/${result.draft.questions.length}, ordered by tier impact):`);
-    for (const [idx, q] of result.questions.entries()) {
-      console.log(`  ${idx + 1}. [${q.field}] ${q.prompt}`);
-      console.log(`     reason: ${q.reason} · suggested: ${JSON.stringify(q.suggestedValue)}`);
-      for (const dep of q.dependentQuestions ?? []) {
-        console.log(`     ↳ if true -> [${dep.field}] ${dep.prompt}`);
-      }
-    }
-  }
-  console.log(`\nNext:\n  vld intake accept ${displayPath(result.draftFile)} -o profile.json --accept-suggested\n`);
-}
-
 function runPlan(profilePath) {
   requirePositionals('vld plan <profile.json>', { min: 1 });
   const plan = loadPlanOrFail(profilePath);
-  const adoptedWarn = enforceAdoptedIdea(plan);
-  const injWarnings = injectionWarning(plan);
-  const { liveRiskScan, extraWarnings, advisory } = enforceStrictCompilerGuards(plan);
+  const { liveRiskScan, extraWarnings } = enforceStrictCompilerGuards(plan);
   const unregulated = regulatedWithoutRegime(plan);
-  const warnings = [
-    ...(advisory ? [ADVISORY_BANNER] : []),
-    adoptedWarn,
-    unregulated,
-    ...injWarnings,
-    ...extraWarnings
-  ].filter(Boolean);
+  if (unregulated && hasFlag('--strict')) {
+    fail(`${unregulated}\n  --strict refuses a regulated profile with no named regime.`);
+  }
+  const warnings = [enforceAdoptedIdea(plan), unregulated, ...injectionWarning(plan), ...extraWarnings].filter(Boolean);
   const warning = warnings.length > 0 ? warnings.join('\n⚠ ') : null;
   const explain = hasFlag('--explain')
     ? {
         firedSignals: plan.rigor.signals,
         riskHints: liveRiskScan,
-        ruleLint: plan.ruleLint,
-        provenance: plan.provenance,
-        defaultedTierFields: plan.defaultedTierFields,
         vocabulary: plan.vocabulary,
         overlays: plan.overlays
       }
@@ -971,9 +731,8 @@ function runPlan(profilePath) {
   if (hasFlag('--json')) {
     const out = {
       ...plan,
-      advisory,
       ...(explain ? { explain } : {}),
-      warnings: warning ? [...new Set([...(plan.warnings ?? []), ...warnings])] : plan.warnings
+      warnings: warning ? [...(plan.warnings ?? []), ...warnings] : plan.warnings
     };
     console.log(JSON.stringify(out, null, 2));
     return;
@@ -987,18 +746,19 @@ function runCompile(profilePath) {
   const out = option('-o', option('--out', null));
   if (!out) fail('Missing output directory. Usage: vld compile <profile.json> -o <dir>');
   const plan = loadPlanOrFail(profilePath, { previousIds: previousRequirementIds(out) });
-  const adoptedWarn = enforceAdoptedIdea(plan);
-  const injWarnings = injectionWarning(plan);
-  const { extraWarnings, advisory } = enforceStrictCompilerGuards(plan);
+  const { extraWarnings } = enforceStrictCompilerGuards(plan);
   const compileWarnings = [
-    ...(advisory ? [ADVISORY_BANNER] : []),
-    adoptedWarn,
+    enforceAdoptedIdea(plan),
     regulatedWithoutRegime(plan),
-    ...injWarnings,
+    ...injectionWarning(plan),
     ...(plan.warnings ?? []),
     ...extraWarnings
   ].filter(Boolean);
   if (compileWarnings.length > 0) console.error(`\n! ${[...new Set(compileWarnings)].join('\n! ')}\n`);
+  const unregulated = regulatedWithoutRegime(plan);
+  if (unregulated && hasFlag('--strict')) {
+    fail(`${unregulated}\n  --strict refuses a regulated profile with no named regime.`);
+  }
 
   let result;
   try {
@@ -1085,33 +845,20 @@ permissions:
 jobs:
   spec:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '${nodeVersion}'
-      # Execute unit/integration tests and capture a machine-readable report when present
-      # (Node TAP, Vitest/Jest JSON, pytest --junitxml, or go test -json).
-      - name: Run tests for execution proof
-        run: |
-          if [ -f package.json ] && grep -q '"test"' package.json; then
-            node --test --test-reporter=tap > .vld-test-report.tap || (cat .vld-test-report.tap; exit 1)
-          fi
       # --strict: a requirement marked done must keep its test; nothing ships unfinished.
-      # --require-assertions: anchored tests must contain non-tautological assertions.
-      # --report + --require-report: anchored tests must actually run and pass in CI.
-      - name: Anchors, assertions, and execution proof
-        run: |
-          if [ -f test-report.json ]; then
-            node ${packet}/spec-check.mjs --repo . --strict --require-assertions --report test-report.json --require-report
-          elif [ -f .vld-test-report.tap ]; then
-            node ${packet}/spec-check.mjs --repo . --strict --require-assertions --report .vld-test-report.tap --require-report
-          else
-            node ${packet}/spec-check.mjs --repo . --strict --require-assertions
-          fi
-      # Execute gates (G0-RUN, G0-CHECK, G0-SMOKE, drift, mutation) and publish a
-      # Markdown summary distinguishing PASS-EXECUTED from PASS-STATIC / WAIVED.
+      # --require-assertions: an anchored test must contain an assertion that can fail.
+      - name: Anchors and drift
+        run: node ${packet}/spec-check.mjs --repo . --strict --require-assertions
+      # If your tests emit a TAP, vitest or JUnit report, pass it here so "done"
+      # means a named test passed in this run, not that someone typed done:
+      #   node ${packet}/spec-check.mjs --repo . --strict --report test-report.json
+      # --json + the summary step below turn the gate table into something a
+      # non-developer can read on the pull request.
       - name: Gates
         id: gates
         run: node ${packet}/enforcement/gates.mjs --repo . --json > gates-report.json || (cat gates-report.json; exit 1)
@@ -1139,132 +886,22 @@ happens whether or not an agent chose to run anything.
 `);
 }
 
-async function runVerify(packetDir) {
-  requirePositionals('vld verify <packet-dir> [--repo <path>] [--run] [--report <file>] [--require-report] [--mutation]', { min: 1 });
+function runVerify(packetDir) {
+  requirePositionals('vld verify <packet-dir> [--repo <path>]', { min: 1 });
   if (!packetDir) fail('Missing packet directory. Usage: vld verify <packet-dir> [--repo <path>]');
   if (!existsSync(packetDir)) fail(`No such packet: ${packetDir}`);
 
-  const resolvedPacket = path.resolve(packetDir);
-  const runLive = hasFlag('--run');
-  const runMut = hasFlag('--mutation');
-  const reportOpt = option('--report', null);
-  const mutReportOpt = option('--mutation-report', null);
-  const requireReport = hasFlag('--require-report') || runLive;
-  const repo = hasFlag('--repo')
-    ? path.resolve(option('--repo', '.'))
-    : (runLive || runMut || reportOpt ? path.resolve('.') : null);
-
-  let testReport = null;
-  let testRunMeta = null;
-  if (runLive) {
-    if (!repo) fail('--run requires a repository (defaults to "." or pass --repo <path>)');
-    const explicitCmd = option('--test-cmd', null);
-    const customArgv = explicitCmd ? explicitCmd.trim().split(/\s+/).filter(Boolean) : null;
-    try {
-      testRunMeta = await runRepositoryTests({
-        repoDir: repo,
-        backend: option('--backend', 'auto'),
-        command: customArgv,
-        writeReport: true
-      });
-      testReport = testRunMeta.report;
-    } catch (err) {
-      fail(err.message, err);
-    }
-  }
-
-  let mutationReport = null;
-  if (runMut) {
-    let tier = 2;
-    try {
-      const sp = JSON.parse(readFileSync(path.join(resolvedPacket, 'spec.json'), 'utf8'));
-      tier = Math.max(2, Number(sp.rigor?.tier ?? 2));
-    } catch { /* default tier 2 */ }
-    mutationReport = await runMutationGate({
-      repoDir: repo,
-      tier,
-      backend: option('--backend', 'auto'),
-      writeReport: true
-    });
-  } else if (mutReportOpt) {
-    if (!existsSync(mutReportOpt)) fail(`Mutation report not found: ${mutReportOpt}`);
-    let tier = 2;
-    try {
-      const sp = JSON.parse(readFileSync(path.join(resolvedPacket, 'spec.json'), 'utf8'));
-      tier = Math.max(2, Number(sp.rigor?.tier ?? 2));
-    } catch { /* default tier 2 */ }
-    mutationReport = parseMutationReport(readFileSync(mutReportOpt, 'utf8'), { tier });
-  }
-
-  const report = verifyPacket(resolvedPacket, {
-    repo,
-    strict: hasFlag('--strict') || runLive,
-    requireAssertions: hasFlag('--require-assertions') || runLive,
-    testReport,
-    reportPath: testReport ? null : reportOpt,
-    requireReport,
-    mutationReport
-  });
-
-  // If mutation ran or was supplied on tier >= 2, enforce its threshold honestly!
-  if (mutationReport) {
-    if (mutationReport.verdictLabel === 'FAIL') {
-      const pct = typeof mutationReport.score === 'number' ? `${(mutationReport.score * 100).toFixed(1)}%` : '0%';
-      const floor = `${Math.round((mutationReport.threshold ?? 0.6) * 100)}%`;
-      report.errors.push(`mutation gate failed: ${pct} killed (${mutationReport.killed}/${mutationReport.total}) < required ${floor} floor`);
-      report.ok = false;
-      report.verdict = 'failed';
-    } else if (mutationReport.verdictLabel === 'SKIPPED-UNAVAILABLE') {
-      const msg = `mutation gate SKIPPED-UNAVAILABLE: ${mutationReport.reason ?? 'runner unavailable'}`;
-      if (hasFlag('--strict')) {
-        report.errors.push(`${msg} (record a dated waiver or install the mutation runner)`);
-        report.ok = false;
-        report.verdict = 'failed';
-      } else {
-        report.warnings.push(msg);
-      }
-    }
-  }
-
-  // Record tamper-evident evidence when tests actually executed (`--run`).
-  if (runLive && repo) {
-    try {
-      appendEvidence({
-        projectDir: repo,
-        kind: 'verify',
-        actor: 'cli:verify',
-        subject: path.basename(resolvedPacket),
-        payload: {
-          verdict: report.verdict,
-          ok: report.ok,
-          passed: testReport?.passed ?? 0,
-          failed: testReport?.failed ?? 0,
-          skipped: testReport?.skipped ?? 0,
-          sandboxBackend: testReport?.sandboxBackend ?? null,
-          receiptDigest: testReport?.receiptDigest ?? null,
-          mutationScore: mutationReport?.score ?? null,
-          mutationVerdict: mutationReport?.verdictLabel ?? null
-        }
-      });
-    } catch {
-      // Evidence ledger append is best-effort on read-only checkouts.
-    }
-  }
+  const repo = hasFlag('--repo') ? path.resolve(option('--repo', '.')) : null;
+  const report = verifyPacket(path.resolve(packetDir), { repo, strict: hasFlag('--strict'), requireAssertions: hasFlag('--require-assertions') });
 
   if (hasFlag('--json')) {
     console.log(JSON.stringify(report, null, 2));
     process.exit(report.ok ? 0 : 1);
   }
 
-  console.log(`\nverify · ${packetDir} · verdict: ${report.verdict}\n`);
+  console.log(`\nverify · ${packetDir}\n`);
   for (const pass of report.passes) console.log(`  ✓ ${pass}`);
   for (const line of report.info) console.log(`  · ${line}`);
-  if (mutationReport) {
-    const scoreText = typeof mutationReport.score === 'number'
-      ? `${(mutationReport.score * 100).toFixed(1)}% (${mutationReport.killed}/${mutationReport.total} killed, floor ${Math.round(mutationReport.threshold * 100)}%)`
-      : (mutationReport.reason ?? mutationReport.verdictLabel);
-    console.log(`  · mutation [${mutationReport.verdictLabel}]: ${scoreText}`);
-  }
   if (report.warnings.length > 0) {
     console.log('');
     for (const warning of report.warnings) console.log(`  ! ${warning}`);
@@ -1276,7 +913,7 @@ async function runVerify(packetDir) {
 
   const stats = report.stats ?? {};
   console.log(
-    `\n${report.ok ? 'PASS' : 'FAIL'} [${report.verdict}] · ${stats.requirements ?? 0} requirements · ${stats.criteria ?? 0} criteria · ` +
+    `\n${report.ok ? 'PASS' : 'FAIL'} · ${stats.requirements ?? 0} requirements · ${stats.criteria ?? 0} criteria · ` +
       `${stats.gates ?? 0} gates · ${report.errors.length} error(s) · ${report.warnings.length} warning(s)\n`
   );
   process.exit(report.ok ? 0 : 1);
@@ -1910,58 +1547,10 @@ function printMissionReport(label, report) {
   console.log(`\n${report.ok ? 'PASS' : 'FAIL'}${requirements}\n`);
 }
 
-async function runMission() {
+function runMission() {
   const [action, file] = positional;
   const project = option('--project', '.');
   try {
-    if (action === 'plan') {
-      const packet = file ?? 'specs';
-      const outFile = option('-o', option('--out', 'mission-definition.json'));
-      const maxTurns = Number(option('--max-turns', '3'));
-      const maxChars = Number(option('--max-chars', '24000'));
-      const result = await runPlannerAgent({
-        packetDir: path.resolve(project, packet),
-        missionId: option('--mission-id', null),
-        title: option('--title', null),
-        offline: hasFlag('--offline'),
-        provider: option('--provider', null),
-        model: option('--model', null),
-        tokenEnv: option('--token-env', undefined),
-        baseUrl: option('--base-url', null),
-        cassetteDir: option('--cassette', null),
-        cassetteMode: option('--cassette-mode', null),
-        maxTurns,
-        maxChars,
-        budget: {
-          ...(option('--budget-usd', null) !== null ? { maxCostUsd: Number(option('--budget-usd', null)) } : {}),
-          ...(option('--max-tokens', null) !== null ? { maxTokens: Number(option('--max-tokens', null)) } : {})
-        }
-      });
-      if (!result.ok) {
-        fail(`mission planning failed (${result.mode}):\n${result.errors.map((error) => `- ${error}`).join('\n')}`);
-      }
-      const outPath = path.resolve(project, outFile);
-      writeFileSync(outPath, `${JSON.stringify(result.definition, null, 2)}\n`, 'utf8');
-      const summary = {
-        ok: true,
-        mode: result.mode,
-        definitionFile: displayPath(outPath),
-        contextDigest: result.context.digest,
-        contextChars: result.context.chars,
-        contextTruncated: result.context.truncated,
-        turns: result.turns.map((turn) => ({ index: turn.index, cached: turn.cached, validationErrors: turn.validationErrors })),
-        workPackageContexts: result.workPackageContexts,
-        validation: result.validation,
-        usage: result.usage
-      };
-      if (hasFlag('--json')) console.log(JSON.stringify(summary, null, 2));
-      else {
-        console.log(`\n✓ planned ${result.definition.workPackages.length} work package(s) -> ${displayPath(outPath)} (${result.mode})`);
-        for (const pkg of result.workPackageContexts) console.log(`  · ${pkg.packageId}: context ${pkg.digest.slice(0, 12)}… (${pkg.chars} chars)`);
-        console.log('');
-      }
-      return;
-    }
     if (action === 'init') {
       if (!file) fail('Usage: vld mission init <definition.json> --packet <dir> [--target HEAD] [--project <dir>]');
       const packet = option('--packet', null);
@@ -2026,7 +1615,7 @@ async function runMission() {
       }
       return;
     }
-    fail('Usage: vld mission plan <packet-dir>|init <definition.json>|validate|status|rebase');
+    fail('Usage: vld mission init|validate|status <definition-or-mission.json>');
   } catch (error) {
     fail(error.message);
   }
@@ -2210,8 +1799,8 @@ async function runRuntime() {
         }
         process.exit(result.ok ? 0 : 1);
       }
-      if (!['submit', 'verify', 'review', 'approve', 'queue'].includes(deliveryAction) || !deliveryMissionFile || !deliveryPackageId) {
-        fail('Usage: vld runtime delivery submit|verify|review|approve|queue <mission.json> <package> --policy <delivery-policy.json>');
+      if (!['submit', 'verify', 'approve', 'queue'].includes(deliveryAction) || !deliveryMissionFile || !deliveryPackageId) {
+        fail('Usage: vld runtime delivery submit|verify|approve|queue <mission.json> <package> --policy <delivery-policy.json>');
       }
       const policyFile = option('--policy', null);
       if (!policyFile) fail('runtime delivery requires --policy <delivery-policy.json>');
@@ -2223,54 +1812,6 @@ async function runRuntime() {
         result = submitRuntimeDeliveryCandidate({ missionFile: deliveryMissionFile, packageId: deliveryPackageId, policyFile, leaseToken, candidateSha, adapterRunId: option('--adapter-run', null), projectDir: project });
       } else if (deliveryAction === 'verify') {
         result = await verifyRuntimeDeliveryCandidateAsync({ missionFile: deliveryMissionFile, packageId: deliveryPackageId, policyFile, projectDir: project });
-      } else if (deliveryAction === 'review') {
-        const actor = runtimeActor(option('--actor', null));
-        const candidateId = option('--candidate', null);
-        if (!candidateId) fail('runtime delivery review requires --candidate');
-        const statusForReview = runtimeDeliveryStatus({ missionFile: deliveryMissionFile, projectDir: project });
-        const reviewEntry = (statusForReview.delivery ?? []).find((item) => item.candidate?.id === candidateId);
-        const reviewCandidate = reviewEntry?.candidate;
-        if (!reviewCandidate) fail(`runtime delivery review: unknown candidate ${candidateId}`);
-        const reportFile = option('--report', null);
-        if (reportFile) {
-          const reviewerModelId = option('--reviewer-model', null);
-          if (!reviewerModelId) fail('runtime delivery review --report requires --reviewer-model <provider:model>');
-          const parsed = JSON.parse(readFileSync(reportFile, 'utf8'));
-          result = recordRuntimeDeliveryReview({
-            missionFile: deliveryMissionFile,
-            packageId: deliveryPackageId,
-            candidateId,
-            policyFile,
-            reviewerModelId,
-            categories: parsed.categories,
-            verdict: parsed.verdict,
-            humanSignoff: parsed.humanSignoff ?? null,
-            riskDigest: option('--risk-digest', null),
-            actor,
-            projectDir: project
-          });
-        } else {
-          const missionRaw = JSON.parse(readFileSync(path.resolve(project, deliveryMissionFile), 'utf8'));
-          const packet = prepareReviewPacket({
-            projectDir: project,
-            packetDir: missionRaw.packet?.path ?? 'specs',
-            baseRef: reviewCandidate.targetSha,
-            headRef: reviewCandidate.candidateSha,
-            authorId: actor.id
-          });
-          const agentReview = await runReviewerAgent({ packet, provider: 'rules', reviewerId: actor.id });
-          result = recordRuntimeDeliveryReview({
-            missionFile: deliveryMissionFile,
-            packageId: deliveryPackageId,
-            candidateId,
-            policyFile,
-            reviewerModelId: agentReview.reviewerModelId,
-            categories: agentReview.categories,
-            verdict: agentReview.verdict,
-            actor,
-            projectDir: project
-          });
-        }
       } else if (deliveryAction === 'approve') {
         const actor = runtimeActor(option('--actor', null));
         const candidateId = option('--candidate', null);
@@ -2305,7 +1846,7 @@ async function runRuntime() {
         headRef,
         baseRef: option('--base-ref', null),
         title: option('--title', undefined),
-        requiredChecks: option('--checks', 'spec'),
+        requiredChecks: option('--checks', ''),
         projectDir: project
       };
       if (hasFlag('--dry-run')) {
@@ -2323,12 +1864,10 @@ async function runRuntime() {
         const executed = await executeRuntimeForgePlan({
           ...request,
           action: option('--action', 'publish'),
-          draft: !hasFlag('--ready'),
           allowMergeRequest: hasFlag('--allow-merge'),
           pullNumber: Number.isSafeInteger(pullNumber) ? pullNumber : null,
           postEvidence: !hasFlag('--no-comment'),
-          token,
-          apiUrl: option('--api-url', null)
+          token
         });
         console.log(JSON.stringify(executed, null, 2));
         return;
@@ -2561,56 +2100,21 @@ async function runBuildCommand() {
   const maxRepairs = Number(rawMax);
   if (!Number.isSafeInteger(maxRepairs) || maxRepairs < 0 || maxRepairs > 5) fail('--max-repairs must be an integer from 0 to 5');
   const argValue = option('--arg', null);
-  const adapter = option('--adapter', 'sandboxed-cli');
-  if (!['sandboxed-cli', 'sandboxed-acp', 'sandboxed-agent', 'fake'].includes(adapter)) {
-    fail('--adapter must be sandboxed-cli, sandboxed-acp, sandboxed-agent or fake');
-  }
-  let testCommand = null;
-  const rawTestCmd = option('--test-cmd', null);
-  if (rawTestCmd) {
-    try {
-      const parsed = JSON.parse(rawTestCmd);
-      if (!parsed || typeof parsed !== 'object' || typeof parsed.executable !== 'string') throw new Error('test-cmd');
-      testCommand = {
-        id: parsed.id ?? 'project-tests',
-        executable: parsed.executable,
-        args: Array.isArray(parsed.args) ? parsed.args : [],
-        ...(parsed.timeoutMs ? { timeoutMs: Number(parsed.timeoutMs) } : {})
-      };
-    } catch {
-      fail('--test-cmd must be a JSON object like {"executable":"node","args":["--test","tests/"]}');
-    }
-  }
-  let missionOverrides = null;
-  const overridesFile = option('--mission-overrides', null);
-  if (overridesFile) {
-    const overridesPath = path.resolve(project, overridesFile);
-    try {
-      missionOverrides = JSON.parse(readFileSync(overridesPath, 'utf8'));
-    } catch (error) {
-      fail(`--mission-overrides must be readable JSON: ${error.message}`);
-    }
-  }
   const report = await runBuild({
     projectDir: project,
     profileFile: option('--profile', null),
     packetDir: option('--packet', 'specs'),
     missionFile: option('--mission', null),
-    missionOverrides,
-    adapter,
+    adapter: option('--adapter', 'sandboxed-cli'),
     executable: option('--executable', null),
     args: argValue ? [argValue] : [],
     sandboxBackend: option('--backend', 'auto'),
     requireOsSandbox: hasFlag('--require-os'),
-    testCommand,
     verifyGates: hasFlag('--gates'),
     requireAssertions: hasFlag('--require-assertions') || true,
     maxRepairs,
     dryRun: hasFlag('--dry-run'),
-    reportFile: option('-o', option('--out', null)),
-    model: option('--model', null),
-    cassetteDir: option('--cassette', null),
-    cassetteMode: option('--cassette-mode', null)
+    reportFile: option('-o', option('--out', null))
   });
   if (hasFlag('--json')) console.log(JSON.stringify(report, null, 2));
   else {
@@ -2626,7 +2130,7 @@ async function runBuildCommand() {
   process.exit(report.ok ? 0 : 1);
 }
 
-async function runReviewCommand() {
+function runReviewCommand() {
   const [sub = 'prepare'] = positional;
   const project = option('--project', '.');
   const packet = option('--packet', 'specs');
@@ -2672,53 +2176,7 @@ async function runReviewCommand() {
       else console.log(`\n✓ recorded review (${result.review.verdict}) → ${path.relative(path.resolve(project), result.file)} · evidence ${result.evidenceHash.slice(0, 12)}\n`);
       return;
     }
-    if (sub === 'run') {
-      const provider = option('--provider', 'rules');
-      const model = option('--model', null);
-      const prepared = prepareReviewPacket({
-        projectDir: project,
-        packetDir: packet,
-        baseRef: option('--base-ref', 'HEAD~1'),
-        headRef: option('--head-ref', 'HEAD'),
-        authorId: option('--author', 'unknown-author'),
-        requirementIds: option('--requirements', null) ? option('--requirements', '').split(',').map((v) => v.trim()).filter(Boolean) : undefined
-      });
-      const run = await runReviewerAgent({
-        packet: prepared,
-        provider,
-        model,
-        env: process.env,
-        cassetteDir: option('--cassette', null),
-        cassetteMode: option('--cassette-mode', null),
-        reviewerId: option('--reviewer-id', `reviewer:${provider === 'rules' ? 'diff-risk-v1' : String(model ?? 'model')}`),
-        maxTokens: 2048
-      });
-      const out = option('-o', option('--out', null));
-      const recorded = recordReviewDecision({ projectDir: project, packetDir: packet, report: run.report, outFile: out });
-      const summary = {
-        ok: recorded.review.verdict !== 'changes-requested',
-        mode: run.mode,
-        reviewerModelId: run.reviewerModelId,
-        verdict: recorded.review.verdict,
-        categories: recorded.review.categories,
-        blocking: run.blocking,
-        findings: run.report.findings ?? [],
-        humanEscalation: prepared.humanEscalation,
-        reviewFile: recorded.file,
-        evidenceHash: recorded.evidenceHash,
-        warnings: run.warnings
-      };
-      if (json) console.log(JSON.stringify(summary, null, 2));
-      else {
-        console.log(`\nreview run · ${run.mode} · ${run.reviewerModelId}\n`);
-        console.log(`  verdict   ${summary.verdict} (${summary.blocking} blocking)`);
-        console.log(`  recorded  ${path.relative(path.resolve(project), recorded.file)} · evidence ${recorded.evidenceHash.slice(0, 12)}`);
-        if (prepared.humanEscalation.required) console.log('  ! human escalation required by risk tier');
-        for (const warning of run.warnings) console.log(`  ! ${warning}`);
-      }
-      return;
-    }
-    fail('Usage: vld review <prepare|run|verify|record> [--packet <dir>] [--project <dir>] [--report <review.json>] [--provider rules|openai|...] [--model <id>] [--cassette <dir>] [--cassette-mode <replay|record|auto|off>] [--json]');
+    fail('Usage: vld review <prepare|verify|record> [--packet <dir>] [--project <dir>] [--report <review.json>] [--json]');
   } catch (error) {
     fail(error.message);
   }
@@ -2882,9 +2340,6 @@ switch (command) {
   case 'init':
     runInit(positional[0]).catch((error) => fail(error.message));
     break;
-  case 'intake':
-    runIntakeCommand().catch((error) => fail(error.message));
-    break;
   case 'doctor':
     runDoctorCommand();
     break;
@@ -2928,7 +2383,7 @@ switch (command) {
     runWorkflowCommand();
     break;
   case 'mission':
-    runMission().catch((error) => fail(error.message));
+    runMission();
     break;
   case 'workspace':
     runWorkspace();
@@ -2946,7 +2401,7 @@ switch (command) {
     runBuildCommand().catch((error) => fail(error.message));
     break;
   case 'review':
-    await runReviewCommand();
+    runReviewCommand();
     break;
   case 'drift':
     runDriftCommand();
@@ -2964,7 +2419,7 @@ switch (command) {
     runCompile(positional[0]);
     break;
   case 'verify':
-    await runVerify(positional[0]);
+    runVerify(positional[0]);
     break;
   case 'ci':
     runCi();

@@ -30,7 +30,6 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { applyChange, emitChange, planChange } from './change.mjs';
-import { createModelClient } from './model-client.mjs';
 import { emitPacket } from './emit/index.mjs';
 import { OUTCOME_ARMS, OUTCOME_TASKS, validateOutcomeTasks } from '../evals/tasks/index.mjs';
 import { buildIndex } from './indexer.mjs';
@@ -716,41 +715,52 @@ async function runExternalAgent(runner, workspaceDir, task, arm, { agentCmd, mod
   let rawJson = '{"files":{}}';
   let agentTokens = 0;
 
-  if (runner !== 'openai' && runner !== 'anthropic') {
+  if (runner === 'openai') {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) throw new Error('openai runner requires OPENAI_API_KEY');
+    const baseUrl = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
+    const res = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: model || process.env.EVAL_MODEL || 'gpt-4o-mini',
+        temperature: 0,
+        response_format: { type: 'json_object' },
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+    if (!res.ok) throw new Error(`OpenAI HTTP ${res.status}: ${await res.text()}`);
+    const data = await res.json();
+    rawJson = data.choices?.[0]?.message?.content ?? '{"files":{}}';
+    agentTokens = (data.usage?.prompt_tokens ?? 0) + (data.usage?.completion_tokens ?? 0);
+  } else if (runner === 'anthropic') {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) throw new Error('anthropic runner requires ANTHROPIC_API_KEY');
+    const baseUrl = (process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com').replace(/\/$/, '');
+    const res = await fetch(`${baseUrl}/v1/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({
+        model: model || process.env.EVAL_MODEL || 'claude-3-5-sonnet-latest',
+        max_tokens: 4096,
+        temperature: 0,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+    if (!res.ok) throw new Error(`Anthropic HTTP ${res.status}: ${await res.text()}`);
+    const data = await res.json();
+    rawJson = data.content?.map((c) => c.text ?? '').join('\n') ?? '{"files":{}}';
+    agentTokens = (data.usage?.input_tokens ?? 0) + (data.usage?.output_tokens ?? 0);
+  } else {
     throw new Error(`unknown outcome runner "${runner}"`);
   }
 
-  // One shared P3.1 model-client path instead of hand-rolled fetch calls: secret
-  // redaction, Retry-After-aware bounded retries, optional cassette replay/record
-  // (VLD_MODEL_CASSETTE_DIR), and token/cost budget accounting.
-  const provider = runner;
-  const client = createModelClient({
-    provider,
-    model: model || process.env.EVAL_MODEL || (provider === 'openai' ? 'gpt-4o-mini' : 'claude-3-5-sonnet-latest'),
-    baseUrl: process.env[provider === 'openai' ? 'OPENAI_BASE_URL' : 'ANTHROPIC_BASE_URL'] || null,
-    cassetteDir: process.env.VLD_MODEL_CASSETTE_DIR || null,
-    cassetteMode: process.env.VLD_MODEL_CASSETTE_MODE || null,
-    env: process.env
-  });
-  const response = await client.complete({
-    messages: [{ role: 'user', content: prompt }],
-    maxTokens: 4096,
-    temperature: 0,
-    schema: { type: 'object', title: 'vld_outcome_files' }
-  });
-  rawJson = typeof response.text === 'string' && response.text.trim() ? response.text : JSON.stringify(response.json ?? {});
-  agentTokens = response.usage?.totalTokens ?? 0;
-  const usageCost = response.usage?.costUsd ?? null;
-
-  let parsed = response.json ?? null;
-  if (!parsed || typeof parsed !== 'object') {
-    const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(rawJson);
-    const clean = fenced ? fenced[1].trim() : rawJson.trim();
-    parsed = JSON.parse(clean.slice(clean.indexOf('{'), clean.lastIndexOf('}') + 1));
-  }
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(rawJson);
+  const clean = fenced ? fenced[1].trim() : rawJson.trim();
+  const parsed = JSON.parse(clean.slice(clean.indexOf('{'), clean.lastIndexOf('}') + 1));
   writeModelResponseFiles(workspaceDir, parsed.files ?? {});
 
-  return { wallClockMs: Date.now() - started, agentTokens, costUsd: usageCost };
+  return { wallClockMs: Date.now() - started, agentTokens, costUsd: null };
 }
 
 function summarizeArm(records) {

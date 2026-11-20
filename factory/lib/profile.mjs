@@ -44,9 +44,7 @@ export const TRAITS = [
  * *which* obligations exist, and HIPAA, GDPR and PCI-DSS impose different ones.
  * Naming the regime is what lets the compiler add content instead of only weight.
  */
-export const REGULATIONS = ['hipaa', 'gdpr', 'ccpa', 'pci-dss', 'soc2', 'coppa', 'ferpa', 'sox', 'dora', 'eu-ai-act'];
-
-export const PROVENANCE_SOURCES = Object.freeze(['user', 'inferred', 'default', 'waived']);
+export const REGULATIONS = ['hipaa', 'gdpr', 'pci-dss', 'soc2', 'coppa', 'ferpa', 'sox', 'dora', 'eu-ai-act'];
 
 export const RISK_FLAGS = [
   'pii',
@@ -58,36 +56,8 @@ export const RISK_FLAGS = [
   'integrations'
 ];
 
-export const TIER_DRIVING_FIELDS = Object.freeze([
-  'stage',
-  'users.scale',
-  ...RISK_FLAGS.map((flag) => `risks.${flag}`)
-]);
-
 const ID_PATTERN = /^[a-z0-9][a-z0-9-]{1,60}$/;
-const PROFILE_KEYS = new Set([
-  'name',
-  'idea',
-  'kind',
-  'stage',
-  'users',
-  'traits',
-  'risks',
-  'regulation',
-  'constraints',
-  'overlays',
-  'discoverability',
-  'traitWaivers',
-  'riskWaivers',
-  'conflicts',
-  'provenance',
-  'questions',
-  'domain',
-  'rules',
-  'vocabulary',
-  '$comment',
-  '$adopted'
-]);
+const PROFILE_KEYS = new Set(['name', 'idea', 'kind', 'stage', 'users', 'traits', 'risks', 'regulation', 'constraints', 'overlays', 'discoverability', 'traitWaivers', 'riskWaivers', 'domain', 'rules', 'vocabulary', '$comment', '$adopted']);
 const VOCABULARY_KEYS = new Set(['forbidden', 'affirmed']);
 const USER_KEYS = new Set(['scale']);
 const CONSTRAINT_KEYS = new Set(['team', 'weeks', 'stack', 'mustUse']);
@@ -230,99 +200,10 @@ export function normalizeProfile(raw) {
   profile.regulation = Array.isArray(raw.regulation) ? raw.regulation.map((value) => String(value).toLowerCase()) : [];
   profile.traitWaivers = Array.isArray(raw.traitWaivers) ? raw.traitWaivers : [];
   profile.riskWaivers = Array.isArray(raw.riskWaivers) ? raw.riskWaivers : [];
-  profile.conflicts = Array.isArray(raw.conflicts) ? raw.conflicts : [];
   profile.risks = { ...(plainObject(raw.risks) ? raw.risks : {}) };
-  if ('provenance' in raw && plainObject(raw.provenance)) {
-    profile.provenance = { ...raw.provenance };
-  }
-  const derivedProvenance = computeFieldProvenance(raw, profile);
   Object.defineProperty(profile, '__inputShapeErrors', { value: shapeErrors, enumerable: false });
-  Object.defineProperty(profile, '__derivedProvenance', { value: derivedProvenance, enumerable: false });
 
   return profile;
-}
-
-/**
- * Compute per-field provenance (`user` | `inferred` | `default` | `waived`)
- * across every decision-driving field of a profile (roadmap P1.5).
- */
-export function computeFieldProvenance(raw, normalized = null) {
-  const input = plainObject(raw) ? raw : {};
-  const prof = normalized ?? input;
-  const explicit = plainObject(input.provenance) ? input.provenance : {};
-  const adopted = Boolean(input.$adopted);
-  const defaultSourceForPresent = adopted ? 'inferred' : 'user';
-  const rawRisks = plainObject(input.risks) ? input.risks : {};
-  const rawUsers = plainObject(input.users) ? input.users : {};
-  const rawConstraints = plainObject(input.constraints) ? input.constraints : {};
-  const waivedFlags = new Set(
-    (Array.isArray(prof.riskWaivers) ? prof.riskWaivers : [])
-      .map((w) => w?.flag)
-      .filter(Boolean)
-  );
-
-  const resolve = (field, isPresent, isWaived = false) => {
-    if (typeof explicit[field] === 'string' && PROVENANCE_SOURCES.includes(explicit[field])) {
-      return explicit[field];
-    }
-    if (isWaived) return 'waived';
-    return isPresent ? defaultSourceForPresent : 'default';
-  };
-
-  const map = {
-    kind: resolve('kind', 'kind' in input),
-    stage: resolve('stage', 'stage' in input),
-    'users.scale': resolve('users.scale', 'scale' in rawUsers),
-    traits: resolve('traits', 'traits' in input),
-    regulation: resolve(
-      'regulation',
-      'regulation' in input && Array.isArray(input.regulation) && input.regulation.length > 0,
-      [...waivedFlags].some((f) => String(f).startsWith('regulation:'))
-    ),
-    'constraints.stack': resolve('constraints.stack', 'stack' in rawConstraints && rawConstraints.stack !== 'undecided'),
-    'constraints.team': resolve('constraints.team', 'team' in rawConstraints),
-    'constraints.weeks': resolve('constraints.weeks', 'weeks' in rawConstraints)
-  };
-  for (const flag of RISK_FLAGS) {
-    const key = `risks.${flag}`;
-    map[key] = resolve(key, flag in rawRisks && typeof rawRisks[flag] === 'boolean', waivedFlags.has(flag));
-  }
-  // Preserve any extra valid field annotations recorded by intake/answer flows.
-  for (const [k, v] of Object.entries(explicit)) {
-    if (!(k in map) && PROVENANCE_SOURCES.includes(v)) map[k] = v;
-  }
-  return map;
-}
-
-/** Effective provenance dictionary for a normalized or raw profile. */
-export function getProfileProvenance(profile) {
-  if (plainObject(profile?.__derivedProvenance)) {
-    const base = { ...profile.__derivedProvenance };
-    if (plainObject(profile.provenance)) {
-      for (const [k, v] of Object.entries(profile.provenance)) {
-        if (PROVENANCE_SOURCES.includes(v)) base[k] = v;
-      }
-    }
-    return base;
-  }
-  return computeFieldProvenance(profile, profile);
-}
-
-/**
- * List tier-driving fields still carrying `provenance === 'default'` when
- * `profile.stage === 'production'` (roadmap P1.5 strict guard).
- */
-export function defaultedProductionTierFields(profile) {
-  if (profile?.stage !== 'production') return [];
-  const prov = getProfileProvenance(profile);
-  const defaulted = [];
-  for (const field of TIER_DRIVING_FIELDS) {
-    if ((prov[field] ?? 'default') === 'default') defaulted.push(field);
-  }
-  if (profile?.risks?.regulated === true && (prov.regulation ?? 'default') === 'default') {
-    defaulted.push('regulation');
-  }
-  return defaulted;
 }
 
 export function validateProfile(profile) {
@@ -505,10 +386,8 @@ export function validateProfile(profile) {
         errors.push(`riskWaivers[${position}]: must be an object with flag, reason and expires`);
         return;
       }
-      const isRegimeWaiver = typeof waiver.flag === 'string' && waiver.flag.startsWith('regulation:') &&
-        REGULATIONS.includes(waiver.flag.slice('regulation:'.length));
-      if (!RISK_FLAGS.includes(waiver.flag) && !isRegimeWaiver) {
-        errors.push(`riskWaivers[${position}].flag: unknown risk flag "${waiver.flag}". Known: ${RISK_FLAGS.join(', ')} (or regulation:<regime>)`);
+      if (!RISK_FLAGS.includes(waiver.flag)) {
+        errors.push(`riskWaivers[${position}].flag: unknown risk flag "${waiver.flag}". Known: ${RISK_FLAGS.join(', ')}`);
       }
       if (typeof waiver.reason !== 'string' || waiver.reason.trim().length < 10) {
         errors.push(`riskWaivers[${position}].reason: say why the risk does not apply (10+ characters)`);
@@ -517,55 +396,6 @@ export function validateProfile(profile) {
         errors.push(`riskWaivers[${position}].expires: must be a YYYY-MM-DD date, so the waiver cannot live forever`);
       }
     });
-  }
-
-  // Conflict resolutions (roadmap P1.3): acknowledge contradictions across profile.rules.
-  if ('conflicts' in profile) {
-    if (!Array.isArray(profile.conflicts)) {
-      errors.push('conflicts: must be a list of { rules: ["REQ-C01", "REQ-C02"], winner: "REQ-C02", reason: "..." } entries');
-    } else {
-      profile.conflicts.forEach((entry, position) => {
-        if (!plainObject(entry)) {
-          errors.push(`conflicts[${position}]: must be an object with rules, winner and reason`);
-          return;
-        }
-        const pair = entry.rules;
-        if (!Array.isArray(pair) || pair.length !== 2 || pair.some((id) => typeof id !== 'string' || !id.trim())) {
-          errors.push(`conflicts[${position}].rules: must name the two conflicting rule IDs or slugs`);
-        } else if (typeof entry.winner !== 'string' || !pair.includes(entry.winner)) {
-          errors.push(`conflicts[${position}].winner: must be one of the two entries in conflicts[${position}].rules`);
-        }
-        if (typeof entry.reason !== 'string' || entry.reason.trim().length < 10) {
-          errors.push(`conflicts[${position}].reason: explain the precedence decision (10+ characters)`);
-        }
-      });
-    }
-  }
-
-  // Provenance annotations (roadmap P1.5).
-  if ('provenance' in profile && profile.provenance !== undefined) {
-    if (!plainObject(profile.provenance)) {
-      errors.push('provenance: must be an object mapping profile field paths to user|inferred|default|waived');
-    } else {
-      for (const [field, src] of Object.entries(profile.provenance)) {
-        if (!PROVENANCE_SOURCES.includes(src)) {
-          errors.push(`provenance.${field}: unknown provenance "${src}". Known: ${PROVENANCE_SOURCES.join(', ')}`);
-        }
-      }
-    }
-  }
-
-  // Answered / pending structured elicitation questions (roadmap P1.5).
-  if ('questions' in profile && profile.questions !== undefined) {
-    if (!Array.isArray(profile.questions)) {
-      errors.push('questions: must be a list of question records');
-    } else {
-      profile.questions.forEach((q, position) => {
-        if (!plainObject(q) || typeof q.id !== 'string' || typeof q.field !== 'string') {
-          errors.push(`questions[${position}]: must be an object with id and field`);
-        }
-      });
-    }
   }
 
   // A waiver is deliberate, dated debt. It must name a trait, a reason and an

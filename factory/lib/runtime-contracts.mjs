@@ -8,16 +8,11 @@ export const RUNTIME_API_METHODS = Object.freeze([
   'status',
   'events',
   'evidence',
-  'get_questions',
-  'answer',
-  'candidate_detail',
   'allocate',
   'heartbeat',
   'transition',
   'approve',
   'queue',
-  'pause',
-  'kill',
   'recover',
   'shutdown'
 ]);

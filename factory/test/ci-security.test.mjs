@@ -38,9 +38,9 @@ test('CI pins every third-party action, has read-only permissions and keeps one 
   }
   mustMatch(ci, /^permissions:\n  contents: read$/m);
   mustMatch(live, /^permissions:\n  contents: read$/m);
-  mustMatch(ci, /^  check:\n    name: check\n    if: \$\{\{ always\(\) \}\}\n    needs: \[core, secret-history, node-22-minimum, integration, packed-distribution, acp-v1-bridge, evaluations, stress, portable-smoke, container-baseline\]/m);
+  mustMatch(ci, /^  check:\n    name: check\n    if: \$\{\{ always\(\) \}\}\n    needs: \[core, secret-history, node-22-minimum, integration, packed-distribution, acp-v1-bridge, evaluations, stress, portable-smoke\]/m);
   assert.match(read('.github', 'dependabot.yml'), /package-ecosystem: github-actions/);
-  for (const job of ['core', 'secret-history', 'node-22-minimum', 'integration', 'packed-distribution', 'acp-v1-bridge', 'evaluations', 'stress', 'portable-smoke', 'container-baseline', 'check']) {
+  for (const job of ['core', 'secret-history', 'node-22-minimum', 'integration', 'packed-distribution', 'acp-v1-bridge', 'evaluations', 'stress', 'portable-smoke', 'check']) {
     mustMatch(ci, new RegExp(`^  ${job}:\\n[\\s\\S]*?^    timeout-minutes: \\d+$`, 'm'), `${job} needs an explicit job timeout`);
   }
   mustMatch(read('CONTRIBUTING.md'), /Workflow jobs have explicit time limits[\s\S]*pinned to full commit SHAs/);

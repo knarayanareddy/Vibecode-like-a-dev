@@ -110,16 +110,15 @@ test('adopted TODO ideas are prominent in advisory mode and refused in strict pl
   const profile = path.join(workspace, 'profile.json');
   writeFileSync(profile, JSON.stringify({ ...PROFILE, idea: 'TODO replace with one paragraph. Adopted draft: web application.' }, null, 2));
 
-  const advisory = await cli(['plan', profile, '--advisory']);
+  const advisory = await cli(['plan', profile]);
   assert.equal(advisory.code, 0, advisory.stderr);
-  assert.match(advisory.stderr, /ADVISORY MODE/);
   assert.match(advisory.stderr, /TODO draft/);
 
-  const strictPlan = await cli(['plan', profile]);
+  const strictPlan = await cli(['plan', profile, '--strict']);
   assert.equal(strictPlan.code, 2);
-  assert.match(strictPlan.stderr, /Replace TODO in profile\.idea/);
+  assert.match(strictPlan.stderr, /Remove TODO from profile\.idea/);
 
-  const strictCompile = await cli(['compile', profile, '-o', path.join(workspace, 'spec')]);
+  const strictCompile = await cli(['compile', profile, '-o', path.join(workspace, 'spec'), '--strict']);
   assert.equal(strictCompile.code, 2);
   assert.equal(existsSync(path.join(workspace, 'spec')), false, 'strict refusal must not emit a packet');
 });
@@ -252,14 +251,12 @@ test('compile and verify report identical core packet markdown line counts even 
         users: { scale: 'medium' },
         traits: ['auth', 'admin', 'payments', 'persistence', 'webhooks', 'upload', 'ai', 'offline', 'background-jobs'],
         risks: { pii: true, payments: true, regulated: true, multiTenant: true, destructiveWrites: true, publicFacing: true, integrations: true },
-        riskWaivers: [{ flag: 'regulation:hipaa', reason: 'Covered directly by custom health-data overlay.', expires: '2099-01-01' }],
-        domain: { entity: 'reimbursement', actors: ['sponsor', 'participant'] },
         constraints: { team: 4, weeks: 12, stack: 'python' },
         overlays: ['two-person-review', 'health-data', 'org-baseline']
       })
     );
 
-    const compiled = await cli(['compile', profilePath, '-o', specsDir, '--advisory']);
+    const compiled = await cli(['compile', profilePath, '-o', specsDir]);
     assert.equal(compiled.code, 0, compiled.stderr);
     assert.doesNotMatch(compiled.stdout, /Over the tier ceiling/, 'enforcement templates must not push compile over the tier ceiling');
     const compileCount = Number(compiled.stdout.match(/markdown total\s+(\d+)\s+lines/)?.[1]);
@@ -323,9 +320,9 @@ test('vld adopt accepts a Git repository URL, and spec-check/verify enforce [CLA
     const adopted = JSON.parse(readFileSync(outProfile, 'utf8'));
     assert.equal(adopted.name, 'freight-hub');
 
-    // 2. Compile packet (with --advisory since freshly adopted profile needs human review), plant a [CLARIFY] marker, and test authoring warning vs --strict failure
+    // 2. Compile packet, plant a [CLARIFY] marker, and test authoring warning vs --strict failure
     const specsDir = path.join(workspace, 'specs');
-    const compiled = await cli(['compile', outProfile, '-o', specsDir, '--advisory']);
+    const compiled = await cli(['compile', outProfile, '-o', specsDir]);
     assert.equal(compiled.code, 0, compiled.stderr);
 
     const specJsonPath = path.join(specsDir, 'spec.json');

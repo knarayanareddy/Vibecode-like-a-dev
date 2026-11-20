@@ -9,16 +9,12 @@
 
 import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { digest, ensureProjectDir, extensionError, ID_PATTERN } from './extension-utils.mjs';
-
-/** Factory root (the `sandboxed-agent` implementer lives here, outside any workspace). */
-export const FACTORY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 export const AGENT_POLICY_SCHEMA_VERSION = 1;
 export const AGENT_POLICY_V2_SCHEMA_VERSION = 2;
 export const AGENT_ADAPTER_IDS = Object.freeze(['fake', 'local-process', 'acp-v1']);
-export const SANDBOXED_AGENT_ADAPTER_IDS = Object.freeze(['sandboxed-cli', 'sandboxed-acp', 'sandboxed-agent']);
+export const SANDBOXED_AGENT_ADAPTER_IDS = Object.freeze(['sandboxed-cli', 'sandboxed-acp']);
 export const ALL_AGENT_ADAPTER_IDS = Object.freeze([...AGENT_ADAPTER_IDS, ...SANDBOXED_AGENT_ADAPTER_IDS]);
 export const AGENT_CAPABILITIES = Object.freeze([
   'readWorkspace',
@@ -40,16 +36,7 @@ const SANDBOX_FIELDS = new Set(['backend', 'requireOs', 'allowChildProcess', 'ex
 const ALLOWED_SANDBOX_BACKENDS = new Set(['auto', 'oci', 'bwrap', 'linux-ns', 'darwin-seatbelt', 'node-permission']);
 const LIMIT_FIELDS = new Set(['durationMs', 'outputBytes', 'retryBudget']);
 const COMMAND_FIELDS = new Set(['script', 'executable', 'args']);
-const SAFE_ENVIRONMENT_NAMES = new Set([
-  'LANG', 'LC_ALL', 'TZ', 'NO_COLOR',
-  // Built-in `sandboxed-agent` model/tool context (roadmap 3.3) — non-secret
-  // references only; credentials never travel through agent policies.
-  'VLD_MODEL_SPEC', 'VLD_MODEL_BASE_URL', 'VLD_MODEL_TOKEN_ENV', 'VLD_MODEL_COMMAND',
-  'VLD_MODEL_CASSETTE_DIR', 'VLD_MODEL_CASSETTE_MODE',
-  'VLD_MODEL_MAX_CALLS', 'VLD_MODEL_MAX_TOKENS', 'VLD_MODEL_MAX_COST_USD',
-  'VLD_TEST_COMMAND', 'VLD_ALLOW_COMMANDS', 'VLD_WRITE_GLOBS',
-  'VLD_REPAIR_ATTEMPT', 'VLD_REPAIR_BRIEF'
-]);
+const SAFE_ENVIRONMENT_NAMES = new Set(['LANG', 'LC_ALL', 'TZ', 'NO_COLOR']);
 const FAKE_SCRIPTS = new Set(['succeed', 'fail', 'silent']);
 const MAX_DURATION_MS = 15 * 60 * 1_000;
 const MAX_OUTPUT_BYTES = 1024 * 1024;
@@ -145,29 +132,6 @@ export function defaultSandboxedCliPolicy({ executable = process.execPath, args 
 }
 
 /**
- * v2 policy for the built-in `sandboxed-agent` tool-loop implementer
- * (factory/agents/implementer.mjs). The agent spawns its declared test
- * command and allow-listed tools, so `allowChildProcess` is enabled while
- * network stays denied (model egress is brokered or cassette-replayed).
- */
-export function defaultSandboxedAgentPolicy({ executable = process.execPath, args = [], mode = 'write-workspace', backend = 'auto' } = {}) {
-  return {
-    ...defaultSandboxedCliPolicy({ executable, args, mode, backend }),
-    id: 'sandboxed-agent-v2',
-    adapter: 'sandboxed-agent',
-    sandbox: {
-      backend,
-      requireOs: false,
-      allowChildProcess: true,
-      // The implementer script (and its lib imports) live in the factory tree,
-      // outside every project workspace — grant read-only access to it.
-      extraReadPaths: [FACTORY_ROOT]
-    },
-    limits: { durationMs: 15 * 60_000, outputBytes: 262_144, retryBudget: 1 }
-  };
-}
-
-/**
  * Structural validation deliberately performs no filesystem lookup, so policy
  * review/digest tests are deterministic. `resolveLocalProcessCommand` performs
  * the executable resolution immediately before spawn.
@@ -207,10 +171,7 @@ export function validateAgentPolicy(policy) {
   } else {
     for (const [name, value] of Object.entries(policy.environment)) {
       if (!SAFE_ENVIRONMENT_NAMES.has(name)) errors.push(`agent policy.environment.${name} is not an approved non-secret environment key`);
-      // VLD_MODEL_TOKEN_ENV holds the NAME of an environment variable (e.g.
-      // VLD_ANTHROPIC_API_KEY), never a secret value; other keys stay strict.
-      const tokenEnvName = name === 'VLD_MODEL_TOKEN_ENV' && /^[A-Z_][A-Z0-9_]*$/.test(String(value));
-      if (!safeText(value, { maximum: 240 }) || (SECRETISH.test(value) && !tokenEnvName)) errors.push(`agent policy.environment.${name} must be a bounded non-secret one-line value`);
+      if (!safeText(value, { maximum: 240 }) || SECRETISH.test(value)) errors.push(`agent policy.environment.${name} must be a bounded non-secret one-line value`);
     }
   }
 

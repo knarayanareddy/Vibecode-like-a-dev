@@ -18,9 +18,7 @@ import { vocabularyFor } from './emit/vocabulary.mjs';
 import { ROOT } from './indexer.mjs';
 import { applyOverlays, checkOverlayTargets, overlayGates, resolveOverlays } from './overlays.mjs';
 import { evaluate, explain, getPath } from './predicate.mjs';
-import { defaultedProductionTierFields, getProfileProvenance } from './profile.mjs';
 import { formatRiskHintWarnings, scanRiskHints } from './risk-hints.mjs';
-import { formatRuleLintFindings, lintRules } from './rule-lint.mjs';
 
 const POLICY_PATH = path.join(ROOT, 'factory', 'policy.json');
 const ROUTING_PATH = path.join(ROOT, 'factory', 'routing.json');
@@ -421,10 +419,6 @@ export function buildPlan(
   const gates = collectGates(profile, policy, rigor, selected, overlayGates(resolved.overlays));
   const docs = policy.requiredDocs[rigor.packet];
   const riskHints = scanRiskHints(profile);
-  const ruleLint = lintRules(requirements, profile);
-  const ruleLintFormatted = formatRuleLintFindings(ruleLint);
-  const provenance = getProfileProvenance(profile);
-  const defaultedTierFields = defaultedProductionTierFields(profile);
   const vocab = vocabularyFor(profile);
   const vocabulary = {
     primary: vocab.primary,
@@ -443,14 +437,6 @@ export function buildPlan(
   const warnings = [
     ...selection.missing.map((id) => `routing references unknown primitive "${id}"`),
     ...formatRiskHintWarnings(riskHints, profile),
-    ...ruleLintFormatted.errors,
-    ...ruleLintFormatted.warnings,
-    ...(defaultedTierFields.length > 0
-      ? [
-          `provenance hint: production profile leaves tier-driving field(s) at default (${defaultedTierFields.join(', ')}). ` +
-            'Declare them explicitly in profile.json or record dated waivers in riskWaivers.'
-        ]
-      : []),
     ...(vocab.lowConfidence
       ? [
           `vocabulary hint: primary noun confidence is ${vocab.confidence.toFixed(2)} (< 0.60); using neutral default "${vocab.primary}"` +
@@ -476,9 +462,6 @@ export function buildPlan(
     customRules: compiledRules.pins,
     gates,
     riskHints,
-    ruleLint,
-    provenance,
-    defaultedTierFields,
     vocabulary,
     config: {
       team: profile.constraints.team,

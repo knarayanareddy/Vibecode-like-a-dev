@@ -3,7 +3,7 @@
   "schemaVersion": 1,
   "generatedWith": {
     "tool": "vibecode-like-a-dev",
-    "version": "0.21.0"
+    "version": "0.20.0"
   },
   "project": {
     "name": "fintech-payout-go",
@@ -1371,21 +1371,6 @@
       }
     },
     {
-      "id": "G2-MUTATION",
-      "statement": "Domain-layer mutation score meets or exceeds the 60% tier-2 kill floor.",
-      "origin": "policy:tier-2",
-      "enforcement": {
-        "runner": "enforcement/gates.mjs",
-        "command": "node enforcement/gates.mjs",
-        "files": [
-          "enforcement/mutation.config.json"
-        ],
-        "kind": "local",
-        "proves": "Mutation testing runs against domain modules and kills at least 60% of mutants (or records an explicit dated waiver).",
-        "doesNotProve": "`vld verify --run --mutation` or Stryker / mutmut / gremlins / cargo-mutants report enforcing a 60% kill floor."
-      }
-    },
-    {
       "id": "G3-MUTATION",
       "statement": "Domain-layer mutation score is at or above the target recorded in the spec.",
       "origin": "policy:tier-3",
@@ -1528,7 +1513,7 @@
     "customRequirements": 2,
     "acceptanceCriteria": 51,
     "automated": 26,
-    "gates": 25,
+    "gates": 24,
     "deferred": 0,
     "skipped": 4
   }

@@ -49,7 +49,7 @@ test('4.3 vld doctor and vld init --interactive guide setup and report live envi
   // Run vld doctor on this repo
   const doc = runDoctor({ projectDir: ROOT, profileFile: 'profile.json', packetDir: 'specs' });
   assert.equal(doc.ok, true, `doctor failed: ${JSON.stringify(doc.checks)}`);
-  assert.equal(doc.version, '0.21.0');
+  assert.equal(doc.version, '0.20.0');
   for (const id of ['node-runtime', 'git', 'sandbox', 'profile', 'packet', 'telemetry']) {
     assert.ok(doc.checks.some((c) => c.id === id), `missing doctor check ${id}`);
   }
@@ -130,7 +130,7 @@ test('4.4 vld migrate upgrades legacy profiles, v1 policies and stale packets wi
     // Apply migration
     const applied = migrateProject({ projectDir: tmp, dryRun: false });
     assert.equal(applied.ok, true);
-    assert.equal(applied.targetVersion, '0.21.0');
+    assert.equal(applied.targetVersion, '0.20.0');
     assert.equal(applied.changedCount, 4);
     assert.ok(existsSync(path.join(tmp, 'profile.json.bak')));
     assert.ok(existsSync(path.join(tmp, '.vld', 'agent-policy.json.bak')));
@@ -181,7 +181,7 @@ test('0.4, 4.3 & 4.4 VitePress config, archived plans, README metrics, CycloneDX
   const sbom = JSON.parse(readFileSync(path.join(ROOT, 'sbom.cdx.json'), 'utf8'));
   assert.equal(sbom.bomFormat, 'CycloneDX');
   assert.equal(sbom.specVersion, '1.5');
-  assert.equal(sbom.metadata.component.version, '0.21.0');
+  assert.equal(sbom.metadata.component.version, '0.20.0');
   assert.deepEqual(sbom.components, []);
 
   // release.yml pins every third-party action to a full 40-char SHA and publishes with --provenance

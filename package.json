@@ -1,6 +1,6 @@
 {
   "name": "vibecode-like-a-dev",
-  "version": "0.21.0",
+  "version": "0.20.0",
   "description": "Turn a one-line idea or an existing repository into an enforceable software factory spec that any coding agent can execute.",
   "type": "module",
   "license": "MIT",
@@ -10,7 +10,6 @@
   "files": [
     "factory/cli.mjs",
     "factory/adapters",
-    "factory/agents",
     "factory/bundles",
     "factory/catalog",
     "factory/evals",
@@ -38,7 +37,6 @@
     "factory/test",
     "factory/workflows",
     "primitives",
-    "packages/analysis",
     "docs",
     "prompts",
     "examples/ideas/01-photo-sorter.json",

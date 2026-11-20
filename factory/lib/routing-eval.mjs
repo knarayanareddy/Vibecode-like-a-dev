@@ -18,7 +18,6 @@
  */
 
 import { execSync } from 'node:child_process';
-import { createModelClient } from './model-client.mjs';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { ROOT, buildIndex } from './indexer.mjs';
@@ -136,88 +135,55 @@ function createCmdSelector(command, catalog, validIds, { unsafeCommandAcknowledg
   };
 }
 
-function createOpenAiSelector(
-  {
-    provider = 'openai',
-    model = process.env.EVAL_MODEL || 'gpt-4o-mini',
-    baseUrl = process.env.OPENAI_BASE_URL || 'https://api.openai.com',
-    tokenEnv = 'OPENAI_API_KEY',
-    cassetteDir = null,
-    cassetteMode = null,
-    budget = {},
-    modelClient = null
-  } = {},
-  catalog,
-  validIds
-) {
-  const client = modelClient ?? createModelClient({
-    provider,
-    model,
-    baseUrl,
-    tokenEnv,
-    cassetteDir,
-    cassetteMode,
-    budget
-  });
-  if (!modelClient && !cassetteDir && provider === 'openai' && !process.env[tokenEnv]) {
-    throw new Error(`openai driver requires ${tokenEnv} in the environment`);
-  }
+function createOpenAiSelector({ model = process.env.EVAL_MODEL || 'gpt-4o-mini', baseUrl = process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1', apiKey = process.env.OPENAI_API_KEY } = {}, catalog, validIds) {
+  if (!apiKey) throw new Error('openai driver requires OPENAI_API_KEY in the environment');
   return async (prompt) => {
-    const res = await client.complete({
-      messages: [{ role: 'user', content: buildModelRoutingPrompt(prompt, catalog) }],
-      schema: { title: 'routing_selection', type: 'object', properties: { selected: { type: 'array', items: { type: 'string' } } } },
-      maxTokens: 256,
-      temperature: 0
+    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0,
+        response_format: { type: 'json_object' },
+        messages: [{ role: 'user', content: buildModelRoutingPrompt(prompt, catalog) }]
+      })
     });
+    if (!response.ok) throw new Error(`OpenAI HTTP ${response.status}: ${await response.text()}`);
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content ?? '{"selected":[]}';
     return {
-      ...parseModelSelection(res.text || JSON.stringify(res.json ?? { selected: [] }), validIds),
-      tokens: res.usage?.totalTokens ?? 0,
-      costUsd: res.usage?.costUsd ?? 0,
-      requestDigest: res.requestDigest,
-      responseDigest: res.responseDigest,
-      cached: res.cached
+      ...parseModelSelection(content, validIds),
+      tokens: (data.usage?.prompt_tokens ?? 0) + (data.usage?.completion_tokens ?? 0)
     };
   };
 }
 
-function createAnthropicSelector(
-  {
-    model = process.env.EVAL_MODEL || 'claude-haiku-4-5',
-    baseUrl = process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com',
-    tokenEnv = 'ANTHROPIC_API_KEY',
-    cassetteDir = null,
-    cassetteMode = null,
-    budget = {},
-    modelClient = null
-  } = {},
-  catalog,
-  validIds
-) {
-  const client = modelClient ?? createModelClient({
-    provider: 'anthropic',
-    model,
-    baseUrl,
-    tokenEnv,
-    cassetteDir,
-    cassetteMode,
-    budget
-  });
-  if (!modelClient && !cassetteDir && !process.env[tokenEnv]) {
-    throw new Error(`anthropic driver requires ${tokenEnv} in the environment`);
-  }
+function createAnthropicSelector({ model = process.env.EVAL_MODEL || 'claude-3-5-haiku-latest', baseUrl = process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com', apiKey = process.env.ANTHROPIC_API_KEY } = {}, catalog, validIds) {
+  if (!apiKey) throw new Error('anthropic driver requires ANTHROPIC_API_KEY in the environment');
   return async (prompt) => {
-    const res = await client.complete({
-      messages: [{ role: 'user', content: buildModelRoutingPrompt(prompt, catalog) }],
-      maxTokens: 256,
-      temperature: 0
+    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/v1/messages`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 256,
+        temperature: 0,
+        messages: [{ role: 'user', content: buildModelRoutingPrompt(prompt, catalog) }]
+      })
     });
+    if (!response.ok) throw new Error(`Anthropic HTTP ${response.status}: ${await response.text()}`);
+    const data = await response.json();
+    const content = data.content?.map((part) => part.text ?? '').join('\n') ?? '{"selected":[]}';
     return {
-      ...parseModelSelection(res.text || '{"selected":[]}', validIds),
-      tokens: res.usage?.totalTokens ?? 0,
-      costUsd: res.usage?.costUsd ?? 0,
-      requestDigest: res.requestDigest,
-      responseDigest: res.responseDigest,
-      cached: res.cached
+      ...parseModelSelection(content, validIds),
+      tokens: (data.usage?.input_tokens ?? 0) + (data.usage?.output_tokens ?? 0)
     };
   };
 }

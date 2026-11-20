@@ -191,10 +191,6 @@
         "statement": "CI fails when a requirement loses its test anchor or the spec references a missing primitive."
       },
       {
-        "id": "G2-MUTATION",
-        "statement": "Domain-layer mutation score meets or exceeds the 60% tier-2 kill floor."
-      },
-      {
         "id": "G2-AUTONOMY",
         "primitiveOnly": true,
         "statement": "Autonomous tool calls enforce a closed allowlist, human confirmation on destructive actions, step/cost ceilings and a tested kill switch."

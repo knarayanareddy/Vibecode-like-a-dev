@@ -22,7 +22,6 @@ export const EVIDENCE_KINDS = Object.freeze([
   'compile',
   'verify',
   'sandbox-run',
-  'agent-transcript',
   'repair',
   'review',
   'approval',
@@ -30,15 +29,7 @@ export const EVIDENCE_KINDS = Object.freeze([
   'forge',
   'drift',
   'build',
-  'migration',
-  'intake',
-  'intake-accepted',
-  'profile-answer',
-  'agent-transcript',
-  'broker-session',
-  'budget-halt',
-  'operator-control',
-  'attestation'
+  'migration'
 ]);
 
 const DEFAULT_LEDGER_REL = path.join('.vld', 'evidence', 'evidence.jsonl');

@@ -22,10 +22,10 @@ import { defaultSandboxedDeliveryPolicy, validateDeliveryPolicy } from '../lib/d
 import { emitPacket } from '../lib/emit/index.mjs';
 import { digest } from '../lib/extension-utils.mjs';
 import { buildIndex } from '../lib/indexer.mjs';
-import { createMission, planMissionDefinitionFromPacket, rebaseMission, validateMissionDefinition } from '../lib/missions.mjs';
+import { createMission, rebaseMission } from '../lib/missions.mjs';
 import { buildPlan } from '../lib/planner.mjs';
 import { normalizeProfile } from '../lib/profile.mjs';
-import { buildRepairPrompt, classifyVerificationFailures, runRepairLoop } from '../lib/repair.mjs';
+import { classifyVerificationFailures, runRepairLoop } from '../lib/repair.mjs';
 import { allocateRuntimePackage, initializeRuntime } from '../lib/runtime.mjs';
 import { runRuntimeAgent } from '../lib/runtime-agent.mjs';
 import { submitRuntimeDeliveryCandidate, verifyRuntimeDeliveryCandidateAsync } from '../lib/runtime-delivery.mjs';
@@ -136,7 +136,7 @@ test('2.3 & 2.4 sandboxed-cli v2 policy, resource-claim gate, receipt-gated cand
       "import fs from 'node:fs';",
       "fs.mkdirSync('tests', { recursive: true });",
       `const anchors = ${JSON.stringify(autoReqs)}.map((id) => '// ${reqTag} ' + id).join('\\n');`,
-      "fs.writeFileSync('tests/unit.test.mjs', `import test from 'node:test';\\nimport assert from 'node:assert/strict';\\nimport { hashArchive } from '../src/index.mjs';\\n${anchors}\\ntest('hashes archive', () => {\\n  assert.equal(hashArchive('abc'), 'sha256:3');\\n});\\n`);"
+      "fs.writeFileSync('tests/unit.test.mjs', `import assert from 'node:assert/strict';\\nimport { hashArchive } from '../src/index.mjs';\\n${anchors}\\nassert.equal(hashArchive('abc'), 'sha256:3');\\n`);"
     ].join('\n'),
     'utf8'
   );
@@ -322,8 +322,7 @@ test('2.5 repair loop classifies failures, redacts secrets, converges, detects s
   assert.equal(converged.outcome, 'converged');
   assert.equal(converged.repairsUsed, 1);
 
-  // Stalls immediately when repair produces identical failure signature —
-  // halted as `stuck` and escalated for human review (roadmap P3.4).
+  // Stalls immediately when repair produces identical failure signature
   const stalled = await runRepairLoop({
     packageId: 'pkg-core',
     maxRepairs: 3,
@@ -331,8 +330,7 @@ test('2.5 repair loop classifies failures, redacts secrets, converges, detects s
     repair: async () => ({})
   });
   assert.equal(stalled.ok, false);
-  assert.equal(stalled.outcome, 'stuck');
-  assert.equal(stalled.escalated, true);
+  assert.equal(stalled.outcome, 'stalled');
   assert.equal(stalled.repairsUsed, 1);
 
   // Halts with 0 repairs on non-retryable sandbox violation
@@ -432,13 +430,10 @@ test('2.7 vld build compiles, executes in sandbox, self-repairs from repair brie
       "  const spec = JSON.parse(fs.readFileSync('specs/spec.json', 'utf8'));",
       `  const anchors = spec.requirements.filter((r) => r.verify === 'automated').map((r) => '// ${reqTag} ' + r.id).join('\\n');`,
       "  fs.writeFileSync('tests/checksum.test.mjs', [",
-      "    \"import test from 'node:test';\",",
       "    \"import assert from 'node:assert/strict';\",",
       "    \"import { hashArchive } from '../src/index.mjs';\",",
       "    anchors,",
-      "    \"test('hashes archive', () => {\",",
-      "    \"  assert.equal(hashArchive('hello'), 'sha256:5');\",",
-      "    \"});\",",
+      "    \"assert.equal(hashArchive('hello'), 'sha256:5');\",",
       "    ''",
       "  ].join('\\n'));",
       "}"
@@ -472,273 +467,4 @@ test('2.7 vld build compiles, executes in sandbox, self-repairs from repair brie
   assert.equal(live.packages[0].repairsUsed, 1);
   assert.equal(live.packages[0].verificationOutcome, 'passed');
   assert.ok(existsSync(path.join(proj.root, live.reportFile)));
-});
-
-// --- P3.4 Smarter packages + repair (roadmap) -------------------------------------------
-
-function emitFixturePacket(profileFields) {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'vld-p34-'));
-  const plan = buildPlan(normalizeProfile(profileFields), { index: INDEX });
-  emitPacket(plan, path.join(dir, 'specs'), { force: true, packetDir: 'specs' });
-  const spec = JSON.parse(readFileSync(path.join(dir, 'specs', 'spec.json'), 'utf8'));
-  return {
-    dir,
-    spec,
-    packetDir: path.join(dir, 'specs'),
-    cleanup: () => rmSync(dir, { recursive: true, force: true })
-  };
-}
-
-test('P3.4 package derivation: CLI profile collapses to one package; API profile derives core/api/contract in dependency order', (t) => {
-  // CLI is one bounded context: every requirement lands in a single work package.
-  const cli = emitFixturePacket({
-    name: 'todo-cli',
-    idea: 'A command-line checklist tool that stores tasks in a local file and prints status reports.',
-    kind: 'cli',
-    stage: 'mvp',
-    traits: [],
-    risks: {},
-    constraints: { stack: 'javascript' }
-  });
-  t.after(cli.cleanup);
-  const cliDef = planMissionDefinitionFromPacket({ packetDir: cli.packetDir });
-  assert.equal(cliDef.workPackages.length, 1, `CLI profile derives a single package, got ${cliDef.workPackages.map((p) => p.id).join(',')}`);
-  assert.equal(cliDef.workPackages[0].id, 'pkg-app');
-  assert.deepEqual(cliDef.workPackages[0].requirements, cli.spec.requirements.map((r) => r.id).sort());
-  assert.equal(validateMissionDefinition(cliDef).ok, true);
-
-  // A service product separates core / api / contract, with the interface
-  // contract landing before the API that realizes it (contract dependency order).
-  const api = emitFixturePacket({
-    name: 'svc',
-    idea: 'A payments API with idempotent transfers and a signed contract.',
-    kind: 'api',
-    stage: 'production',
-    traits: [],
-    risks: { financial: true },
-    constraints: { stack: 'python' }
-  });
-  t.after(api.cleanup);
-  const apiDef = planMissionDefinitionFromPacket({ packetDir: api.packetDir });
-  assert.deepEqual(apiDef.workPackages.map((p) => p.id), ['pkg-core', 'pkg-contract', 'pkg-api']);
-  const byId = new Map(apiDef.workPackages.map((p) => [p.id, p]));
-  const byKey = new Map(api.spec.requirements.map((r) => [r.key, r.id]));
-  assert.ok(byId.get('pkg-contract').requirements.includes(byKey.get('api.contract')), 'api.contract lands in the contract package');
-  assert.ok(byId.get('pkg-api').requirements.includes(byKey.get('api.error-envelope')), 'api error behaviour lands in the api package');
-  assert.ok(byId.get('pkg-core').requirements.includes(byKey.get('data.persistence')), 'service products fold data obligations into core');
-  assert.deepEqual(byId.get('pkg-contract').dependsOn, ['pkg-core']);
-  assert.deepEqual(byId.get('pkg-api').dependsOn, ['pkg-contract', 'pkg-core']);
-  assert.ok(byId.get('pkg-contract').resourceClaims.paths.includes('contracts/**'));
-  assert.ok(!byId.get('pkg-contract').resourceClaims.paths.includes('src/**'), 'contract claims follow the contract stack layout');
-  const assigned = apiDef.workPackages.flatMap((p) => p.requirements);
-  assert.equal(assigned.length, api.spec.requirements.length, 'every requirement is assigned exactly once');
-  assert.equal(new Set(assigned).size, assigned.length);
-  assert.equal(validateMissionDefinition(apiDef).ok, true);
-});
-
-test('P3.4 mission.json overrides merge packages, set the concurrency cap and cost ceilings, and validate strictly', (t) => {
-  const api = emitFixturePacket({
-    name: 'svc',
-    idea: 'A payments API with idempotent transfers and a signed contract.',
-    kind: 'api',
-    stage: 'production',
-    traits: [],
-    risks: { financial: true },
-    constraints: { stack: 'python' }
-  });
-  t.after(api.cleanup);
-  const apiReq = api.spec.requirements.find((r) => r.key === 'api.error-envelope').id;
-
-  const merged = planMissionDefinitionFromPacket({
-    packetDir: api.packetDir,
-    overrides: {
-      maxConcurrentWorktrees: 3,
-      budget: { maxCostUsd: 4, maxTokens: 500000 },
-      removePackages: ['pkg-api'],
-      workPackages: [
-        { id: 'pkg-contract', budget: { maxCostUsd: 1 } },
-        {
-          id: 'pkg-surface',
-          title: 'Implement the api surface requirements',
-          requirements: [apiReq],
-          dependsOn: ['pkg-contract'],
-          resourceClaims: { paths: ['src/**', 'tests/**'] },
-          budget: { maxTokens: 9000 }
-        }
-      ]
-    }
-  });
-  assert.equal(merged.maxConcurrentWorktrees, 3);
-  assert.equal(merged.budget.maxCostUsd, 4);
-  assert.equal(merged.budget.maxTokens, 500000);
-  assert.deepEqual(merged.workPackages.map((p) => p.id), ['pkg-core', 'pkg-contract', 'pkg-surface']);
-  assert.deepEqual(merged.workPackages.find((p) => p.id === 'pkg-surface').dependsOn, ['pkg-contract']);
-  assert.deepEqual(merged.workPackages.find((p) => p.id === 'pkg-contract').budget, { maxCostUsd: 1 });
-  assert.deepEqual(merged.workPackages.find((p) => p.id === 'pkg-surface').budget, { maxTokens: 9000 });
-  assert.equal(validateMissionDefinition(merged).ok, true);
-
-  // Strict validation of overrides.
-  assert.throws(
-    () => planMissionDefinitionFromPacket({ packetDir: api.packetDir, overrides: { maxConcurrentWorktrees: 5 } }),
-    /maxConcurrentWorktrees must be an integer between 1 and 4/
-  );
-  assert.throws(
-    () => planMissionDefinitionFromPacket({ packetDir: api.packetDir, overrides: { mystery: true } }),
-    /mission overrides.mystery is not allowed/
-  );
-  assert.throws(
-    () => planMissionDefinitionFromPacket({ packetDir: api.packetDir, overrides: { budget: { maxTokens: -1 } } }),
-    /maxTokens must be a non-negative integer/
-  );
-  assert.throws(
-    () => planMissionDefinitionFromPacket({
-      packetDir: api.packetDir,
-      overrides: { workPackages: [{ id: 'pkg-surface', title: 'x'.repeat(12), requirements: [] }] }
-    }),
-    /requirements must name at least one requirement id/
-  );
-});
-
-test('P3.4 repair brief names failing tests, spec-check findings, gate output and last-attempt diff; cost ceilings halt', async () => {
-  const diagnosis = classifyVerificationFailures({
-    ok: false,
-    drift: { errors: ['REQ-003 has no test anchor'] },
-    gates: { failures: ['G1-DOMAIN-TESTS ✗ domain test missing'] },
-    tests: { ok: false, exitCode: 1, stdout: 'not ok 2 - sums two numbers\nnot ok 3 - rejects negatives', stderr: '' }
-  });
-  const prompt = buildRepairPrompt({
-    packageId: 'pkg-core',
-    attempt: 1,
-    maxAttempts: 2,
-    diagnosis,
-    requirements: [],
-    verification: { ok: false, gates: { stdout: 'gate runner: mutation score below threshold', failures: [] } },
-    previousAttemptDiff: 'diff --git a/src/calc.mjs b/src/calc.mjs\n- return a + b + 7;\n+ return a + b;'
-  });
-  assert.match(prompt, /## Failing tests/);
-  assert.match(prompt, /sums two numbers/);
-  assert.match(prompt, /rejects negatives/);
-  assert.match(prompt, /## Spec-check findings/);
-  assert.match(prompt, /REQ-003 has no test anchor/);
-  assert.match(prompt, /## Gate output/);
-  assert.match(prompt, /mutation score below threshold/);
-  assert.match(prompt, /## Changes since the previous attempt/);
-  assert.match(prompt, /return a \+ b \+ 7;/);
-
-  // Distinct, escalating failures accumulate against the package cost ceiling.
-  let round = 0;
-  const capped = await runRepairLoop({
-    packageId: 'pkg-core',
-    maxRepairs: 3,
-    budget: { maxCostUsd: 1 },
-    verify: async () => ({ ok: false, drift: { errors: [`REQ-00${(round += 1)} has no test anchor`] } }),
-    repair: async () => ({ usage: { totalTokens: 100, costUsd: 0.8 } })
-  });
-  assert.equal(capped.ok, false);
-  assert.equal(capped.outcome, 'cost-ceiling');
-  assert.equal(capped.escalated, true);
-  assert.equal(capped.repairsUsed, 2);
-  assert.ok(capped.usage.costUsd > 1);
-
-  // A spend already past the ceiling halts before any repair runs.
-  const preSpent = await runRepairLoop({
-    packageId: 'pkg-core',
-    maxRepairs: 3,
-    budget: { maxCostUsd: 1 },
-    initialUsage: { totalTokens: 10000, costUsd: 9 },
-    verify: async () => ({ ok: false, drift: { errors: ['REQ-002 has no test anchor'] } }),
-    repair: async () => { throw new Error('must not repair past the cost ceiling'); }
-  });
-  assert.equal(preSpent.outcome, 'cost-ceiling');
-  assert.equal(preSpent.repairsUsed, 0);
-  assert.equal(preSpent.escalated, true);
-});
-
-test('P3.4 parallel worktrees honor the mission concurrency cap', async (t) => {
-  const reqTag = ['@', 'req'].join('');
-
-  async function greenProject(name, cap) {
-    const proj = createGitProject({ name, stage: 'mvp' });
-    t.after(proj.cleanup);
-    const spec = JSON.parse(readFileSync(path.join(proj.root, 'specs', 'spec.json'), 'utf8'));
-    const allIds = spec.requirements.map((r) => r.id).sort();
-    const automated = spec.requirements.filter((r) => r.verify === 'automated');
-    const tests = [
-      "import test from 'node:test';",
-      "import assert from 'node:assert/strict';",
-      "import { hashArchive } from '../src/index.mjs';",
-      '',
-      ...automated.flatMap((r) => [
-        `// ${reqTag} ${r.id}`,
-        `test('${r.id} hashes deterministically', () => { assert.equal(hashArchive('hi'), 'sha256:2'); });`,
-        ''
-      ])
-    ].join('\n');
-    writeFileSync(path.join(proj.root, 'tests', 'anchored.test.mjs'), tests, 'utf8');
-    git(proj.root, ['add', '-A']);
-    git(proj.root, ['commit', '-qm', 'anchored green tests']);
-    const derived = planMissionDefinitionFromPacket({ packetDir: path.join(proj.root, 'specs') });
-    const half = Math.ceil(allIds.length / 2);
-    return {
-      proj,
-      overrides: {
-        maxConcurrentWorktrees: cap,
-        removePackages: derived.workPackages.map((p) => p.id),
-        workPackages: [
-          {
-            id: 'pkg-alpha',
-            title: 'Implement alpha half of the specification requirements',
-            requirements: allIds.slice(0, half),
-            dependsOn: [],
-            resourceClaims: { paths: ['src/**', 'tests/**', 'spec/**', 'docs/**'] }
-          },
-          {
-            id: 'pkg-beta',
-            title: 'Implement beta half of the specification requirements',
-            requirements: allIds.slice(half),
-            dependsOn: [],
-            resourceClaims: { paths: ['src/**', 'tests/**', 'spec/**', 'docs/**'] }
-          }
-        ]
-      }
-    };
-  }
-
-  // Cap 2: two independent packages run concurrently (worktrees overlap).
-  const parallel = await greenProject('par-two', 2);
-  const live2 = await runBuild({
-    projectDir: parallel.proj.root,
-    packetDir: 'specs',
-    adapter: 'fake',
-    missionOverrides: parallel.overrides,
-    verifyGates: false,
-    requireAssertions: true
-  });
-  assert.equal(live2.ok, true, JSON.stringify(live2, null, 2));
-  assert.equal(live2.packages.length, 2);
-  assert.ok(live2.packages.every((p) => p.verificationOutcome === 'passed'));
-  assert.equal(live2.maxConcurrentWorktrees, 2);
-  const [alpha, beta] = live2.packages;
-  assert.ok(
-    alpha.startedAt < beta.finishedAt && beta.startedAt < alpha.finishedAt,
-    `packages must overlap under cap 2 (${alpha.startedAt}..${alpha.finishedAt} vs ${beta.startedAt}..${beta.finishedAt})`
-  );
-
-  // Cap 1 (default): packages run strictly serially.
-  const serial = await greenProject('par-one', 1);
-  const live1 = await runBuild({
-    projectDir: serial.proj.root,
-    packetDir: 'specs',
-    adapter: 'fake',
-    missionOverrides: serial.overrides,
-    verifyGates: false,
-    requireAssertions: true
-  });
-  assert.equal(live1.ok, true, JSON.stringify(live1, null, 2));
-  assert.equal(live1.maxConcurrentWorktrees, 1);
-  const [first, second] = live1.packages;
-  assert.ok(
-    first.finishedAt <= second.startedAt || second.finishedAt <= first.startedAt,
-    `packages must not overlap under cap 1 (${first.startedAt}..${first.finishedAt} vs ${second.startedAt}..${second.finishedAt})`
-  );
 });

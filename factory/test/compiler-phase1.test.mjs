@@ -60,16 +60,15 @@ test('1.1 risk-hint scanner flags unflagged telehealth risks, enforces --strict,
   // Compiler purity: profile.risks is never mutated.
   assert.deepEqual(base.risks, {});
 
-  // --explain with --advisory surfaces fired, unflagged, waived and suggested regime lines.
-  const explain = runCli(['plan', profilePath, '--advisory', '--explain']);
+  // --explain surfaces fired, unflagged, waived and suggested regime lines.
+  const explain = runCli(['plan', profilePath, '--explain']);
   assert.equal(explain.status, 0, explain.stderr);
-  assert.match(explain.stderr, /ADVISORY MODE/);
   assert.match(explain.stdout, /explain · signal & vocabulary trace:/);
   assert.match(explain.stdout, /risks\.regulated <-/);
   assert.match(explain.stdout, /regulation "hipaa" <-/);
 
-  // Default strict mode rejects unwaived risk signals.
-  const strictFail = runCli(['plan', profilePath]);
+  // --strict rejects unwaived risk signals.
+  const strictFail = runCli(['plan', profilePath, '--strict']);
   assert.equal(strictFail.status, 2);
   assert.match(strictFail.stderr, /unflagged risk signal\(s\)/);
 
@@ -119,8 +118,8 @@ test('1.1 risk-hint scanner flags unflagged telehealth risks, enforces --strict,
   assert.deepEqual(benignScan.unflaggedRisks, []);
 });
 
-test('1.2 all 10 regulation overlays (including ccpa, coppa, ferpa, sox, dora, eu-ai-act) compile valid packets with enforceable gates', (t) => {
-  assert.deepEqual(REGULATIONS, ['hipaa', 'gdpr', 'ccpa', 'pci-dss', 'soc2', 'coppa', 'ferpa', 'sox', 'dora', 'eu-ai-act']);
+test('1.2 all 9 regulation overlays (including coppa, ferpa, sox, dora, eu-ai-act) compile valid packets with enforceable gates', (t) => {
+  assert.deepEqual(REGULATIONS, ['hipaa', 'gdpr', 'pci-dss', 'soc2', 'coppa', 'ferpa', 'sox', 'dora', 'eu-ai-act']);
 
   const expectedByRegime = {
     coppa: ['privacy.parental-consent', 'G3-PARENTAL-CONSENT'],
@@ -176,9 +175,8 @@ test('1.3 noun confidence rejects autonomous/clinical qualifiers, enforces --str
     idea: 'A modern automated resilient scalable system designed to be fast, flexible and reliable for internal operators.',
     kind: 'api',
     stage: 'production',
-    users: { scale: 'small' },
     traits: ['auth', 'persistence'],
-    risks: { pii: false, payments: false, regulated: false, multiTenant: true, destructiveWrites: false, publicFacing: false, integrations: true },
+    risks: { multiTenant: true, integrations: true },
     constraints: { stack: 'typescript' }
   };
   const vagueVocab = vocabularyFor(vagueProfile);
@@ -224,9 +222,8 @@ test('1.4 custom profile.rules emit stable REQ-Cxx requirements, verify via spec
     idea: 'A settlement service managing merchant payouts. Refunds over $500 require dual approval before disbursement.',
     kind: 'api',
     stage: 'production',
-    users: { scale: 'small' },
     traits: ['auth', 'payments', 'persistence'],
-    risks: { pii: true, payments: true, regulated: false, multiTenant: false, destructiveWrites: false, publicFacing: false, integrations: false },
+    risks: { payments: true, pii: true },
     constraints: { stack: 'typescript' },
     rules: [
       'Refunds over $500 require dual approval before disbursement.',

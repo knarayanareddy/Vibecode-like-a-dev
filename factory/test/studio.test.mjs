@@ -59,7 +59,7 @@ test('Studio browser program renders an authoritative forge plan receipt into DO
     removeChild(node) { this.children.splice(this.children.indexOf(node), 1); }
     addEventListener(type, listener) { this.listeners.set(type, listener); }
   }
-  const ids = ['token', 'connect', 'refresh', 'connection', 'mission', 'packages', 'runs', 'evidence', 'package-id', 'assignee', 'lease-ms', 'allocate', 'recover', 'questions', 'profile-file', 'load-questions'];
+  const ids = ['token', 'connect', 'refresh', 'connection', 'mission', 'packages', 'runs', 'evidence', 'package-id', 'assignee', 'lease-ms', 'allocate', 'recover'];
   const nodes = Object.fromEntries(ids.map((id) => [id, new Node()]));
   const status = {
     ok: true,

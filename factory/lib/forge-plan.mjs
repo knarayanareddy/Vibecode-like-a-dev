@@ -22,7 +22,7 @@ function safeNumber(value) { if (!Number.isSafeInteger(value) || value < 1) thro
 
 /** Validate an immutable, provider-safe GitHub pull-request plan. */
 export function assertGitHubPullRequestPlan(plan) {
-  const allowed = new Set(['schemaVersion', 'provider', 'repository', 'headRef', 'headSha', 'baseRef', 'candidateId', 'candidateSha', 'targetSha', 'packetDigest', 'policyDigest', 'title', 'body', 'existingPullNumber', 'requiredChecks', 'requireGitHubApproval', 'allowMergeRequest', 'draft', 'digest']);
+  const allowed = new Set(['schemaVersion', 'provider', 'repository', 'headRef', 'headSha', 'baseRef', 'candidateId', 'candidateSha', 'targetSha', 'packetDigest', 'policyDigest', 'title', 'body', 'existingPullNumber', 'requiredChecks', 'requireGitHubApproval', 'allowMergeRequest', 'digest']);
   if (!object(plan) || plan.provider !== 'github-v1' || Object.keys(plan).some((key) => !allowed.has(key))) throw extensionError('GitHub plan is invalid', 'INVALID_GITHUB_PLAN');
   const { digest: planDigest, ...unsigned } = plan;
   if (!/^[a-f0-9]{64}$/.test(String(planDigest ?? '')) || digest(unsigned) !== planDigest) throw extensionError('GitHub plan digest does not match its reviewed contents', 'GITHUB_PLAN_DIGEST_MISMATCH');
@@ -33,12 +33,11 @@ export function assertGitHubPullRequestPlan(plan) {
   if (plan.existingPullNumber !== undefined) safeNumber(plan.existingPullNumber);
   if (!Array.isArray(plan.requiredChecks) || plan.requiredChecks.length > 30 || plan.requiredChecks.some((check) => !safeLine(check, 120)) || new Set(plan.requiredChecks).size !== plan.requiredChecks.length) throw extensionError('GitHub plan requiredChecks are invalid', 'INVALID_GITHUB_PLAN');
   if (typeof plan.requireGitHubApproval !== 'boolean' || typeof plan.allowMergeRequest !== 'boolean') throw extensionError('GitHub plan flags are invalid', 'INVALID_GITHUB_PLAN');
-  if (plan.draft !== undefined && typeof plan.draft !== 'boolean') throw extensionError('GitHub plan draft flag is invalid', 'INVALID_GITHUB_PLAN');
   return plan;
 }
 
 /** Bind exact M5 receipts into a non-secret, reviewable provider plan. */
-export function createGitHubPullRequestPlan({ repository, headRef, baseRef, candidate, approval, queue, title, body = '', existingPullNumber = null, requiredChecks = [], requireGitHubApproval = true, allowMergeRequest = false, draft = true } = {}) {
+export function createGitHubPullRequestPlan({ repository, headRef, baseRef, candidate, approval, queue, title, body = '', existingPullNumber = null, requiredChecks = [], requireGitHubApproval = true, allowMergeRequest = false } = {}) {
   safeRepository(repository); safeRef(headRef, 'head'); safeRef(baseRef, 'base');
   if (!object(candidate) || !ID_PATTERN.test(String(candidate.id ?? ''))) throw extensionError('GitHub plan requires a frozen VLD candidate receipt', 'GITHUB_PLAN_TUPLE_INVALID');
   for (const field of ['candidateSha', 'targetSha']) safeSha(candidate[field], field);
@@ -48,7 +47,7 @@ export function createGitHubPullRequestPlan({ repository, headRef, baseRef, cand
   if (!safeLine(title, 240) || !safeBody(body)) throw extensionError('GitHub pull request title/body is invalid', 'INVALID_GITHUB_PULL_REQUEST');
   if (existingPullNumber !== null) safeNumber(existingPullNumber);
   if (!Array.isArray(requiredChecks) || requiredChecks.length > 30 || requiredChecks.some((check) => !safeLine(check, 120)) || new Set(requiredChecks).size !== requiredChecks.length) throw extensionError('GitHub requiredChecks are invalid', 'INVALID_GITHUB_PLAN');
-  if (typeof requireGitHubApproval !== 'boolean' || typeof allowMergeRequest !== 'boolean' || typeof draft !== 'boolean') throw extensionError('GitHub plan flags are invalid', 'INVALID_GITHUB_PLAN');
-  const plan = { schemaVersion: 1, provider: 'github-v1', repository, headRef, headSha: candidate.candidateSha, baseRef, candidateId: candidate.id, candidateSha: candidate.candidateSha, targetSha: candidate.targetSha, packetDigest: candidate.packetDigest, policyDigest: candidate.policyDigest, title, body, ...(existingPullNumber ? { existingPullNumber } : {}), requiredChecks: [...requiredChecks].sort(), requireGitHubApproval, allowMergeRequest, draft };
+  if (typeof requireGitHubApproval !== 'boolean' || typeof allowMergeRequest !== 'boolean') throw extensionError('GitHub plan flags are invalid', 'INVALID_GITHUB_PLAN');
+  const plan = { schemaVersion: 1, provider: 'github-v1', repository, headRef, headSha: candidate.candidateSha, baseRef, candidateId: candidate.id, candidateSha: candidate.candidateSha, targetSha: candidate.targetSha, packetDigest: candidate.packetDigest, policyDigest: candidate.policyDigest, title, body, ...(existingPullNumber ? { existingPullNumber } : {}), requiredChecks: [...requiredChecks].sort(), requireGitHubApproval, allowMergeRequest };
   return { ...plan, digest: digest(plan) };
 }

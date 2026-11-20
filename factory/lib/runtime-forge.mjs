@@ -9,14 +9,11 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { existsSync, linkSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, lstatSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { assertGitHubPullRequestPlan, createGitHubPullRequestPlan } from './forge-plan.mjs';
 import { digest, ensureProjectDir, extensionError } from './extension-utils.mjs';
-import { verifyEvidenceChain } from './evidence.mjs';
-import { readMission } from './missions.mjs';
 import { recordRuntimeForgePlan, runtimeForgeEvidence } from './runtime.mjs';
-import { requiresHumanReview } from './review.mjs';
 
 function atIso(now = undefined) {
   const value = now === undefined ? new Date() : new Date(now);
@@ -41,27 +38,8 @@ function safeTitle(value, evidence) {
   return `VLD ${evidence.mission.id}/${evidence.package.id}: ${evidence.candidate.id}`;
 }
 
-function sandboxReceiptLines(projectDir, evidence) {
-  // Sandbox execution receipts come from the build report the candidate was
-  // verified against; absent receipts are stated, never implied (roadmap 4.2).
-  const reportFile = path.join(projectDir, '.vld', 'build', evidence.mission.id, 'build-report.json');
-  try {
-    const report = JSON.parse(readFileSync(reportFile, 'utf8'));
-    return (report.packages ?? []).map((entry) => `  ${entry.packageId}: ${entry.sandboxReceiptDigest ?? 'not recorded'}`);
-  } catch {
-    return ['  not recorded (no build report)'];
-  }
-}
-
-/**
- * PR body sections (roadmap 4.2): the runtime receipts plus the evidence
- * export and per-package sandbox receipts, so a reviewer sees the audit
- * surface without leaving the pull request.
- */
-function deterministicBody(evidence, extras = {}) {
+function deterministicBody(evidence) {
   const { candidate, verification, approval, queue } = evidence;
-  const exportLines = extras.evidenceExport ?? ['  not recorded (offline export)'];
-  const sandboxLines = extras.sandboxReceipts ?? ['  not recorded'];
   return [
     'VLD Runtime safe forge plan export.',
     'Authority scope: local Runtime ledger only; this is not provider, PR, CI, ref, or branch-protection attestation.',
@@ -75,22 +53,8 @@ function deterministicBody(evidence, extras = {}) {
     `Independent approval: ${approval.id}`,
     `Queue receipt: ${queue.id}`,
     '',
-    'Sandbox receipts:',
-    ...sandboxLines,
-    'Evidence export:',
-    ...exportLines,
-    '',
     'This is an offline, data-only plan. It contains no credential and does not authorize a push, pull-request change, or merge request.'
   ].join('\n');
-}
-
-function bodyExtras(projectDir, evidence, chain) {
-  return {
-    sandboxReceipts: sandboxReceiptLines(projectDir, evidence),
-    evidenceExport: chain
-      ? [`  chain head: ${chain.headHash} (${chain.entries} entries, ${chain.ok ? 'verified' : 'degraded'})`]
-      : ['  not recorded (offline export)']
-  };
 }
 
 /** Build one immutable safe plan and a receipt that binds all delivery facts. */
@@ -104,7 +68,7 @@ export function prepareRuntimeForgePlan({ missionFile, packageId, candidateId, r
     approval: evidence.approval,
     queue: evidence.queue,
     title: safeTitle(title, evidence),
-    body: deterministicBody(evidence, bodyExtras(projectDir, evidence, verifyEvidenceChain({ projectDir }))),
+    body: deterministicBody(evidence),
     requiredChecks: requiredChecks(checks),
     requireGitHubApproval: true,
     // The export can never produce a plan accepted by requestGitHubMerge.
@@ -217,8 +181,7 @@ export async function executeRuntimeForgePlan({
   headRef,
   baseRef = null,
   title = undefined,
-  requiredChecks: checks = ['spec'],
-  draft = true,
+  requiredChecks: checks = [],
   allowMergeRequest = false,
   requireGitHubApproval = true,
   existingPullNumber = null,
@@ -227,44 +190,10 @@ export async function executeRuntimeForgePlan({
   postEvidence = true,
   token,
   fetchImpl = globalThis.fetch,
-  apiUrl = null,
   projectDir = '.'
 } = {}) {
   const root = ensureProjectDir(projectDir);
   const evidence = runtimeForgeEvidence({ missionFile, packageId, candidateId, projectDir: root });
-
-  const { appendEvidence } = await import('./evidence.mjs');
-  const chainBefore = verifyEvidenceChain({ projectDir: root });
-
-  // Roadmap 4.2, gate 1: never publish from a broken evidence chain.
-  if (!chainBefore.ok) {
-    throw extensionError(
-      `refusing to publish: the evidence chain failed verification (${chainBefore.errors?.slice(0, 3).join('; ') || `broken at seq ${chainBefore.firstBrokenSeq}`})`,
-      'FORGE_EVIDENCE_CHAIN_INVALID'
-    );
-  }
-
-  // Roadmap 4.2, gate 2: escalation packets (rigor tier >= 2, money, regulated
-  // or destructiveWrites) publish only with a human sign-off recorded on the
-  // independent review. Stricter than the queue gate on purpose: publishing to
-  // a repository is the highest-stakes step of the journey.
-  const loadedMission = readMission(missionFile, { projectDir: root });
-  const specFile = path.resolve(root, loadedMission.mission.packet.path, 'spec.json');
-  let spec = null;
-  try {
-    spec = JSON.parse(readFileSync(specFile, 'utf8'));
-  } catch {
-    throw extensionError('cannot read the frozen packet spec.json for the publish gates', 'FORGE_PACKET_UNREADABLE');
-  }
-  const escalation = requiresHumanReview(spec);
-  const signoffRequired = evidence.review ? Boolean(evidence.review.requiresHumanSignoff) : escalation.required;
-  if (signoffRequired && !evidence.review?.humanSignoff) {
-    throw extensionError(
-      `refusing to publish: this packet requires a human sign-off recorded on the independent review (${escalation.reasons.join(', ') || 'escalation packet'})`,
-      'FORGE_HUMAN_SIGNOFF_REQUIRED'
-    );
-  }
-
   const plan = createGitHubPullRequestPlan({
     repository,
     headRef,
@@ -273,16 +202,17 @@ export async function executeRuntimeForgePlan({
     approval: evidence.approval,
     queue: evidence.queue,
     title: safeTitle(title, evidence),
-    body: deterministicBody(evidence, bodyExtras(root, evidence, chainBefore)),
+    body: deterministicBody(evidence),
     requiredChecks: requiredChecks(checks),
     requireGitHubApproval: Boolean(requireGitHubApproval),
     allowMergeRequest: action === 'merge' ? Boolean(allowMergeRequest) : false,
-    draft: Boolean(draft),
     ...(existingPullNumber ? { existingPullNumber } : {})
   });
 
   const { createGitHubV1Client, executeGitHubDelivery } = await import('../integrations/github-v1/index.mjs');
-  const client = createGitHubV1Client({ token, fetchImpl, ...(apiUrl ? { apiUrl } : {}) });
+  const { appendEvidence, verifyEvidenceChain } = await import('./evidence.mjs');
+  const chainBefore = verifyEvidenceChain({ projectDir: root });
+  const client = createGitHubV1Client({ token, fetchImpl });
 
   const evidenceLines = [
     `**Mission / package:** \`${evidence.mission.id}\` / \`${evidence.package.id}\``,
@@ -314,7 +244,6 @@ export async function executeRuntimeForgePlan({
     candidateSha: evidence.candidate.candidateSha,
     targetSha: evidence.candidate.targetSha,
     planDigest: plan.digest,
-    draft: plan.draft,
     repository: plan.repository,
     pullNumber: remote.pullRequest?.number ?? remote.pullNumber ?? null,
     pullUrl: remote.pullRequest?.url ?? null,

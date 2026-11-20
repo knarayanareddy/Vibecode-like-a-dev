@@ -26,42 +26,9 @@ const COMMIT = /^[a-f0-9]{40}$/;
 const REQUIREMENT = /^REQ-(?:C\d{2,}|\d{3,})$/;
 const SAFE_GIT_REF = /^(?:HEAD|[A-Za-z0-9][A-Za-z0-9._/-]{0,200})$/;
 const SAFE_PATH_PATTERN = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9][A-Za-z0-9._/*?{}-]{0,240}$/;
-const MISSION_FIELDS = new Set(['schemaVersion', 'id', 'title', 'packet', 'target', 'corePolicyDigest', 'workPackages', 'rebaseHistory', 'maxConcurrentWorktrees', 'budget']);
-const DEFINITION_FIELDS = new Set(['schemaVersion', 'id', 'title', 'workPackages', 'maxConcurrentWorktrees', 'budget']);
-const PACKAGE_FIELDS = new Set(['id', 'title', 'requirements', 'dependsOn', 'resourceClaims', 'budget']);
-const BUDGET_FIELDS = new Set(['maxTokens', 'maxCostUsd']);
-// A worktree is a full checkout plus an agent sandbox; more than a handful in
-// flight turns one machine into a swap farm. 4 is the honest ceiling.
-const MAX_CONCURRENT_WORKTREES = 4;
-
-function validateBudget(budget, label, errors) {
-  if (budget === undefined || budget === null) return;
-  if (typeof budget !== 'object' || Array.isArray(budget)) {
-    errors.push(`${label} must be an object`);
-    return;
-  }
-  for (const key of Object.keys(budget)) if (!BUDGET_FIELDS.has(key)) errors.push(`${label}.${key} is not allowed`);
-  if (budget.maxTokens !== undefined && (!Number.isInteger(budget.maxTokens) || budget.maxTokens < 0)) {
-    errors.push(`${label}.maxTokens must be a non-negative integer`);
-  }
-  if (budget.maxCostUsd !== undefined && (typeof budget.maxCostUsd !== 'number' || !Number.isFinite(budget.maxCostUsd) || budget.maxCostUsd < 0)) {
-    errors.push(`${label}.maxCostUsd must be a non-negative number`);
-  }
-}
-
-function validateConcurrencyCap(value, label, errors) {
-  if (value === undefined || value === null) return;
-  if (!Number.isInteger(value) || value < 1 || value > MAX_CONCURRENT_WORKTREES) {
-    errors.push(`${label} must be an integer between 1 and ${MAX_CONCURRENT_WORKTREES}`);
-  }
-}
-
-function sanitizeBudget(budget) {
-  return {
-    ...(Number.isInteger(budget?.maxTokens) ? { maxTokens: budget.maxTokens } : {}),
-    ...(typeof budget?.maxCostUsd === 'number' ? { maxCostUsd: budget.maxCostUsd } : {})
-  };
-}
+const MISSION_FIELDS = new Set(['schemaVersion', 'id', 'title', 'packet', 'target', 'corePolicyDigest', 'workPackages', 'rebaseHistory']);
+const DEFINITION_FIELDS = new Set(['schemaVersion', 'id', 'title', 'workPackages']);
+const PACKAGE_FIELDS = new Set(['id', 'title', 'requirements', 'dependsOn', 'resourceClaims']);
 
 function hasUnsafeText(value) {
   return typeof value !== 'string' || !value.trim() || /[\r\n\0]/.test(value);
@@ -203,7 +170,6 @@ function validatePackageShape(workPackage, index, errors) {
       }
     }
   }
-  validateBudget(workPackage.budget, `${label}.budget`, errors);
 }
 
 function validatePackageGraph(workPackages, errors) {
@@ -257,8 +223,6 @@ export function validateMissionDefinition(definition, { requirementIds = null } 
   if (definition.schemaVersion !== MISSION_SCHEMA_VERSION) errors.push(`schemaVersion must be ${MISSION_SCHEMA_VERSION}`);
   if (!ID_PATTERN.test(String(definition.id ?? ''))) errors.push('id must be lowercase kebab-case');
   if (hasUnsafeText(definition.title) || definition.title.trim().length < 8) errors.push('title must be a one-line string of at least 8 characters');
-  validateConcurrencyCap(definition.maxConcurrentWorktrees, 'maxConcurrentWorktrees', errors);
-  validateBudget(definition.budget, 'budget', errors);
   if (!Array.isArray(definition.workPackages) || definition.workPackages.length === 0) errors.push('workPackages must be a non-empty list');
   else {
     definition.workPackages.forEach((workPackage, index) => validatePackageShape(workPackage, index, errors));
@@ -278,8 +242,6 @@ export function validateMission(mission, { projectDir = '.', packetDir = null, p
   const passes = [];
   const project = ensureProjectDir(projectDir);
   validateNoUnknownFields(mission, MISSION_FIELDS, 'mission', errors);
-  validateConcurrencyCap(mission?.maxConcurrentWorktrees, 'mission.maxConcurrentWorktrees', errors);
-  validateBudget(mission?.budget, 'mission.budget', errors);
   if (!mission || typeof mission !== 'object' || Array.isArray(mission)) return { ok: false, errors, warnings, passes, mission: null };
   if (mission.schemaVersion !== MISSION_SCHEMA_VERSION) errors.push(`schemaVersion must be ${MISSION_SCHEMA_VERSION}`);
   if (!ID_PATTERN.test(String(mission.id ?? ''))) errors.push('id must be lowercase kebab-case');
@@ -346,15 +308,12 @@ export function createMission({ definition, projectDir = '.', packetDir = 'specs
     packet: { path: authority.relativePath, digest: authority.digest },
     target,
     corePolicyDigest: digest(policy),
-    ...(definition.maxConcurrentWorktrees ? { maxConcurrentWorktrees: definition.maxConcurrentWorktrees } : {}),
-    ...(definition.budget ? { budget: sanitizeBudget(definition.budget) } : {}),
     workPackages: definition.workPackages.map((workPackage) => ({
       id: workPackage.id,
       title: workPackage.title.trim(),
       requirements: [...workPackage.requirements],
       dependsOn: [...(workPackage.dependsOn ?? [])],
-      ...(workPackage.resourceClaims ? { resourceClaims: { paths: [...workPackage.resourceClaims.paths] } } : {}),
-      ...(workPackage.budget ? { budget: sanitizeBudget(workPackage.budget) } : {})
+      ...(workPackage.resourceClaims ? { resourceClaims: { paths: [...workPackage.resourceClaims.paths] } } : {})
     }))
   };
   const report = validateMission(mission, { projectDir: project, policy });
@@ -435,105 +394,9 @@ function claimTouches(paths, changedFiles) {
 
 /**
  * Deterministically partition a compiled packet's requirements into a
- * dependency-ordered mission definition (ADR 0011, 2.7 / roadmap P3.4).
- *
- * Packages derive from REQ.area grouped into bounded contexts: a CLI is one
- * application context (a single work package), a service product separates
- * core / api / contract with the contract landing before the API that realizes
- * it (contract dependency order). Resource claims follow the project's stack
- * layout. `overrides` (mission.json-shaped) may revise the derived definition.
+ * dependency-ordered mission definition grouped by area (ADR 0011, 2.7).
  */
-const CONTEXT_ORDER = ['core', 'app', 'data', 'security', 'contract', 'api', 'ai', 'frontend', 'reliability', 'delivery'];
-const CONTEXT_LABELS = { app: 'application' };
-// Interface-contract obligations form their own bounded context wherever a
-// service surface exists (catalog keys api.contract, library.api-stability, ...).
-const CONTRACT_KEY_PATTERN = /(?:^|\.)contract$|^library\.api-stability$/;
-const SINGLE_CONTEXT_KINDS = new Set(['cli']);
-const SERVICE_KINDS = new Set(['api']);
-
-const DEFAULT_STACK_LAYOUT = ['src/**', 'lib/**', 'app/**', 'tests/**', 'test/**', 'spec/**', 'docs/**', 'contracts/**', 'migrations/**', 'enforcement/**'];
-const STACK_LAYOUTS = {
-  javascript: DEFAULT_STACK_LAYOUT,
-  typescript: DEFAULT_STACK_LAYOUT,
-  python: DEFAULT_STACK_LAYOUT,
-  go: ['cmd/**', 'internal/**', 'pkg/**', 'tests/**', 'test/**', 'spec/**', 'docs/**', 'contracts/**', 'migrations/**', 'enforcement/**'],
-  rust: ['src/**', 'tests/**', 'test/**', 'spec/**', 'docs/**', 'contracts/**', 'migrations/**', 'enforcement/**']
-};
-const CONTRACT_LAYOUT = ['contracts/**', 'docs/**', 'spec/**', 'schemas/**'];
-
-function contextForRequirement(requirement, kind) {
-  if (CONTRACT_KEY_PATTERN.test(String(requirement.key ?? ''))) return 'contract';
-  if (SINGLE_CONTEXT_KINDS.has(kind)) return 'app';
-  if (SERVICE_KINDS.has(kind)) return requirement.area === 'api' ? 'api' : 'core';
-  return CONTEXT_ORDER.includes(requirement.area) ? requirement.area : 'core';
-}
-
-function applyDefinitionOverrides(definition, overrides) {
-  const errors = [];
-  if (!overrides || typeof overrides !== 'object' || Array.isArray(overrides)) {
-    throw extensionError('mission overrides must be an object', 'INVALID_MISSION');
-  }
-  const allowed = new Set(['maxConcurrentWorktrees', 'budget', 'workPackages', 'removePackages']);
-  for (const key of Object.keys(overrides)) if (!allowed.has(key)) errors.push(`mission overrides.${key} is not allowed`);
-  if (overrides.removePackages !== undefined) {
-    if (!Array.isArray(overrides.removePackages) || overrides.removePackages.some((id) => !ID_PATTERN.test(String(id ?? '')))) {
-      errors.push('mission overrides.removePackages must be a list of work package ids');
-    }
-  }
-  validateConcurrencyCap(overrides.maxConcurrentWorktrees, 'mission overrides.maxConcurrentWorktrees', errors);
-  validateBudget(overrides.budget, 'mission overrides.budget', errors);
-  if (overrides.workPackages !== undefined) {
-    if (!Array.isArray(overrides.workPackages)) errors.push('mission overrides.workPackages must be a list');
-    else {
-      overrides.workPackages.forEach((entry, index) => {
-        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
-          errors.push(`mission overrides.workPackages[${index}] must be an object`);
-          return;
-        }
-        if (!ID_PATTERN.test(String(entry.id ?? ''))) errors.push(`mission overrides.workPackages[${index}].id must be lowercase kebab-case`);
-        for (const key of Object.keys(entry)) if (!PACKAGE_FIELDS.has(key)) errors.push(`mission overrides.workPackages[${index}].${key} is not allowed`);
-        validateBudget(entry.budget, `mission overrides.workPackages[${index}].budget`, errors);
-      });
-    }
-  }
-  if (errors.length > 0) {
-    throw extensionError(`mission overrides are invalid:\n${errors.map((error) => `- ${error}`).join('\n')}`, 'INVALID_MISSION');
-  }
-
-  if (Array.isArray(overrides.removePackages)) {
-    const removed = new Set(overrides.removePackages);
-    definition.workPackages = definition.workPackages.filter((workPackage) => !removed.has(workPackage.id));
-  }
-  if (overrides.maxConcurrentWorktrees !== undefined) definition.maxConcurrentWorktrees = overrides.maxConcurrentWorktrees;
-  if (overrides.budget !== undefined) definition.budget = sanitizeBudget(overrides.budget);
-  if (Array.isArray(overrides.workPackages)) {
-    for (const entry of overrides.workPackages) {
-      const existing = definition.workPackages.find((workPackage) => workPackage.id === entry.id);
-      if (existing) {
-        if (entry.title !== undefined) existing.title = entry.title;
-        if (entry.requirements !== undefined) existing.requirements = [...entry.requirements];
-        if (entry.dependsOn !== undefined) existing.dependsOn = [...entry.dependsOn];
-        if (entry.resourceClaims !== undefined) existing.resourceClaims = { paths: [...entry.resourceClaims.paths] };
-        if (entry.budget !== undefined) existing.budget = sanitizeBudget(entry.budget);
-      } else {
-        definition.workPackages.push({
-          id: entry.id,
-          title: entry.title ?? `Implement and verify ${entry.id} requirements`,
-          requirements: [...(entry.requirements ?? [])],
-          dependsOn: [...(entry.dependsOn ?? [])],
-          ...(entry.resourceClaims ? { resourceClaims: { paths: [...entry.resourceClaims.paths] } } : {}),
-          ...(entry.budget ? { budget: sanitizeBudget(entry.budget) } : {})
-        });
-      }
-    }
-  }
-  const check = validateMissionDefinition(definition);
-  if (!check.ok) {
-    throw extensionError(`mission overrides produce an invalid definition:\n${check.errors.map((error) => `- ${error}`).join('\n')}`, 'INVALID_MISSION');
-  }
-}
-
-export function planMissionDefinitionFromPacket({ packetDir, missionId = null, title = null, resourceClaimsByArea = {}, overrides = null } = {}) {
+export function planMissionDefinitionFromPacket({ packetDir, missionId = null, title = null, resourceClaimsByArea = {} } = {}) {
   const specFile = path.join(packetDir, 'spec.json');
   const spec = readJson(specFile);
   const projectName = String(spec.project?.name ?? 'project').toLowerCase().replace(/[^a-z0-9-]+/g, '-');
@@ -543,50 +406,36 @@ export function planMissionDefinitionFromPacket({ packetDir, missionId = null, t
     throw extensionError('packet contains no assignable requirements', 'INVALID_MISSION_PACKET');
   }
 
-  const kind = String(spec.project?.kind ?? '');
-  const stack = String(spec.project?.constraints?.stack ?? '');
+  const areaOrder = ['core', 'data', 'security', 'api', 'ai', 'frontend', 'reliability', 'delivery'];
   const groups = new Map();
   for (const req of allReqs) {
-    const context = contextForRequirement(req, kind);
-    if (!groups.has(context)) groups.set(context, []);
-    groups.get(context).push(req.id);
+    const area = areaOrder.includes(req.area) ? req.area : 'core';
+    if (!groups.has(area)) groups.set(area, []);
+    groups.get(area).push(req.id);
   }
 
-  const orderedContexts = [...groups.keys()].sort((a, b) => CONTEXT_ORDER.indexOf(a) - CONTEXT_ORDER.indexOf(b));
-  const layout = STACK_LAYOUTS[stack] ?? DEFAULT_STACK_LAYOUT;
+  const orderedAreas = [...groups.keys()].sort((a, b) => areaOrder.indexOf(a) - areaOrder.indexOf(b));
+  const defaultClaims = ['src/**', 'lib/**', 'app/**', 'tests/**', 'test/**', 'spec/**', 'docs/**', 'contracts/**', 'migrations/**', 'enforcement/**'];
   const workPackages = [];
-  for (const context of orderedContexts) {
-    const pkgId = `pkg-${context}`;
+  for (const area of orderedAreas) {
+    const pkgId = `pkg-${area}`;
     workPackages.push({
       id: pkgId,
-      title: `Implement and verify ${CONTEXT_LABELS[context] ?? context} specification requirements`,
-      requirements: groups.get(context).sort(),
+      title: `Implement and verify ${area} specification requirements`,
+      requirements: groups.get(area).sort(),
       dependsOn: [],
       resourceClaims: {
-        paths: resourceClaimsByArea[context] ?? (context === 'contract' ? CONTRACT_LAYOUT : layout)
+        paths: resourceClaimsByArea[area] ?? defaultClaims
       }
     });
   }
 
-  // Contract dependency order: the interface contract lands after the foundation
-  // and before the API surface that realizes it.
-  const byContext = new Map(workPackages.map((workPackage) => [workPackage.id.slice('pkg-'.length), workPackage]));
-  const corePkg = byContext.get('core') ?? byContext.get('app');
-  const contractPkg = byContext.get('contract');
-  const apiPkg = byContext.get('api');
-  if (contractPkg && corePkg && contractPkg !== corePkg) contractPkg.dependsOn = [corePkg.id];
-  if (apiPkg && contractPkg && apiPkg !== contractPkg) {
-    apiPkg.dependsOn = [...new Set([contractPkg.id, ...(corePkg && corePkg !== apiPkg ? [corePkg.id] : [])])];
-  }
-
-  const definition = {
+  return {
     schemaVersion: MISSION_SCHEMA_VERSION,
     id,
     title: title ?? `Build ${spec.project?.title ?? spec.project?.name ?? 'project'} against verified spec`,
     workPackages
   };
-  if (overrides) applyDefinitionOverrides(definition, overrides);
-  return definition;
 }
 
 /**
