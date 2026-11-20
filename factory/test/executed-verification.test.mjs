@@ -264,7 +264,7 @@ test('quota calculation works', () => {
   assert.equal(failRun.status, 1);
   const failJson = JSON.parse(failRun.stdout);
   assert.equal(failJson.verdict, 'failed');
-  assert.ok(failJson.errors.some((e) => /FAILED/i.test(e)));
+  assert.ok(failJson.errors.some((e) => /FAILED/i.test(e)), JSON.stringify(failJson));
 
   // 4. Genuine passing test -> `vld verify --run` succeeds with `verdict === 'executed-verified'`!
   writeFileSync(

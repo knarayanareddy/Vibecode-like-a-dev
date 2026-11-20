@@ -20,6 +20,8 @@
 
 function normalizeRelFile(raw, repoRoot = '') {
   let s = String(raw ?? '').trim().replace(/^file:\/\//, '').replace(/\\/g, '/');
+  // file:///D:/x strips to /D:/x — drop the phantom leading slash before a drive letter.
+  s = s.replace(/^\/(?=[A-Za-z]:\/)/, '');
   if (repoRoot) {
     const normRoot = String(repoRoot).replace(/\\/g, '/').replace(/\/+$/, '');
     if (normRoot && s.startsWith(`${normRoot}/`)) {
