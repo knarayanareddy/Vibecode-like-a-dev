@@ -6,19 +6,24 @@
  * a model, runs a command or accepts a caller-selected filesystem path.
  */
 
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { extensionError, ID_PATTERN } from './extension-utils.mjs';
+import { applyProfileAnswer, generateProfileQuestions } from './questions.mjs';
 import { assertRuntimeActor } from './runtime-policy.mjs';
 import { assertRuntimeRequest, runtimeFailure, runtimeSuccess } from './runtime-contracts.mjs';
 import { catalogStatus, readCatalogState } from './catalog.mjs';
 import { appendEvidence, studioEvidenceProjection } from './evidence.mjs';
 import { approveRuntimeDeliveryCandidate, queueRuntimeDeliveryCandidate } from './runtime-delivery.mjs';
+import { execFileSync } from 'node:child_process';
+import { readMission } from './missions.mjs';
 import { STUDIO_PATH, studioCapabilities, studioContentSecurityPolicy, studioHtml, studioNonce } from './studio.mjs';
 import {
   allocateRuntimePackage,
   heartbeatRuntimeLease,
+  recordRuntimeRunStop,
   recoverRuntime,
   runtimeEventHistory,
   runtimeStatus,
@@ -134,6 +139,131 @@ function studioCatalogProjection(report, projectDir) {
   };
 }
 
+function boundedGit(projectDir, args, maxBytes = 96 * 1024) {
+  try {
+    const out = execFileSync('git', ['-C', projectDir, ...args], {
+      encoding: 'utf8',
+      maxBuffer: maxBytes,
+      stdio: ['ignore', 'pipe', 'ignore']
+    });
+    return out.slice(0, maxBytes);
+  } catch {
+    return '';
+  }
+}
+
+function reqAnchorsInTree(projectDir, commitSha) {
+  const anchors = new Map();
+  const out = boundedGit(projectDir, ['grep', '-n', '-e', '@req', commitSha], 256 * 1024);
+  for (const line of out.split('\n')) {
+    // git grep <tree>: "<sha>:<path>:<line>:<content>"
+    const match = line.match(/^[0-9a-f]{40}:(.+?):\d+:(.*)$/);
+    if (!match) continue;
+    const file = match[1];
+    for (const token of match[2].matchAll(/@req\s+(REQ-(?:C\d{2,}|\d{3,}))\b/g)) {
+      const requirement = token[1];
+      if (!anchors.has(requirement)) anchors.set(requirement, new Set());
+      anchors.get(requirement).add(file);
+    }
+  }
+  return anchors;
+}
+
+/**
+ * P3.6 candidate page: requirement coverage matrix, mutation score, sandbox
+ * verification receipt, independent review findings, bounded diff, run cost
+ * and the evidence-chain badge — everything a reviewer needs to approve from
+ * Studio alone.
+ */
+/**
+ * Roadmap 4.3 cost panel: per-run model provenance + token/cost totals with
+ * the frozen mission budget and an over-budget alert.
+ */
+function costProjection({ status, missionFile, projectDir }) {
+  const runs = (status.agentRuns ?? []).map((run) => ({
+    id: run.id,
+    packageId: run.packageId ?? null,
+    adapter: run.adapter,
+    outcome: run.outcome,
+    modelId: run.modelId ?? null,
+    promptHash: run.promptHash ?? null,
+    transcriptDigest: run.transcriptDigest ?? null,
+    usage: run.usage ?? null
+  }));
+  const totals = runs.reduce((sum, run) => ({
+    totalTokens: sum.totalTokens + (run.usage?.totalTokens ?? 0),
+    costUsd: Number((sum.costUsd + (run.usage?.costUsd ?? 0)).toFixed(8))
+  }), { totalTokens: 0, costUsd: 0 });
+  let budget = null;
+  try {
+    budget = readMission(missionFile, { projectDir }).mission.budget ?? null;
+  } catch {
+    budget = null;
+  }
+  const overBudget = Boolean(
+    (Number.isFinite(budget?.maxTokens) && totals.totalTokens > budget.maxTokens)
+    || (Number.isFinite(budget?.maxCostUsd) && totals.costUsd > budget.maxCostUsd)
+  );
+  return { runs, totals, budget, overBudget };
+}
+
+function candidateDetail({ missionFile, projectDir, packageId, candidateId = null }) {
+  const status = runtimeStatus({ missionFile, projectDir });
+  const workPackage = (status.packages ?? []).find((entry) => entry.id === packageId);
+  if (!workPackage) throw extensionError(`runtime mission has no work package "${packageId}"`, 'UNKNOWN_WORK_PACKAGE');
+  const delivery = (status.delivery ?? []).filter((entry) => entry.packageId === packageId);
+  const candidateEntry = delivery.filter((entry) => entry.candidate && (!candidateId || entry.candidate.id === candidateId)).at(-1);
+  if (!candidateEntry) throw extensionError('runtime package has no matching frozen candidate receipt', 'RUNTIME_CANDIDATE_NOT_FOUND');
+  const candidate = candidateEntry.candidate;
+  const verification = delivery.filter((entry) => entry.verification?.candidateId === candidate.id).map((entry) => entry.verification).at(-1) ?? null;
+  const review = delivery.filter((entry) => entry.review?.candidateId === candidate.id).map((entry) => entry.review).at(-1) ?? null;
+  const approval = delivery.filter((entry) => entry.approval?.candidateId === candidate.id).map((entry) => entry.approval).at(-1) ?? null;
+  const queue = delivery.filter((entry) => entry.queue?.candidateId === candidate.id).map((entry) => entry.queue).at(-1) ?? null;
+
+  const missionRaw = JSON.parse(readFileSync(path.resolve(projectDir, missionFile), 'utf8'));
+  const specFile = path.resolve(projectDir, missionRaw.packet?.path ?? 'specs', 'spec.json');
+  const spec = existsSync(specFile) ? JSON.parse(readFileSync(specFile, 'utf8')) : { requirements: [] };
+  const anchors = reqAnchorsInTree(projectDir, candidate.candidateSha);
+  const coverage = (spec.requirements ?? []).map((requirement) => ({
+    id: requirement.id,
+    title: requirement.title,
+    area: requirement.area ?? null,
+    verify: requirement.verify ?? null,
+    anchored: anchors.has(requirement.id),
+    anchoredFiles: [...(anchors.get(requirement.id) ?? [])].sort().slice(0, 8)
+  }));
+
+  const mutationChecks = (verification?.checks ?? []).filter((check) => /mutation/i.test(String(check.kind ?? '')));
+  const mutation = mutationChecks.length > 0
+    ? { checks: mutationChecks.map((check) => ({ id: check.id, kind: check.kind, passed: check.passed, output: check.output })), reported: true }
+    : { checks: [], reported: false };
+
+  const runCosts = (status.agentRuns ?? [])
+    .filter((run) => run.packageId === packageId)
+    .map((run) => ({ id: run.id, adapter: run.adapter, outcome: run.outcome, modelId: run.modelId ?? null, promptHash: run.promptHash ?? null, transcriptDigest: run.transcriptDigest ?? null, usage: run.usage ?? null }));
+  const totals = runCosts.reduce((sum, run) => ({
+    totalTokens: sum.totalTokens + (run.usage?.totalTokens ?? 0),
+    costUsd: sum.costUsd + (run.usage?.costUsd ?? 0)
+  }), { totalTokens: 0, costUsd: 0 });
+
+  const diffText = boundedGit(projectDir, ['diff', '--unified=1', `${candidate.targetSha}..${candidate.candidateSha}`]);
+  const truncated = diffText.length >= 96 * 1024;
+
+  return {
+    package: { id: workPackage.id, state: workPackage.state, requirements: workPackage.requirements },
+    candidate,
+    verification,
+    review,
+    approval,
+    queue,
+    coverage,
+    mutation,
+    cost: { runs: runCosts, totals, ...(() => { const c = costProjection({ status, missionFile, projectDir }); return { budget: c.budget, overBudget: c.overBudget }; })() },
+    diff: { text: diffText, truncated },
+    evidenceChain: studioEvidenceProjection({ projectDir })
+  };
+}
+
 function dispatch({ request, actor, missionFile, projectDir, close }) {
   const params = request.params;
   switch (request.method) {
@@ -150,7 +280,8 @@ function dispatch({ request, actor, missionFile, projectDir, close }) {
           actor: { ...actor },
           actions: studioCapabilities(actor),
           ...(catalog.exists ? { catalog: studioCatalogProjection(catalogStatus(projectDir), projectDir) } : {}),
-          evidenceChain: studioEvidenceProjection({ projectDir })
+          evidenceChain: studioEvidenceProjection({ projectDir }),
+          costs: costProjection({ status, missionFile, projectDir })
         }
       };
     }
@@ -174,6 +305,31 @@ function dispatch({ request, actor, missionFile, projectDir, close }) {
     case 'transition': {
       closedParams(params, new Set(['packageId', 'to', 'expectedVersion', 'leaseToken', 'reason']), 'transition');
       return transitionRuntimePackage({ missionFile, projectDir, packageId: params.packageId, to: params.to, actor, expectedVersion: params.expectedVersion, leaseToken: params.leaseToken ?? null, reason: params.reason ?? null, idempotencyKey: request.requestId });
+    }
+    case 'candidate_detail': {
+      closedParams(params, new Set(['packageId', 'candidateId']), 'candidate_detail');
+      if (!ID_PATTERN.test(String(params.packageId ?? ''))) throw extensionError('candidate_detail params.packageId is invalid', 'INVALID_RUNTIME_REQUEST');
+      return candidateDetail({ missionFile, projectDir, packageId: params.packageId, candidateId: params.candidateId ?? null });
+    }
+    case 'pause':
+    case 'kill': {
+      closedParams(params, new Set(['packageId', 'runId', 'reason']), request.method);
+      if (!['operator', 'release-approver', 'runtime'].includes(actor.role)) {
+        throw extensionError('only an operator, release-approver or runtime identity may pause or kill a run', 'RUNTIME_ACTOR_FORBIDDEN');
+      }
+      if (!ID_PATTERN.test(String(params.packageId ?? '')) || !ID_PATTERN.test(String(params.runId ?? ''))) {
+        throw extensionError(`${request.method} requires valid packageId and runId`, 'INVALID_RUNTIME_REQUEST');
+      }
+      const stopped = recordRuntimeRunStop({
+        missionFile,
+        projectDir,
+        packageId: params.packageId,
+        runId: params.runId,
+        action: request.method,
+        reason: typeof params.reason === 'string' && params.reason.trim() ? params.reason.trim() : (request.method === 'kill' ? 'Killed from local Studio' : 'Paused from local Studio'),
+        actor
+      });
+      return stopped;
     }
     case 'approve': {
       closedParams(params, new Set(['packageId', 'candidateId', 'policyFile', 'reason']), 'approve');
@@ -239,6 +395,55 @@ function dispatch({ request, actor, missionFile, projectDir, close }) {
       } catch {}
       return queued;
     }
+    case 'get_questions': {
+      closedParams(params, new Set(['profileFile']), 'get_questions');
+      const rel = typeof params.profileFile === 'string' && params.profileFile ? params.profileFile : 'profile.json';
+      if (path.isAbsolute(rel) || rel.includes('..') || /[\r\n\0]/.test(rel)) {
+        throw extensionError('get_questions profileFile must be a safe relative path inside the project', 'INVALID_RUNTIME_REQUEST');
+      }
+      const target = path.resolve(projectDir, rel);
+      if (!existsSync(target)) {
+        throw extensionError(`profile file not found: ${rel}`, 'INVALID_RUNTIME_REQUEST');
+      }
+      const parsed = JSON.parse(readFileSync(target, 'utf8'));
+      const raw = parsed.candidateProfile ?? parsed;
+      return generateProfileQuestions(raw, { referenceDate: new Date().toISOString().slice(0, 10) });
+    }
+    case 'answer': {
+      closedParams(params, new Set(['profileFile', 'questionId', 'field', 'value', 'waive']), 'answer');
+      if (!['operator', 'reviewer', 'release-approver'].includes(actor.role)) {
+        throw extensionError('only an operator, reviewer, or release-approver identity may record profile answers', 'RUNTIME_ACTOR_FORBIDDEN');
+      }
+      const rel = typeof params.profileFile === 'string' && params.profileFile ? params.profileFile : 'profile.json';
+      if (path.isAbsolute(rel) || rel.includes('..') || /[\r\n\0]/.test(rel)) {
+        throw extensionError('answer profileFile must be a safe relative path inside the project', 'INVALID_RUNTIME_REQUEST');
+      }
+      const target = path.resolve(projectDir, rel);
+      if (!existsSync(target)) {
+        throw extensionError(`profile file not found: ${rel}`, 'INVALID_RUNTIME_REQUEST');
+      }
+      const parsed = JSON.parse(readFileSync(target, 'utf8'));
+      const base = parsed.candidateProfile ?? parsed;
+      const result = applyProfileAnswer(base, {
+        questionId: typeof params.questionId === 'string' ? params.questionId : null,
+        field: typeof params.field === 'string' ? params.field : null,
+        value: params.value,
+        waive: params.waive && typeof params.waive === 'object' ? params.waive : null,
+        actor: `${actor.role}:${actor.id}`,
+        referenceDate: new Date().toISOString().slice(0, 10)
+      });
+      writeFileSync(target, `${JSON.stringify(result.profile, null, 2)}\n`, 'utf8');
+      try {
+        appendEvidence({
+          projectDir,
+          kind: 'profile-answer',
+          actor,
+          subject: params.field ?? params.questionId ?? rel,
+          payload: { profileFile: rel, field: params.field ?? null, questionId: params.questionId ?? null }
+        });
+      } catch {}
+      return result;
+    }
     case 'recover':
       closedParams(params, new Set(), 'recover');
       if (!['operator', 'runtime'].includes(actor.role)) throw extensionError('only local operator/runtime identity may recover Runtime state', 'RUNTIME_ACTOR_FORBIDDEN');
@@ -279,6 +484,43 @@ export function createRuntimeServer({ missionFile, projectDir = '.', host = '127
       }
       response.writeHead(204, { 'access-control-allow-origin': origin, 'access-control-allow-methods': 'POST', 'access-control-allow-headers': 'authorization, content-type', vary: 'Origin' });
       response.end();
+      return;
+    }
+    if (request.method === 'GET' && (request.url === '/v1/runtime/stream' || request.url.startsWith('/v1/runtime/stream?'))) {
+      let streamActor;
+      try { streamActor = authenticate(request, tokens); } catch (error) {
+        json(response, 401, runtimeFailure(null, error), origin);
+        return;
+      }
+      response.writeHead(200, {
+        'content-type': 'text/event-stream; charset=utf-8',
+        'cache-control': 'no-store',
+        connection: 'keep-alive',
+        'x-content-type-options': 'nosniff'
+      });
+      let after = 0;
+      try {
+        const streamUrl = new URL(request.url, 'http://127.0.0.1');
+        const requested = Number.parseInt(streamUrl.searchParams.get('after') ?? '', 10);
+        if (Number.isSafeInteger(requested) && requested >= 0) after = requested;
+      } catch {}
+      let closed = false;
+      const write = (frame) => { if (!closed) { try { response.write(frame); } catch { closed = true; } } };
+      write(`: stream opened\n\n`);
+      const tick = () => {
+        if (closed) return;
+        try {
+          const page = runtimeEventHistory({ missionFile, projectDir, actor: streamActor, after, limit: 25, maxBytes: 65536 });
+          for (const event of page.events) {
+            write(`data: ${JSON.stringify(event)}\n\n`);
+            after = Math.max(after, Number(event.sequence) || 0);
+          }
+        } catch {}
+      };
+      tick();
+      const poller = setInterval(tick, 300);
+      const heartbeat = setInterval(() => write(': ping\n\n'), 15000);
+      request.on('close', () => { closed = true; clearInterval(poller); clearInterval(heartbeat); try { response.end(); } catch {} });
       return;
     }
     if (request.method !== 'POST' || request.url !== '/v1/runtime') {

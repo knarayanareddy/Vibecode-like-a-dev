@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "rulesChecked": 1,
+  "parsedRules": [
+    {
+      "id": "REQ-C01",
+      "key": "custom.triage-model-classifies-intake-urgent",
+      "subject": "application",
+      "modal": "shall",
+      "predicate": "enforce",
+      "object": "explicit clinician confirmation before releasing",
+      "quantity": null,
+      "unit": null,
+      "comparator": null,
+      "negated": false
+    }
+  ],
+  "contradictions": [],
+  "infeasible": [],
+  "resolvedConflicts": [],
+  "duplicates": [],
+  "blockingCount": 0,
+  "warningCount": 0
+}

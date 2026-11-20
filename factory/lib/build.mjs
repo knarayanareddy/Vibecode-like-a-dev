@@ -19,9 +19,12 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { agentPolicyDigest, assertAgentPolicy, defaultFakeAgentPolicy, defaultSandboxedCliPolicy } from './agent-policy.mjs';
+import { fileURLToPath } from 'node:url';
+import { executeAgentAdapter } from './agent-adapters.mjs';
+import { harvestTranscripts } from './agent-transcript.mjs';
+import { agentPolicyDigest, assertAgentPolicy, defaultFakeAgentPolicy, defaultSandboxedAgentPolicy, defaultSandboxedCliPolicy, FACTORY_ROOT } from './agent-policy.mjs';
 import { defaultDeliveryPolicy, defaultSandboxedDeliveryPolicy } from './delivery-policy.mjs';
 import { emitPacket } from './emit/index.mjs';
 import { digest, ensureProjectDir, extensionError, readJson, writeJsonAtomic } from './extension-utils.mjs';
@@ -41,6 +44,26 @@ export const BUILD_REPORT_SCHEMA_VERSION = 1;
 
 function git(cwd, args) {
   return execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+}
+
+function worktreeSnapshotTree(worktree) {
+  try {
+    git(worktree, ['add', '-A']);
+    return git(worktree, ['write-tree']);
+  } catch {
+    return null;
+  }
+}
+
+function captureRepairDelta(worktree, treeBefore, briefPath) {
+  try {
+    if (briefPath && existsSync(briefPath)) rmSync(briefPath, { force: true });
+    const treeAfter = worktreeSnapshotTree(worktree);
+    if (!treeBefore || !treeAfter || treeBefore === treeAfter) return null;
+    return git(worktree, ['diff', treeBefore, treeAfter]).slice(0, 8000);
+  } catch {
+    return null;
+  }
 }
 
 function topologicalOrder(workPackages) {
@@ -72,15 +95,18 @@ async function verifyPackageWorktree({
   requireAssertions
 }) {
   const packetAbs = path.join(worktree, packetRel);
+  // Parse `git status --porcelain` defensively: the execSync helper trims the
+  // whole output, which can strip the first line's leading status space —
+  // slicing a fixed 3 chars would then eat the path's first character.
   const statusLines = git(worktree, ['status', '--porcelain'])
     .split(/\r?\n/)
-    .map((line) => line.slice(3).trim())
+    .map((line) => line.replace(/^.{0,2}\s+/, '').trim())
     .filter(Boolean);
   const committedLines = git(worktree, ['diff', '--name-only', baseCommit])
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
-  const changed = [...new Set([...statusLines, ...committedLines])].filter((f) => !f.startsWith('.vld-repair'));
+  const changed = [...new Set([...statusLines, ...committedLines])].filter((f) => !f.startsWith('.vld-repair') && !f.startsWith('.vld/'));
   const claims = checkResourceClaims(changed, resourceClaims);
 
   const driftReport = verifyPacket(packetAbs, {
@@ -176,8 +202,13 @@ export async function runBuild({
   verifyGates = false,
   requireAssertions = true,
   maxRepairs = 2,
+  missionOverrides = null,
   dryRun = false,
-  reportFile = null
+  reportFile = null,
+  model = null,
+  cassetteDir = null,
+  cassetteMode = null,
+  environment = {}
 } = {}) {
   const project = ensureProjectDir(projectDir);
   const startedMs = Date.now();
@@ -217,7 +248,7 @@ export async function runBuild({
   if (resolvedMissionRel) {
     mission = readMission(resolvedMissionRel, { projectDir: project }).mission;
   } else {
-    const def = planMissionDefinitionFromPacket({ packetDir: packetAbs });
+    const def = planMissionDefinitionFromPacket({ packetDir: packetAbs, overrides: missionOverrides });
     if (dryRun) {
       const reportBody = {
         schemaVersion: BUILD_REPORT_SCHEMA_VERSION,
@@ -270,21 +301,62 @@ export async function runBuild({
   const agentPolicyRel = path.join(policyDirRel, 'agent-policy.json');
   const deliveryPolicyRel = path.join(policyDirRel, 'delivery-policy.json');
 
+  const missionBudget = mission.budget ?? null;
+  const agentEnvironment = {
+    ...environment,
+    // Roadmap 4.3: the frozen mission budget bounds every model run — an
+    // overrun aborts the run (and with it the mission build).
+    ...(missionBudget?.maxCostUsd ? { VLD_MODEL_MAX_COST_USD: String(missionBudget.maxCostUsd) } : {}),
+    ...(missionBudget?.maxTokens ? { VLD_MODEL_MAX_TOKENS: String(missionBudget.maxTokens) } : {}),
+    ...(model ? { VLD_MODEL_SPEC: model } : {}),
+    ...(cassetteDir ? {
+      // Carry the REAL path: the sandbox read grant is realpath-based (macOS
+      // /var -> /private/var), so a symlinked env value misses the grant and
+      // the node-permission model rejects every cassette read.
+      VLD_MODEL_CASSETTE_DIR: (() => {
+        const abs = path.resolve(project, cassetteDir);
+        try { return realpathSync(abs); } catch { return abs; }
+      })()
+    } : {}),
+    ...(cassetteMode ? { VLD_MODEL_CASSETTE_MODE: cassetteMode } : {}),
+    ...(testCommand ? {
+      VLD_TEST_COMMAND: JSON.stringify({
+        executable: testCommand.executable,
+        args: testCommand.args ?? [],
+        timeoutMs: testCommand.timeoutMs ?? 60_000
+      })
+    } : {})
+  };
+  const agentExecutable = executable ?? (adapter === 'sandboxed-agent' ? process.execPath : process.execPath);
+  const agentArgs = adapter === 'sandboxed-agent' && !executable && args.length === 0
+    ? [path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'agents', 'implementer.mjs')]
+    : args;
+
   const agentPolicy = adapter === 'fake'
     ? defaultFakeAgentPolicy()
     : assertAgentPolicy({
-        ...defaultSandboxedCliPolicy({
-          executable: executable ?? process.execPath,
-          args,
-          mode: 'write-workspace',
-          backend: sandboxBackend
-        }),
+        ...(adapter === 'sandboxed-agent'
+          ? defaultSandboxedAgentPolicy({
+              executable: agentExecutable,
+              args: agentArgs,
+              mode: 'write-workspace',
+              backend: sandboxBackend
+            })
+          : defaultSandboxedCliPolicy({
+              executable: executable ?? process.execPath,
+              args,
+              mode: 'write-workspace',
+              backend: sandboxBackend
+            })),
         adapter,
+        environment: agentEnvironment,
         sandbox: {
           backend: sandboxBackend,
           requireOs: Boolean(requireOsSandbox),
-          allowChildProcess: Boolean(allowChildProcess),
-          extraReadPaths: [...extraReadPaths]
+          allowChildProcess: Boolean(allowChildProcess) || adapter === 'sandboxed-agent',
+          extraReadPaths: adapter === 'sandboxed-agent'
+            ? [...new Set([...extraReadPaths, FACTORY_ROOT])]
+            : [...extraReadPaths]
         }
       });
   writeJsonAtomic(path.join(project, agentPolicyRel), agentPolicy);
@@ -313,7 +385,7 @@ export async function runBuild({
   const packageReports = [];
   let buildOk = true;
 
-  for (const pkg of schedule) {
+  const buildOne = async (pkg) => {
     const wsRes = createWorkspace({ missionFile: resolvedMissionRel, packageId: pkg.id, projectDir: project });
     const worktree = wsRes.allocation.worktree;
     const alloc = allocateRuntimePackage({
@@ -333,18 +405,20 @@ export async function runBuild({
     });
 
     if (!agentRunRes.ok) {
-      buildOk = false;
-      packageReports.push({
-        packageId: pkg.id,
+      return {
         ok: false,
-        stage: 'agent-run',
-        agentRunId: agentRunRes.agentRun?.id ?? null,
-        sandboxReceiptDigest: agentRunRes.agentRun?.sandbox?.receiptDigest ?? null,
-        repairsUsed: 0,
-        candidateId: null,
-        verificationOutcome: null
-      });
-      break;
+        entry: {
+          packageId: pkg.id,
+          ok: false,
+          stage: 'agent-run',
+          agentRunId: agentRunRes.agentRun?.id ?? null,
+          sandboxReceiptDigest: agentRunRes.agentRun?.sandbox?.receiptDigest ?? null,
+          repairsUsed: 0,
+          candidateId: null,
+          verificationOutcome: null,
+          usage: agentRunRes.agentRun?.usage ?? null
+        }
+      };
     }
 
     let repairOutcome = null;
@@ -357,6 +431,8 @@ export async function runBuild({
         packageId: pkg.id,
         requirements: pkgReqs,
         maxRepairs,
+        budget: pkg.budget ?? mission.budget ?? null,
+        initialUsage: agentRunRes.agentRun?.usage ?? null,
         verify: async () => verifyPackageWorktree({
           worktree,
           packetRel,
@@ -369,21 +445,65 @@ export async function runBuild({
           requireAssertions
         }),
         repair: async ({ attempt, prompt }) => {
+          const treeBefore = worktreeSnapshotTree(worktree);
           writeFileSync(repairBriefPath, prompt, 'utf8');
-          let run;
           try {
-            run = await runSandboxed({
+            if (adapter === 'sandboxed-agent') {
+              const execution = await executeAgentAdapter({
+                spec: {
+                  id: `repair-${pkg.id}-a${attempt}`,
+                  missionId: mission.id,
+                  packageId: pkg.id,
+                  packetDigest: agentPolicyDigest(agentPolicy),
+                  contextDigest: agentPolicyDigest(agentPolicy),
+                  requirementIds: pkg.requirements,
+                  resourceClaims: pkg.resourceClaims?.paths ?? [],
+                  workspace: worktree
+                },
+                policy: {
+                  ...agentPolicy,
+                  environment: {
+                    ...agentPolicy.environment,
+                    VLD_REPAIR_ATTEMPT: String(attempt),
+                    VLD_REPAIR_BRIEF: '.vld-repair-brief.md'
+                  }
+                }
+              });
+              if (execution.transcriptDigest !== null && !execution.transcriptVerified) {
+                throw extensionError(
+                  `repair attempt ${attempt} transcript failed verification: ${(execution.transcriptErrors ?? []).join('; ')}`,
+                  'AGENT_TRANSCRIPT_TAMPERED'
+                );
+              }
+              if (execution.transcriptDigest) {
+                harvestTranscripts({
+                  from: path.join(worktree, '.vld', 'agent-transcripts'),
+                  to: path.join(project, '.vld', 'agent-transcripts'),
+                  runId: `repair-${pkg.id}-a${attempt}`
+                });
+              }
+              latestSandboxAfterDigest = workspaceTreeDigest(worktree);
+              return {
+                sandboxReceipt: execution.sandboxReceipt,
+                receiptDigest: execution.sandboxReceipt.receiptDigest,
+                transcriptDigest: execution.transcriptDigest,
+                usage: execution.usage ?? null,
+                diffSinceLastAttempt: captureRepairDelta(worktree, treeBefore, repairBriefPath)
+              };
+            }
+            const run = await runSandboxed({
               executable: agentPolicy.command.executable,
               args: agentPolicy.command.args,
               workspace: worktree,
               mode: 'write-workspace',
               network: false,
-              allowChildProcess: Boolean(allowChildProcess),
+              allowChildProcess: Boolean(allowChildProcess) || adapter === 'sandboxed-agent',
               extraReadPaths,
               backend: sandboxBackend,
               requireOs: Boolean(requireOsSandbox),
               policyDigest: agentPolicyDigest(agentPolicy),
               env: {
+                ...agentPolicy.environment,
                 VLD_MISSION_ID: mission.id,
                 VLD_PACKAGE_ID: pkg.id,
                 VLD_REQUIREMENT_IDS: pkg.requirements.join(','),
@@ -392,31 +512,41 @@ export async function runBuild({
               },
               limits: agentPolicy.limits
             });
+            latestSandboxAfterDigest = workspaceTreeDigest(worktree);
+            return {
+              sandboxReceipt: run.receipt,
+              receiptDigest: run.receipt.receiptDigest,
+              usage: null,
+              diffSinceLastAttempt: captureRepairDelta(worktree, treeBefore, repairBriefPath)
+            };
           } finally {
             if (existsSync(repairBriefPath)) rmSync(repairBriefPath, { force: true });
           }
-          latestSandboxAfterDigest = workspaceTreeDigest(worktree);
-          return { sandboxReceipt: run.receipt, receiptDigest: run.receipt.receiptDigest };
         }
       });
 
       if (existsSync(repairBriefPath)) rmSync(repairBriefPath, { force: true });
 
       if (!repairOutcome.ok) {
-        buildOk = false;
-        packageReports.push({
-          packageId: pkg.id,
+        return {
           ok: false,
-          stage: 'repair-loop',
-          agentRunId: agentRunRes.agentRun.id,
-          sandboxReceiptDigest: agentRunRes.agentRun.sandbox?.receiptDigest ?? null,
-          repairOutcome: repairOutcome.outcome,
-          repairsUsed: repairOutcome.repairsUsed,
-          repairLedgerDigest: repairOutcome.ledgerDigest,
-          candidateId: null,
-          verificationOutcome: 'failed'
-        });
-        break;
+          entry: {
+            packageId: pkg.id,
+            ok: false,
+            stage: 'repair-loop',
+            agentRunId: agentRunRes.agentRun.id,
+            sandboxReceiptDigest: agentRunRes.agentRun.sandbox?.receiptDigest ?? null,
+            repairOutcome: repairOutcome.outcome,
+            repairsUsed: repairOutcome.repairsUsed,
+            repairLedgerDigest: repairOutcome.ledgerDigest,
+            failureDigest: repairOutcome.ledger?.at(-1)?.failureDigest ?? null,
+            failureKinds: (repairOutcome.ledger?.at(-1)?.failures ?? []).map((f) => `${f.kind}: ${f.detail ?? f.message ?? ''}`),
+            escalated: Boolean(repairOutcome.escalated),
+            candidateId: null,
+            verificationOutcome: 'failed',
+            usage: repairOutcome.usage ?? agentRunRes.agentRun?.usage ?? null
+          }
+        };
       }
     }
 
@@ -463,28 +593,73 @@ export async function runBuild({
     });
 
     const pkgPassed = verified.verification.outcome === 'passed';
-    if (!pkgPassed) buildOk = false;
-    packageReports.push({
-      packageId: pkg.id,
-      requirements: pkg.requirements,
+    return {
       ok: pkgPassed,
-      stage: pkgPassed ? 'verified' : 'integration-verify',
-      agentRunId: agentRunRes.agentRun.id,
-      sandboxBackend: agentRunRes.agentRun.sandbox?.backend ?? (adapter === 'fake' ? 'fake' : null),
-      confinementClass: agentRunRes.agentRun.sandbox?.confinementClass ?? null,
-      sandboxReceiptDigest: agentRunRes.agentRun.sandbox?.receiptDigest ?? null,
-      repairOutcome: repairOutcome?.outcome ?? 'not-needed',
-      repairsUsed: repairOutcome?.repairsUsed ?? 0,
-      repairLedgerDigest: repairOutcome?.ledgerDigest ?? null,
-      candidateId: submitted.candidate.id,
-      candidateSha,
-      verificationId: verified.verification.id,
-      verificationOutcome: verified.verification.outcome,
-      checks: verified.verification.checks.map((c) => ({ id: c.id, kind: c.kind, passed: c.passed }))
-    });
+      entry: {
+        packageId: pkg.id,
+        requirements: pkg.requirements,
+        ok: pkgPassed,
+        stage: pkgPassed ? 'verified' : 'integration-verify',
+        agentRunId: agentRunRes.agentRun.id,
+        sandboxBackend: agentRunRes.agentRun.sandbox?.backend ?? (adapter === 'fake' ? 'fake' : null),
+        confinementClass: agentRunRes.agentRun.sandbox?.confinementClass ?? null,
+        sandboxReceiptDigest: agentRunRes.agentRun.sandbox?.receiptDigest ?? null,
+        repairOutcome: repairOutcome?.outcome ?? 'not-needed',
+        repairsUsed: repairOutcome?.repairsUsed ?? 0,
+        repairLedgerDigest: repairOutcome?.ledgerDigest ?? null,
+        escalated: Boolean(repairOutcome?.escalated),
+        candidateId: submitted.candidate.id,
+        candidateSha,
+        provenance: submitted.candidate.provenance ?? null,
+        verificationId: verified.verification.id,
+        verificationOutcome: verified.verification.outcome,
+        usage: repairOutcome?.usage ?? agentRunRes.agentRun?.usage ?? null,
+        checks: verified.verification.checks.map((c) => ({ id: c.id, kind: c.kind, passed: c.passed }))
+      }
+    };
+  };
 
-    if (!pkgPassed) break;
+  // Run ready packages concurrently up to the mission's worktree cap
+  // (roadmap P3.4): a package starts once its dependencies have finished and
+  // a slot is free; the first failure stops new launches and drains in flight.
+  const concurrencyCap = Math.max(1, Math.min(mission.maxConcurrentWorktrees ?? 1, 4));
+  const outcomesById = new Map();
+  const completedIds = new Set();
+  const inFlight = new Map();
+  let failureSeen = false;
+  while (!failureSeen) {
+    let launched = false;
+    for (const candidate of schedule) {
+      if (inFlight.size >= concurrencyCap) break;
+      if (completedIds.has(candidate.id) || inFlight.has(candidate.id)) continue;
+      if (!(candidate.dependsOn ?? []).every((dep) => completedIds.has(dep))) continue;
+      launched = true;
+      const startedAt = new Date().toISOString();
+      const promise = buildOne(candidate)
+        .then((result) => ({ result }))
+        .catch((error) => ({ error }))
+        .then((outcome) => {
+          inFlight.delete(candidate.id);
+          completedIds.add(candidate.id);
+          outcomesById.set(candidate.id, { ...outcome, startedAt, finishedAt: new Date().toISOString() });
+          if (outcome.error || !outcome.result.ok) failureSeen = true;
+          return outcome;
+        });
+      inFlight.set(candidate.id, promise);
+    }
+    if (inFlight.size === 0) break;
+    if (!launched && inFlight.size > 0) await Promise.race([...inFlight.values()]);
   }
+  if (inFlight.size > 0) await Promise.allSettled([...inFlight.values()]);
+  for (const pkg of schedule) {
+    const outcome = outcomesById.get(pkg.id);
+    if (outcome) packageReports.push(outcome.result
+      ? { ...outcome.result.entry, startedAt: outcome.startedAt, finishedAt: outcome.finishedAt }
+      : { packageId: pkg.id, ok: false, stage: 'error', error: String(outcome.error?.message ?? outcome.error ?? 'unknown build error'), startedAt: outcome.startedAt, finishedAt: outcome.finishedAt });
+  }
+  const firstError = schedule.map((pkg) => outcomesById.get(pkg.id)?.error).find(Boolean);
+  if (firstError) throw firstError;
+  for (const outcome of outcomesById.values()) if (outcome.error || !outcome.result.ok) buildOk = false;
 
   const finalStatus = runtimeStatus({ missionFile: resolvedMissionRel, projectDir: project });
   const reportBody = {
@@ -500,6 +675,7 @@ export async function runBuild({
     missionFile: resolvedMissionRel,
     packet: mission.packet,
     order: schedule.map((p) => p.id),
+    maxConcurrentWorktrees: concurrencyCap,
     packages: packageReports,
     runtimeSequence: finalStatus.runtime.sequence
   };
@@ -521,7 +697,12 @@ export async function runBuild({
         packages: packageReports.length,
         verifiedPackages: packageReports.filter((p) => p.ok).length,
         packetDigest: mission.packet?.digest ?? null,
-        reportDigest: report.reportDigest
+        reportDigest: report.reportDigest,
+        // Roadmap 4.3: each model-produced evidence entry records the model id,
+        // prompt hash, tool-call transcript digest and token/cost ledger.
+        provenance: packageReports
+          .filter((entry) => entry.provenance)
+          .map((entry) => ({ packageId: entry.packageId, ...entry.provenance }))
       }
     });
   } catch {}

@@ -38,9 +38,9 @@ test('CI pins every third-party action, has read-only permissions and keeps one 
   }
   mustMatch(ci, /^permissions:\n  contents: read$/m);
   mustMatch(live, /^permissions:\n  contents: read$/m);
-  mustMatch(ci, /^  check:\n    name: check\n    if: \$\{\{ always\(\) \}\}\n    needs: \[core, secret-history, node-22-minimum, integration, packed-distribution, acp-v1-bridge, evaluations, stress, portable-smoke\]/m);
+  mustMatch(ci, /^  check:\n    name: check\n    if: \$\{\{ always\(\) \}\}\n    needs: \[core, secret-history, node-22-minimum, integration, packed-distribution, acp-v1-bridge, evaluations, stress, portable-smoke, container-baseline\]/m);
   assert.match(read('.github', 'dependabot.yml'), /package-ecosystem: github-actions/);
-  for (const job of ['core', 'secret-history', 'node-22-minimum', 'integration', 'packed-distribution', 'acp-v1-bridge', 'evaluations', 'stress', 'portable-smoke', 'check']) {
+  for (const job of ['core', 'secret-history', 'node-22-minimum', 'integration', 'packed-distribution', 'acp-v1-bridge', 'evaluations', 'stress', 'portable-smoke', 'container-baseline', 'check']) {
     mustMatch(ci, new RegExp(`^  ${job}:\\n[\\s\\S]*?^    timeout-minutes: \\d+$`, 'm'), `${job} needs an explicit job timeout`);
   }
   mustMatch(read('CONTRIBUTING.md'), /Workflow jobs have explicit time limits[\s\S]*pinned to full commit SHAs/);
@@ -58,7 +58,7 @@ test('CI separates deterministic evaluations/stress work and validates the porta
   mustMatch(ci, /^  stress:/m);
   mustMatch(ci, /^  portable-smoke:/m);
   mustMatch(ci, /os: \[macos-latest, windows-latest\]/);
-  mustMatch(ci, /name: Full portable test suite[\s\S]*?shell: bash[\s\S]*?log=\/tmp\/vld-portable-test\.log[\s\S]*?npm test >"\$log"[\s\S]*?Portable Node test failure/);
+  mustMatch(ci, /name: Full portable test suite[\s\S]*?shell: bash[\s\S]*?log=\/tmp\/vld-portable-test-\$\{\{ matrix\.shard \}\}\.log[\s\S]*?node --test --test-concurrency=1 --test-timeout=180000 \$files[\s\S]*?Portable Node test failure/);
   mustNotMatch(ci, /tee portable-test\.log|NODE_OPTIONS=--test-reporter=dot/);
   mustMatch(ci, /deterministic outcome calibration/);
   mustNotMatch(ci, /--runner cmd|--unsafe-command/);

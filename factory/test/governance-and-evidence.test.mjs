@@ -581,6 +581,7 @@ test('3.3 continuous drift detector, workflow scaffolding, and 10-stack G3-MUTAT
       users: { scale: 'large' },
       traits: ['auth', 'persistence'],
       risks: { pii: true, payments: true, regulated: true, multiTenant: true, destructiveWrites: true, publicFacing: true, integrations: false },
+      regulation: ['sox', 'dora'],
       constraints: { team: 5, weeks: 12, stack: 'go', mustUse: [] }
     }, null, 2));
     compilePacket(profilePath, path.join(repo, 'specs'));

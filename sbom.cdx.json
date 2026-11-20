@@ -7,16 +7,16 @@
       {
         "vendor": "vibecode-like-a-dev",
         "name": "generate-sbom.mjs",
-        "version": "0.20.0"
+        "version": "0.21.0"
       }
     ],
     "component": {
       "type": "application",
-      "bom-ref": "pkg:npm/vibecode-like-a-dev@0.20.0",
+      "bom-ref": "pkg:npm/vibecode-like-a-dev@0.21.0",
       "name": "vibecode-like-a-dev",
-      "version": "0.20.0",
+      "version": "0.21.0",
       "description": "Turn a one-line idea or an existing repository into an enforceable software factory spec that any coding agent can execute.",
-      "purl": "pkg:npm/vibecode-like-a-dev@0.20.0",
+      "purl": "pkg:npm/vibecode-like-a-dev@0.21.0",
       "licenses": [
         {
           "license": {
@@ -27,7 +27,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "930923ada89259916ff24e15edbf03b644e0dc0fdbef35269225eea1e25c09cf"
+          "content": "16ad7c266c32d1a2b503903d7419d6eef164a5e4c69fac11dec6d820a2ebc089"
         }
       ],
       "properties": [
@@ -41,7 +41,7 @@
         },
         {
           "name": "vld:shippedFileCount",
-          "value": "442"
+          "value": "488"
         }
       ]
     }
@@ -49,7 +49,7 @@
   "components": [],
   "dependencies": [
     {
-      "ref": "pkg:npm/vibecode-like-a-dev@0.20.0",
+      "ref": "pkg:npm/vibecode-like-a-dev@0.21.0",
       "dependsOn": []
     }
   ]

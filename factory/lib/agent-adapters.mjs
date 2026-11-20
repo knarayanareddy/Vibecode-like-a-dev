@@ -9,9 +9,9 @@
  * authority until a separately reviewed OS sandbox adapter exists.
  */
 
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { existsSync, lstatSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import {
   agentPolicyDigest,
@@ -20,8 +20,10 @@ import {
   resolveDeclaredExecutable,
   resolveLocalProcessCommand
 } from './agent-policy.mjs';
+import { verifyAgentTranscript } from './agent-transcript.mjs';
 import { digest, extensionError } from './extension-utils.mjs';
 import { runSandboxed } from './sandbox/index.mjs';
+import { createModelBroker } from './sandbox/broker.mjs';
 
 const KILL_GRACE_MS = 250;
 const EVENT_TYPES = new Set(['started', 'progress', 'output', 'completed', 'failed', 'cancelled', 'timed-out']);
@@ -99,7 +101,10 @@ function environmentFor(spec, policy) {
     VLD_PACKAGE_ID: spec.packageId,
     VLD_PACKET_DIGEST: spec.packetDigest,
     VLD_CONTEXT_DIGEST: spec.contextDigest,
-    VLD_REQUIREMENT_IDS: spec.requirementIds.join(',')
+    VLD_REQUIREMENT_IDS: spec.requirementIds.join(','),
+    ...(Array.isArray(spec.resourceClaims) && spec.resourceClaims.length
+      ? { VLD_WRITE_GLOBS: spec.resourceClaims.join(',') }
+      : {})
   });
 }
 
@@ -262,12 +267,170 @@ async function runSandboxedCli({ spec, policy, signal, onEvent }) {
   };
 }
 
+/**
+ * Decide whether a `sandboxed-agent` run needs a model broker, and with which
+ * provider allow-list. Cassette replay and command providers need no egress.
+ * Exported for focused tests.
+ */
+export function agentModelBrokerSpec({ modelSpec, cassetteMode = null, env = process.env } = {}) {
+  if (!modelSpec) return null;
+  const separator = String(modelSpec).indexOf(':');
+  const provider = separator > 0 ? String(modelSpec).slice(0, separator) : String(modelSpec);
+  const rest = separator > 0 ? String(modelSpec).slice(separator + 1) : '';
+  const secondSep = rest.indexOf(':');
+  const model = secondSep > 0 ? rest.slice(0, secondSep) : rest;
+  if (provider === 'command') return null;
+  if (cassetteMode === 'replay') return null;
+  if (env.VLD_MODEL_NO_BROKER === '1') return null;
+  return {
+    provider,
+    model,
+    baseUrl: (secondSep > 0 ? rest.slice(secondSep + 1) : null) ?? env.VLD_MODEL_BASE_URL ?? null,
+    budget: {
+      maxCalls: Number(env.VLD_MODEL_MAX_CALLS ?? 64),
+      maxTokens: Number(env.VLD_MODEL_MAX_TOKENS ?? 200_000),
+      maxCostUsd: Number(env.VLD_MODEL_MAX_COST_USD ?? 5)
+    }
+  };
+}
+
+/**
+ * The `sandboxed-agent` adapter: runs the built-in tool-loop implementer
+ * inside the sandbox. Model egress is broker-only — when a live model is
+ * configured (no cassette replay), a loopback model broker is started for the
+ * duration of the run and its binding is injected into the sandbox env, so the
+ * agent process never holds provider credentials and can only reach the
+ * model's allow-listed endpoint. Afterwards the tool transcript written inside
+ * the workspace is verified and its digest is attached to the execution.
+ */
+async function runSandboxedAgent({ spec, policy, signal = null, onEvent = null }) {
+  const command = resolveDeclaredExecutable(policy, ['sandboxed-agent']);
+  const cwd = workspaceDirectory(spec.workspace);
+  const sbx = policy.sandbox ?? { backend: 'auto' };
+  const startedAt = nowIso();
+  emit(onEvent, { type: 'started', at: startedAt, message: 'sandboxed agent adapter started' });
+
+  const env = environmentFor(spec, policy);
+  const brokerSpec = agentModelBrokerSpec({
+    modelSpec: env.VLD_MODEL_SPEC ?? null,
+    cassetteMode: env.VLD_MODEL_CASSETTE_MODE ?? null,
+    env
+  });
+  let broker = null;
+  if (brokerSpec) {
+    const nonce = randomBytes(32).toString('hex');
+    // Network-isolated backends (linux-ns) run with loopback down, so the
+    // broker must be a bind-mounted unix socket there; loopback TCP works
+    // under seatbelt/node-permission and on Windows where AF_UNIX is dicey.
+    const brokerMode = process.platform === 'linux' ? 'unix-socket' : 'loopback-port';
+    broker = createModelBroker({
+      mode: brokerMode,
+      nonce,
+      providers: {
+        [brokerSpec.provider]: brokerSpec.baseUrl ? { baseUrl: brokerSpec.baseUrl } : {}
+      },
+      allowModels: [brokerSpec.model],
+      budget: brokerSpec.budget
+    });
+    await broker.start();
+    const binding = broker.binding();
+    if (binding.socketPath) env.VLD_MODEL_BROKER_SOCKET = binding.socketPath;
+    else env.VLD_MODEL_BROKER_URL = `http://127.0.0.1:${binding.port}`;
+    env.VLD_MODEL_BROKER_NONCE = binding.nonce;
+    env.VLD_MODEL_BROKER_TOKEN = binding.nonce;
+  }
+
+  let run;
+  try {
+    const cassetteRead = env.VLD_MODEL_CASSETTE_DIR ? [path.resolve(env.VLD_MODEL_CASSETTE_DIR)] : [];
+    // Record/auto modes write cassette entries from inside the sandbox.
+    const cassetteWrite = env.VLD_MODEL_CASSETTE_DIR && (env.VLD_MODEL_CASSETTE_MODE === 'record' || env.VLD_MODEL_CASSETTE_MODE === 'auto')
+      ? [path.resolve(env.VLD_MODEL_CASSETTE_DIR)]
+      : [];
+    run = await runSandboxed({
+      id: `sbx-${spec.id}`,
+      executable: command.executable,
+      args: command.args,
+      workspace: cwd,
+      mode: policy.mode,
+      network: false,
+      broker: broker ? broker.binding() : undefined,
+      allowChildProcess: Boolean(sbx.allowChildProcess),
+      extraReadPaths: [...(sbx.extraReadPaths ?? []), ...cassetteRead],
+      extraWritePaths: cassetteWrite,
+      ociImage: sbx.ociImage,
+      backend: sbx.backend ?? 'auto',
+      requireOs: Boolean(sbx.requireOs),
+      env,
+      policyDigest: agentPolicyDigest(policy),
+      limits: policy.limits,
+      signal,
+      onChunk: (stream, buf) => emit(onEvent, { type: 'output', at: nowIso(), stream, bytes: buf.length })
+    });
+  } finally {
+    if (broker) await broker.stop();
+  }
+
+  // Verify the tool transcript the agent wrote inside its workspace.
+  const transcriptBase = path.join(cwd, '.vld', 'agent-transcripts', `${spec.id}`);
+  let transcriptDigest = null;
+  let agentSummary = null;
+  let transcriptVerified = false;
+  let transcriptErrors = [];
+  if (existsSync(`${transcriptBase}.jsonl`)) {
+    const verification = verifyAgentTranscript(readFileSync(`${transcriptBase}.jsonl`, 'utf8'));
+    transcriptVerified = verification.ok;
+    transcriptErrors = verification.errors;
+    transcriptDigest = verification.digest;
+    if (existsSync(`${transcriptBase}.summary.json`)) {
+      try {
+        agentSummary = JSON.parse(readFileSync(`${transcriptBase}.summary.json`, 'utf8'));
+      } catch {}
+    }
+    if (!verification.ok) {
+      emit(onEvent, {
+        type: 'failed',
+        at: nowIso(),
+        message: `agent transcript failed verification: ${verification.errors[0] ?? 'unknown'}`
+      });
+    }
+  }
+
+  let outcome = run.outcome;
+  if (outcome === 'completed' && !transcriptVerified) outcome = 'failed';
+  const finishType = outcome === 'completed' ? 'completed' : outcome === 'timed-out' ? 'timed-out' : outcome === 'cancelled' ? 'cancelled' : 'failed';
+  emit(onEvent, { type: finishType, at: run.receipt.finishedAt, message: `sandboxed agent ${outcome} (${run.backend})` });
+  return {
+    outcome,
+    exitCode: run.exitCode,
+    signal: run.signal,
+    outputDigest: run.outputDigest,
+    outputBytes: run.outputBytes,
+    outputSummary: redactAgentOutput(`${run.stdout}\n${run.stderr}`),
+    startedAt: run.receipt.startedAt,
+    finishedAt: run.receipt.finishedAt,
+    sandboxReceipt: run.receipt,
+    transcriptDigest,
+    transcriptVerified,
+    transcriptErrors,
+    agentSummary,
+    ...(agentSummary?.promptHash ? { promptHash: agentSummary.promptHash } : {}),
+    ...(Array.isArray(agentSummary?.requestDigests) && agentSummary.requestDigests.length > 0
+      ? { requestDigests: agentSummary.requestDigests }
+      : {}),
+    usage: agentSummary?.usage ?? null
+  };
+}
+
 export function adapterCapabilities(id) {
   if (!ALL_AGENT_ADAPTER_IDS.includes(id)) throw extensionError('unknown agent adapter', 'UNKNOWN_AGENT_ADAPTER');
   if (id === 'fake') {
     return { readWorkspace: true, writeWorkspace: true, runDeclaredCommands: false, network: false, streamEvents: true, cancel: true, reconnect: true, sandbox: true };
   }
   if (id === 'sandboxed-cli') {
+    return { readWorkspace: true, writeWorkspace: true, runDeclaredCommands: true, network: false, streamEvents: true, cancel: true, reconnect: false, sandbox: true };
+  }
+  if (id === 'sandboxed-agent') {
     return { readWorkspace: true, writeWorkspace: true, runDeclaredCommands: true, network: false, streamEvents: true, cancel: true, reconnect: false, sandbox: true };
   }
   if (id === 'sandboxed-acp') {
@@ -285,6 +448,7 @@ export async function executeAgentAdapter({ spec, policy, signal = null, onEvent
   if (!spec || typeof spec !== 'object' || Array.isArray(spec)) throw extensionError('agent run spec must be an object', 'INVALID_AGENT_RUN');
   if (policy.adapter === 'fake') return runFake({ policy, signal, onEvent });
   if (policy.adapter === 'sandboxed-cli') return runSandboxedCli({ spec, policy, signal, onEvent });
+  if (policy.adapter === 'sandboxed-agent') return runSandboxedAgent({ spec, policy, signal, onEvent });
   if (policy.adapter === 'acp-v1' || policy.adapter === 'sandboxed-acp') {
     // The stable ACP v1 SDK is a deliberately optional nested package. Core
     // never imports it at startup and no experimental/v2 endpoint is selected.

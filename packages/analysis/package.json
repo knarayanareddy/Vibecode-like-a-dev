@@ -1,0 +1,19 @@
+{
+  "name": "@vld/analysis",
+  "version": "0.21.0",
+  "description": "Zero-dependency AST-based non-tautological assertion and test-coupling analysis for vibecode-like-a-dev.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "exports": {
+    ".": "./src/index.mjs",
+    "./js-ast": "./src/js-ast.mjs",
+    "./python-ast": "./src/python-ast.mjs",
+    "./go-ast": "./src/go-ast.mjs"
+  },
+  "files": [
+    "src/"
+  ]
+}

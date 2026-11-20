@@ -11,11 +11,12 @@
  * has no dependencies, and the surface is small enough to read.
  */
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { ROOT, buildIndex, loadIndex } from './indexer.mjs';
 import { buildPlan, loadCatalog, loadPolicy, loadRouting } from './planner.mjs';
 import { normalizeProfile, validateProfile } from './profile.mjs';
+import { applyProfileAnswer, generateProfileQuestions } from './questions.mjs';
 import { anchorPath, planContract } from './emit/derive.mjs';
 import { PACKAGE_VERSION } from './version.mjs';
 
@@ -430,6 +431,41 @@ const TOOLS = [
     name: 'get_anchor_convention',
     description: 'Return how requirements are bound to tests (the @req convention) and the drift-check commands. Use before writing any test in a project that has a packet.',
     inputSchema: { type: 'object', properties: {} }
+  },
+  {
+    name: 'get_questions',
+    description: 'Return up to 7 structured, tier-ordered elicitation questions and per-field provenance (user | inferred | default | waived) for a profile or profilePath, including dependent follow-up questions.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        profile: { type: 'object', description: 'Raw profile JSON object to inspect.' },
+        profilePath: { type: 'string', description: 'Optional path to profile.json or profile.draft.json.' }
+      }
+    }
+  },
+  {
+    name: 'answer',
+    description: 'Apply a user answer (or dated risk waiver) to a pending elicitation question, recording a timestamp and provenance="user"|"waived", and return the updated profile plus any newly unlocked dependent questions.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        profile: { type: 'object', description: 'Raw profile JSON object to update.' },
+        profilePath: { type: 'string', description: 'Optional path to profile.json; persisted when persist=true.' },
+        persist: { type: 'boolean', description: 'Write the updated profile back to profilePath.' },
+        questionId: { type: 'string' },
+        field: { type: 'string' },
+        value: {},
+        waive: {
+          type: 'object',
+          properties: {
+            reason: { type: 'string' },
+            expires: { type: 'string' }
+          },
+          required: ['reason', 'expires']
+        },
+        actor: { type: 'string' }
+      }
+    }
   }
 ];
 
@@ -672,6 +708,45 @@ const HANDLERS = {
         java: `// ${tag} REQ-004\n@Test void eraseSubjectRemovesRows() { assertTrue(rows.isEmpty()); }`
       }
     };
+  },
+
+  get_questions(args) {
+    let raw = args.profile;
+    if (!raw && typeof args.profilePath === 'string') {
+      const target = path.resolve(args.profilePath);
+      if (!existsSync(target)) throw new Error(`profile not found: ${target}`);
+      const parsed = JSON.parse(readFileSync(target, 'utf8'));
+      raw = parsed.candidateProfile ?? parsed;
+    }
+    if (!isPlainObject(raw)) throw new Error('get_questions requires a `profile` object or `profilePath`');
+    const today = new Date().toISOString().slice(0, 10);
+    return generateProfileQuestions(raw, { referenceDate: today });
+  },
+
+  answer(args) {
+    let raw = args.profile;
+    let targetPath = null;
+    if (!raw && typeof args.profilePath === 'string') {
+      targetPath = path.resolve(args.profilePath);
+      if (!existsSync(targetPath)) throw new Error(`profile not found: ${targetPath}`);
+      const parsed = JSON.parse(readFileSync(targetPath, 'utf8'));
+      raw = parsed.candidateProfile ?? parsed;
+    }
+    if (!isPlainObject(raw)) throw new Error('answer requires a `profile` object or `profilePath`');
+    if (!args.questionId && !args.field) throw new Error('answer requires `questionId` or `field`');
+    const today = new Date().toISOString().slice(0, 10);
+    const updated = applyProfileAnswer(raw, {
+      questionId: args.questionId ?? null,
+      field: args.field ?? null,
+      value: args.value,
+      waive: args.waive ?? null,
+      actor: args.actor ?? 'mcp:user',
+      referenceDate: today
+    });
+    if (targetPath && args.persist === true) {
+      writeFileSync(targetPath, `${JSON.stringify(updated.profile, null, 2)}\n`, 'utf8');
+    }
+    return updated;
   }
 };
 

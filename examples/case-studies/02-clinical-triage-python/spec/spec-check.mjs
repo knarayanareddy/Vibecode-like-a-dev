@@ -50,14 +50,16 @@ const option = (name, fallback) => {
 
 const STRICT = flag('--strict');
 const REQUIRE_ASSERTIONS = flag('--require-assertions');
+const REQUIRE_REPORT = flag('--require-report');
+const JSON_OUT = flag('--json');
 // BLK-2 step 1 of the review: the safe path should be the default and the lenient
 // one should be chosen. The checker cannot make itself strict by default without
 // breaking every team mid-adoption, so what it can do is refuse to be quiet: when
 // neither flag is passed it says, once, that this is the lenient mode and how to
 // get the strict one. `--local` names that choice explicitly.
 const LOCAL = flag('--local');
-if (LOCAL && (STRICT || REQUIRE_ASSERTIONS)) {
-  console.error('\n✗ --local cannot be combined with --strict or --require-assertions: pick one mode.\n');
+if (LOCAL && (STRICT || REQUIRE_ASSERTIONS || REQUIRE_REPORT)) {
+  console.error('\n✗ --local cannot be combined with --strict, --require-assertions or --require-report: pick one mode.\n');
   process.exit(2);
 }
 function defaultRepoRoot(packetDir) {
@@ -88,72 +90,174 @@ const REPORT = option('--report', option('--results', null));
  * reimplement each runner. A file that cannot be parsed is an error, never a pass:
  * an unreadable report is the same as no report.
  */
-function readPassedTests(file) {
+function readExecutionReport(file) {
   const text = readFileSync(file, 'utf8');
   const passed = new Set();
-  const trim = (name) => String(name).trim().replace(/\s+/g, ' ');
+  const failed = new Set();
+  const skipped = new Set();
+  const fileLineOutcomes = [];
+  const trim = (name) => String(name ?? '').trim().replace(/\s+/g, ' ');
+  const normFile = (raw) => String(raw ?? '').trim().replace(/^file:\/\//, '').replace(/\\/g, '/').replace(/^\.\//, '');
+  const record = (bucket, name) => {
+    const n = trim(name);
+    if (n) bucket.add(n);
+  };
 
-  // JUnit XML: <testcase name="…" classname="…"> with or without a failure child.
-  if (/<testsuite\b|<testcase\b/.test(text)) {
-    for (const match of text.matchAll(/<testcase\b([^>]*)(?:\/>|>([\s\S]*?)<\/testcase>)/g)) {
+  // 1. JUnit XML: <testcase name="…" classname="…" file="…"> with failure/error/skipped children.
+  if (/<test(?:suites|suite|case)\b/i.test(text)) {
+    for (const match of text.matchAll(/<testcase\b([^>]*?)(?:\/>|>([\s\S]*?)<\/testcase>)/gi)) {
       const attrs = match[1];
       const body = match[2] ?? '';
-      if (/<failure\b|<error\b|<skipped\b/.test(body)) continue;
-      const name = /\bname\s*=\s*"([^"]*)"/.exec(attrs)?.[1];
+      const name = /\bname\s*=\s*"([^"]*)"/.exec(attrs)?.[1] ?? '';
       const className = /\bclassname\s*=\s*"([^"]*)"/.exec(attrs)?.[1] ?? '';
-      if (name) passed.add(trim(name));
-      if (className) passed.add(trim(`${className} ${name ?? ''}`));
+      const tcFile = /\bfile\s*=\s*"([^"]*)"/.exec(attrs)?.[1] ?? '';
+      const tcLine = Number(/\bline\s*=\s*"([^"]*)"/.exec(attrs)?.[1] ?? NaN);
+      const status = /<(?:failure|error)\b/i.test(body)
+        ? 'failed'
+        : /<skipped\b/i.test(body)
+          ? 'skipped'
+          : 'passed';
+      const bucket = status === 'passed' ? passed : status === 'failed' ? failed : skipped;
+      record(bucket, name);
+      if (className) record(bucket, `${className} ${name}`);
+      if (tcFile) fileLineOutcomes.push({ file: normFile(tcFile), line: Number.isFinite(tcLine) ? tcLine : null, name: trim(name), status });
     }
-    return passed;
+    return { passed, failed, skipped, fileLineOutcomes };
   }
 
-  // JSON: vitest/jest `testResults[].assertionResults[]` or a flat array of tests.
+  // 2. Go `go test -json` NDJSON event stream.
+  if (/^\s*\{.*"Action"\s*:\s*"(?:run|pass|fail|skip)"/m.test(text) && text.includes('\n{')) {
+    for (const rawLine of text.split(/\r?\n/)) {
+      const s = rawLine.trim();
+      if (!s.startsWith('{')) continue;
+      try {
+        const ev = JSON.parse(s);
+        if (!ev.Test || !['pass', 'fail', 'skip'].includes(ev.Action)) continue;
+        const bucket = ev.Action === 'pass' ? passed : ev.Action === 'fail' ? failed : skipped;
+        record(bucket, ev.Test);
+        if (ev.Package) record(bucket, `${ev.Package} ${ev.Test}`);
+      } catch { /* skip non-json line */ }
+    }
+    return { passed, failed, skipped, fileLineOutcomes };
+  }
+
+  // 3. JSON: VLD `vld-test-run`, vitest/jest `testResults[].assertionResults[]`, or flat array.
   try {
     const json = JSON.parse(text);
-    const collect = (node) => {
+    const collect = (node, suiteFile = null) => {
       if (!node || typeof node !== 'object') return;
-      if (Array.isArray(node)) return node.forEach(collect);
+      if (Array.isArray(node)) { node.forEach((n) => collect(n, suiteFile)); return; }
+      const nextFile = typeof node.file === 'string'
+        ? normFile(node.file)
+        : (Array.isArray(node.assertionResults) && typeof node.name === 'string' ? normFile(node.name) : suiteFile);
       const name = node.fullName ?? node.title ?? node.name;
-      const state = node.status ?? node.state ?? node.outcome;
-      if (typeof name === 'string' && ['passed', 'pass', 'ok', 'success'].includes(String(state).toLowerCase())) {
-        passed.add(trim(name));
+      const shortTitle = node.title ?? node.name;
+      const state = String(node.status ?? node.state ?? node.outcome ?? '').toLowerCase();
+      if (typeof name === 'string' && state && !Array.isArray(node.assertionResults)) {
+        let status = null;
+        if (['passed', 'pass', 'ok', 'success'].includes(state)) status = 'passed';
+        else if (['failed', 'fail', 'error'].includes(state)) status = 'failed';
+        else if (['skipped', 'skip', 'pending', 'todo', 'disabled', 'ignored'].includes(state)) status = 'skipped';
+        if (status) {
+          const bucket = status === 'passed' ? passed : status === 'failed' ? failed : skipped;
+          record(bucket, name);
+          if (shortTitle && shortTitle !== name) record(bucket, shortTitle);
+          const ln = Number(node.line ?? node.location?.line ?? NaN);
+          if (nextFile) fileLineOutcomes.push({ file: nextFile, line: Number.isFinite(ln) ? ln : null, name: trim(shortTitle ?? name), status });
+        }
       }
-      for (const value of Object.values(node)) if (value && typeof value === 'object') collect(value);
+      for (const [k, value] of Object.entries(node)) {
+        if (k === 'survivors') continue;
+        if (value && typeof value === 'object') collect(value, nextFile);
+      }
     };
     collect(json);
-    if (passed.size > 0) return passed;
+    return { passed, failed, skipped, fileLineOutcomes };
   } catch {
     // not JSON; fall through to TAP
   }
 
-  // TAP (node:test --test-reporter=tap): `ok 12 - suite › test name`
-  for (const line of text.split('\n')) {
-    const match = /^\s*ok\b\s*\d*\s*(?:-\s*)?(.*)$/.exec(line);
+  // 4. TAP v13/v14 (node:test --test-reporter=tap): NEVER treat `# SKIP` / `# TODO` as passed!
+  const lines = text.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i += 1) {
+    const match = /^(\s*)(ok|not ok)\b\s*\d*\s*(?:-\s*)?(.*)$/.exec(lines[i]);
     if (!match) continue;
-    const name = match[1].replace(/\s*#\s*(?:SKIP|TODO).*$/i, '').trim();
-    if (name) passed.add(trim(name));
+    const indent = match[1].length;
+    const isOk = match[2] === 'ok';
+    const rawRest = match[3].trim();
+    const isSkipOrTodo = /#\s*(?:SKIP|TODO)\b/i.test(rawRest);
+    const name = trim(rawRest.replace(/\s*#\s*(?:SKIP|TODO).*$/i, ''));
+    let locFile = null;
+    let locLine = null;
+    let diagType = null;
+    if (lines[i + 1]?.trim() === '---' && lines[i + 1].search(/\S/) > indent) {
+      let j = i + 2;
+      while (j < lines.length && !(lines[j].trim() === '...' && lines[j].search(/\S/) > indent)) {
+        const loc = lines[j].trim().match(/^location:\s*['"]?(.+?):(\d+)(?::\d+)?['"]?$/);
+        if (loc) { locFile = normFile(loc[1]); locLine = Number(loc[2]); }
+        const tp = lines[j].trim().match(/^type:\s*['"]?(\w+)['"]?/);
+        if (tp) diagType = tp[1];
+        j += 1;
+      }
+      i = j;
+    }
+    if (diagType === 'suite') continue;
+    const status = isSkipOrTodo ? 'skipped' : isOk ? 'passed' : 'failed';
+    const bucket = status === 'passed' ? passed : status === 'failed' ? failed : skipped;
+    record(bucket, name);
+    if (locFile) fileLineOutcomes.push({ file: locFile, line: locLine, name, status });
   }
-  return passed;
+  return { passed, failed, skipped, fileLineOutcomes };
+}
+
+function matchHitInReport(hit, reqId, rep) {
+  const normHitFile = String(hit.file ?? '').replace(/\\/g, '/').replace(/^\.\//, '');
+  const filesEq = (a, b) => a === b || a.endsWith(`/${b}`) || b.endsWith(`/${a}`);
+  // 1. File + testName match
+  if (normHitFile && hit.testName) {
+    const byFileAndName = rep.fileLineOutcomes.filter(
+      (o) => o.file && filesEq(o.file, normHitFile) && (o.name === hit.testName || o.name.endsWith(` > ${hit.testName}`) || o.name.startsWith(`${hit.testName}[`))
+    );
+    if (byFileAndName.length > 0) {
+      if (byFileAndName.some((o) => o.status === 'failed')) return 'failed';
+      if (byFileAndName.every((o) => o.status === 'skipped')) return 'skipped';
+      return 'passed';
+    }
+  }
+  // 2. Scoped testName match against failed/skipped/passed sets
+  const tName = hit.testName ? String(hit.testName).trim().replace(/\s+/g, ' ') : '';
+  const nameIn = (set) => {
+    for (const entry of set) {
+      if (tName && (entry === tName || entry.endsWith(` > ${tName}`) || entry.endsWith(` ${tName}`) || entry.startsWith(`${tName}[`) || entry.startsWith(`${tName}/`))) {
+        return true;
+      }
+      if (entry.includes(reqId)) return true;
+    }
+    return false;
+  };
+  if (nameIn(rep.failed)) return 'failed';
+  if (nameIn(rep.passed)) return 'passed';
+  if (nameIn(rep.skipped)) return 'skipped';
+  return 'not-run';
 }
 
 const errors = [];
 const notices = [];
 const passes = [];
 
-let reportPassed = null;
+let execReport = null;
 if (REPORT) {
   try {
-    reportPassed = readPassedTests(REPORT);
+    execReport = readExecutionReport(REPORT);
   } catch (error) {
     console.error(`\n✗ cannot read test report ${REPORT}: ${error.message}\n`);
     process.exit(2);
   }
-  // An empty report is not an error here: it is evidence that nothing passed, and
-  // each done requirement below then fails on its own line with its own id. Aborting
-  // would hide which requirements are unproven.
-  if (reportPassed.size === 0) {
-    notices.push(`${REPORT} contains no passing test; every done requirement will be reported as unproven`);
+  if (execReport.passed.size === 0) {
+    notices.push(`${REPORT} contains no passing test; every done or required requirement will be reported as unproven`);
   }
+} else if (REQUIRE_REPORT) {
+  errors.push('--require-report requires --report <test-report-path> so anchored tests are verified against a real test run');
 }
 
 const IGNORED_DIRS = new Set([
@@ -290,14 +394,25 @@ function vacuousAssertions(source) {
     const matcherArgs = splitArguments(balancedArguments(tail, matcher.index + matcher[0].length - 1) ?? '');
     if (received.length !== 1) continue;
     const bothLiteral = LITERAL_ONLY.test(received[0]) && matcherArgs.length > 0 && matcherArgs.every((argument) => LITERAL_ONLY.test(argument));
+    const singleLiteralTruthy =
+      matcherArgs.length === 0 &&
+      (LITERAL_ONLY.test(received[0]) || /^\[\s*\]$|^\{\s*\}$/.test(received[0])) &&
+      /\.(?:toBeTruthy|toBeFalsy|toBeDefined|toBeNull|toBeUndefined|toBeTrue|toBeFalse)\s*\($/.test(matcher[0]);
     const selfCompare = matcherArgs.length === 1 && matcherArgs[0] === received[0] && /^[\w.$]+$/.test(received[0]);
-    // `toBeDefined()` takes no argument and is not vacuous by itself; it is only a
-    // weak assertion, which this rule does not try to grade.
-    if (bothLiteral || selfCompare) found.push(`expect(${received[0]})${matcher[0].trim()}(${matcherArgs.join(', ')})`);
+    if (bothLiteral || singleLiteralTruthy || selfCompare) found.push(`expect(${received[0]})${matcher[0].trim()}(${matcherArgs.join(', ')})`);
   }
-  // Python bare literal assertions: `assert True`, `assert 1 == 1`, `assert "a" == "a"`
-  for (const match of source.matchAll(/^[ \t]*assert\s+(True|1\s*==\s*1|0\s*==\s*0|['"][^'"]*['"]\s*==\s*['"][^'"]*['"])[ \t]*(?:#.*)?$/gm)) {
+  // Python literal & reflexive assertions: `assert True`, `assert 1 == 1`, `assert x == x`
+  for (const match of source.matchAll(/^[ \t]*assert\s+(True|False|-?\d+\s*(?:==|!=)\s*-?\d+|['"][^'"]*['"]\s*==\s*['"][^'"]*['"]|([A-Za-z_][\w.]*)\s*==\s*\2)[ \t]*(?:#.*)?$/gm)) {
     found.push(`assert ${match[1].trim()}`);
+  }
+  // Go literal & reflexive guards: `if false { t.Fatal(...) }`, `if 1 != 1 { t.Fatal(...) }`, `if x != x { t.Fatal(...) }`
+  for (const match of source.matchAll(/\bif\s+(false|true|-?\d+\s*(?:==|!=)\s*-?\d+|([A-Za-z_][\w.]*)\s*(?:==|!=)\s*\2)\s*\{[^}]{0,120}\bt\.(?:Fatal|Fatalf|Error|Errorf|Fail|FailNow)\s*\(/g)) {
+    found.push(`if ${match[1].trim()} { t.Fatal(...) }`);
+  }
+  // Swallowed assertion in empty catch: `try { ...expect/assert... } catch [(e)] {}`
+  for (const match of source.matchAll(/\btry\s*\{[^{}]{0,240}\b(?:assert|expect)\b[^{}]{0,240}\}\s*catch(?:\s*\([^)]*\))?\s*\{\s*(?:\/\/[^\n]*\s*|\/\*[\s\S]*?\*\/\s*)?\}/g)) {
+    found.push('try { assert/expect } catch {}');
+    if (match) break;
   }
   // Rust literal macros: `assert!(true)`, `assert_eq!(1, 1)`
   for (const match of source.matchAll(/\b(assert!\s*\(\s*true\s*\)|assert_eq!\s*\(\s*(-?\d+|true|false|"[^"]*")\s*,\s*\2\s*\))/g)) {
@@ -513,54 +628,260 @@ function reachesProduct(source, filePath = '') {
  * this narrows a false pass, it does not invent a failure.
  */
 const ASSERTION_FREE_WINDOW = 40;
+const ANCHOR_PLACEMENT_MESSAGE = 'put // @req directly above the test that proves it';
+const SCOPE_MAX_BODY_LINES = 400;
+const PY_TEST_DECL = /^(\s*)(?:async\s+)?def\s+(test[\w]*)\s*\(/;
+const RB_TEST_DECL = /^(\s*)(?:(?:it|specify|scenario)\s+(?:['"]([^'"]+)['"]|.*)\s+do\b|def\s+(test_\w+))/;
+const EX_TEST_DECL = /^(\s*)test\s+['"]([^'"]+)['"].*\bdo\b/;
+const GO_TEST_DECL = /^\s*func\s+((?:Test|Benchmark|Fuzz|Example)[A-Z0-9_]\w*)\s*\(/;
+const RUST_ATTR_DECL = /^\s*#\[(?:[\w:]+::)?(?:test|rstest)\b/;
+const JVM_ATTR_DECL = /^\s*@(?:Test|ParameterizedTest|RepeatedTest|Property|TestFactory)\b/;
+const CS_ATTR_DECL = /^\s*\[(?:Fact|Theory|Test|TestMethod|DataTestMethod)(?:\s*\(|\s*\])/;
+const PHP_TEST_DECL = /^\s*(?:public\s+)?function\s+(test\w*)\s*\(/i;
+const JS_FN_DECL = /^\s*(?:export\s+)?(?:async\s+)?function\s+(test\w*)\s*\(/;
+const JS_LEAF_DECL = /^\s*(?:(?:Deno|Bun)\.)?(?:test|it|specify|scenario)(?:\.(?:only|skip|todo|concurrent|sequential))?(?:\s*\.\s*each\s*\([^)]*\))?\s*\(\s*(?:(['"`])((?:\\.|(?!\1).)*)\1)?/;
+const JS_SUITE_DECL = /^\s*describe(?:\.(?:only|skip|todo|concurrent|sequential))?(?:\s*\.\s*each\s*\([^)]*\))?\s*\(\s*(?:(['"`])((?:\\.|(?!\1).)*)\1)?/;
+const RB_SUITE_DECL = /^(\s*)(?:RSpec\.)?(?:describe|context)\b.*\bdo\b/;
 
-function scopedAssertionFor(source, anchorIndex) {
-  const lines = source.split('\n');
-  // Python: a def body ends at the next non-blank line indented no deeper than `def`.
-  const pyAnchor = lines.slice(anchorIndex, Math.min(lines.length, anchorIndex + 6)).findIndex((line) => /^\s*(?:async\s+)?def\s+\w+\s*\(/.test(line));
-  if (pyAnchor !== -1) {
-    const defIndex = anchorIndex + pyAnchor;
-    const indent = lines[defIndex].match(/^\s*/)[0].length;
-    const body = [];
-    for (let i = defIndex + 1; i < lines.length; i += 1) {
-      const line = lines[i];
-      if (line.trim() !== '' && !line.trim().startsWith('#') && line.match(/^\s*/)[0].length <= indent) break;
-      body.push(line);
+function stripCodeLiterals(line, inBlockComment = false) {
+  let out = '';
+  let block = inBlockComment;
+  let quote = null;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    const next = line[i + 1];
+    if (block) {
+      if (ch === '*' && next === '/') { block = false; i += 1; }
+      continue;
     }
-    return ASSERTION_SIGNAL.test(body.join('\n'));
-  }
-
-  // Ruby RSpec/Minitest: `it ... do` or `def test_...` ends at matching-indent `end`.
-  const rbAnchor = lines.slice(anchorIndex, Math.min(lines.length, anchorIndex + 4)).findIndex((line) => /^\s*(?:it|specify|scenario)\b.*\bdo\b|^\s*def\s+test_\w+/.test(line));
-  if (rbAnchor !== -1) {
-    const startIdx = anchorIndex + rbAnchor;
-    const indent = lines[startIdx].match(/^\s*/)[0].length;
-    const body = [];
-    for (let i = startIdx + 1; i < lines.length; i += 1) {
-      const line = lines[i];
-      if (new RegExp(`^\\s{0,${indent}}end\\b`).test(line)) break;
-      body.push(line);
+    if (quote) {
+      if (ch === '\\') { i += 1; continue; }
+      if (ch === quote) quote = null;
+      continue;
     }
-    return ASSERTION_SIGNAL.test(body.join('\n'));
+    if (ch === '/' && next === '*') { block = true; i += 1; continue; }
+    if (ch === '/' && next === '/') break;
+    if (ch === '\'' || ch === '"' || ch === '`') { quote = ch; continue; }
+    out += ch;
   }
+  return { code: out, inBlockComment: block };
+}
 
-  const window = [];
-  let depth = 0;
-  let opened = false;
-  for (let i = anchorIndex; i < Math.min(lines.length, anchorIndex + ASSERTION_FREE_WINDOW); i += 1) {
-    const line = lines[i];
-    window.push(line);
-    for (const character of line) {
-      if (character === '{') {
-        depth += 1;
-        opened = true;
-      } else if (character === '}') {
-        depth -= 1;
+function detectTestDecl(line, ext, includeSuites = true) {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) return null;
+  if (ext === '.py') {
+    if (trimmed.startsWith('#')) return null;
+    const m = PY_TEST_DECL.exec(line);
+    return m ? { kind: 'python', indent: m[1].length, name: m[2], isSuite: false } : null;
+  }
+  if (ext === '.rb') {
+    if (trimmed.startsWith('#')) return null;
+    const m = RB_TEST_DECL.exec(line);
+    if (m) return { kind: 'ruby', indent: m[1].length, name: m[2] ?? m[3] ?? null, isSuite: false };
+    if (includeSuites) {
+      const s = RB_SUITE_DECL.exec(line);
+      if (s) return { kind: 'ruby', indent: s[1].length, name: null, isSuite: true };
+    }
+    return null;
+  }
+  if (ext === '.exs') {
+    if (trimmed.startsWith('#')) return null;
+    const m = EX_TEST_DECL.exec(line);
+    return m ? { kind: 'ruby', indent: m[1].length, name: m[2] ?? null, isSuite: false } : null;
+  }
+  if (ext === '.go') {
+    const m = GO_TEST_DECL.exec(line);
+    return m ? { kind: 'brace', name: m[1], isSuite: false } : null;
+  }
+  if (ext === '.rs') return RUST_ATTR_DECL.test(line) ? { kind: 'attr-brace', name: null, isSuite: false } : null;
+  if (ext === '.java' || ext === '.kt') return JVM_ATTR_DECL.test(line) ? { kind: 'attr-brace', name: null, isSuite: false } : null;
+  if (ext === '.cs') return CS_ATTR_DECL.test(line) ? { kind: 'attr-brace', name: null, isSuite: false } : null;
+  if (ext === '.php') {
+    const m = PHP_TEST_DECL.exec(line);
+    if (m) return { kind: 'brace', name: m[1], isSuite: false };
+    const pest = JS_LEAF_DECL.exec(line);
+    return pest ? { kind: 'js-call', name: pest[2] ?? null, isSuite: false } : null;
+  }
+  const jsLeaf = JS_LEAF_DECL.exec(line);
+  if (jsLeaf) return { kind: 'js-call', name: jsLeaf[2] ?? null, isSuite: false };
+  const jsFn = JS_FN_DECL.exec(line);
+  if (jsFn) return { kind: 'brace', name: jsFn[1], isSuite: false };
+  if (includeSuites) {
+    const jsSuite = JS_SUITE_DECL.exec(line);
+    if (jsSuite) return { kind: 'js-call', name: jsSuite[2] ?? null, isSuite: true };
+  }
+  return null;
+}
+
+function extractDeclSpan(lines, declLine, decl) {
+  const cap = Math.min(lines.length, declLine + SCOPE_MAX_BODY_LINES);
+  if (decl.kind === 'python') {
+    let end = declLine;
+    let parenDepth = 0;
+    let sigDone = false;
+    let i = declLine;
+    for (; i < cap; i += 1) {
+      const code = lines[i].replace(/#.*$/, '');
+      for (const ch of code) {
+        if (ch === '(') parenDepth += 1;
+        else if (ch === ')') parenDepth -= 1;
       }
+      end = i;
+      if (parenDepth <= 0 && /:\s*$/.test(code.trim())) { sigDone = true; i += 1; break; }
     }
-    if (opened && depth <= 0) break;
+    if (!sigDone) i = declLine + 1;
+    for (; i < cap; i += 1) {
+      const raw = lines[i];
+      const trimmed = raw.trim();
+      if (trimmed === '' || trimmed.startsWith('#')) continue;
+      if (raw.match(/^\s*/)[0].length <= decl.indent) break;
+      end = i;
+    }
+    return { startLine: declLine, endLine: end, name: decl.name };
   }
-  return ASSERTION_SIGNAL.test(window.join('\n'));
+  if (decl.kind === 'ruby') {
+    let end = declLine;
+    const endRe = new RegExp(`^\\s{0,${decl.indent}}end\\b`);
+    for (let i = declLine + 1; i < cap; i += 1) {
+      end = i;
+      if (endRe.test(lines[i])) break;
+    }
+    return { startLine: declLine, endLine: end, name: decl.name };
+  }
+  let braceDepth = 0;
+  let parenDepth = 0;
+  let openedBrace = false;
+  let openedParen = false;
+  let inBlock = false;
+  let end = declLine;
+  let inferredName = decl.name;
+  for (let i = declLine; i < cap; i += 1) {
+    const raw = lines[i];
+    if (!inferredName && decl.kind === 'attr-brace') {
+      const fnMatch = /\b(?:fn|fun|void|Task)\s+([A-Za-z_]\w*)\s*\(/.exec(raw)
+        ?? /^\s*(?:public\s+|private\s+|internal\s+)?(?:async\s+)?[\w<>]+\s+([A-Za-z_]\w*)\s*\(/.exec(raw);
+      if (fnMatch) inferredName = fnMatch[1];
+    }
+    const s = stripCodeLiterals(raw, inBlock);
+    inBlock = s.inBlockComment;
+    for (const ch of s.code) {
+      if (ch === '(') { parenDepth += 1; openedParen = true; }
+      else if (ch === ')') parenDepth -= 1;
+      else if (ch === '{') { braceDepth += 1; openedBrace = true; }
+      else if (ch === '}') braceDepth -= 1;
+    }
+    end = i;
+    if (openedBrace && braceDepth <= 0 && (decl.kind !== 'js-call' || parenDepth <= 0)) break;
+    if (decl.kind === 'js-call' && openedParen && !openedBrace && parenDepth <= 0) break;
+    if (decl.kind === 'attr-brace' && !openedBrace && i > declLine && /=\s*\S/.test(s.code) && parenDepth <= 0) break;
+  }
+  return { startLine: declLine, endLine: end, name: inferredName };
+}
+
+function skipPreambleBlock(lines, idx) {
+  const trimmed = lines[idx].trim();
+  if (/^(?:export\s+)?import\s/.test(trimmed)) {
+    if (trimmed.includes(';') || /\bfrom\s+['"][^'"]+['"]/.test(trimmed) || /^import\s+['"][^'"]+['"]/.test(trimmed)) return idx;
+    for (let j = idx; j < Math.min(lines.length, idx + 40); j += 1) {
+      if (lines[j].includes(';') || /\bfrom\s+['"][^'"]+['"]/.test(lines[j])) return j;
+    }
+    return idx;
+  }
+  if ((/^import\s*\(/.test(trimmed) || /^from\s+[\w.]+\s+import\s*\(/.test(trimmed)) && !trimmed.includes(')')) {
+    for (let j = idx + 1; j < Math.min(lines.length, idx + 60); j += 1) {
+      if (lines[j].includes(')')) return j;
+    }
+    return idx;
+  }
+  if (/^(?:export\s+)?(?:declare\s+)?(?:interface\s+\w+|type\s+\w+\b)/.test(trimmed)) {
+    let braceDepth = 0;
+    let opened = false;
+    let inBlock = false;
+    for (let j = idx; j < Math.min(lines.length, idx + 60); j += 1) {
+      const s = stripCodeLiterals(lines[j], inBlock);
+      inBlock = s.inBlockComment;
+      for (const ch of s.code) {
+        if (ch === '{') { braceDepth += 1; opened = true; }
+        else if (ch === '}') braceDepth -= 1;
+      }
+      if (opened && braceDepth <= 0) return j;
+      if (!opened && s.code.includes(';')) return j;
+    }
+    return idx;
+  }
+  if (/^(?:const|let|var)\s+[\s\S]*\brequire\s*\(/.test(trimmed) || (/^(?:const|let|var)\s*\{/.test(trimmed) && !trimmed.includes('='))) {
+    let braceDepth = 0;
+    let parenDepth = 0;
+    let inBlock = false;
+    for (let j = idx; j < Math.min(lines.length, idx + 30); j += 1) {
+      const s = stripCodeLiterals(lines[j], inBlock);
+      inBlock = s.inBlockComment;
+      for (const ch of s.code) {
+        if (ch === '{') braceDepth += 1;
+        else if (ch === '}') braceDepth -= 1;
+        else if (ch === '(') parenDepth += 1;
+        else if (ch === ')') parenDepth -= 1;
+      }
+      if (braceDepth <= 0 && parenDepth <= 0 && (/\brequire\s*\(/.test(lines[j]) || s.code.includes(';'))) return j;
+    }
+    return idx;
+  }
+  return idx;
+}
+
+function scopedAssertionFor(source, anchorIndex, filePath = '') {
+  const ext = filePath ? path.extname(filePath).toLowerCase() : '';
+  const lines = source.split('\n');
+  if (ext === '.sh' || ext === '.feature') {
+    const body = lines.slice(anchorIndex, anchorIndex + ASSERTION_FREE_WINDOW).join('\n');
+    return { status: 'ok', hasAssertion: ASSERTION_SIGNAL.test(body), testName: null, body };
+  }
+  // 1. Check enclosing leaf test body.
+  for (let i = anchorIndex; i >= Math.max(0, anchorIndex - 160); i -= 1) {
+    const decl = detectTestDecl(lines[i], ext, false);
+    if (!decl) continue;
+    const span = extractDeclSpan(lines, i, decl);
+    if (anchorIndex >= span.startLine && anchorIndex <= span.endLine) {
+      const body = lines.slice(span.startLine, span.endLine + 1).join('\n');
+      return { status: 'ok', hasAssertion: ASSERTION_SIGNAL.test(body), testName: span.name ?? null, body };
+    }
+    if (span.endLine < anchorIndex) break;
+  }
+  // 2. Search forward up to 40 lines, ignoring import/type/interface/require blocks.
+  const limit = Math.min(lines.length - 1, anchorIndex + ASSERTION_FREE_WINDOW);
+  let firstSuite = null;
+  let inBlock = false;
+  for (let i = anchorIndex; i <= limit; i += 1) {
+    const raw = lines[i];
+    if (inBlock) {
+      if (raw.includes('*/')) inBlock = false;
+      continue;
+    }
+    const trimmed = raw.trim();
+    if (trimmed.startsWith('/*') && !trimmed.includes('*/')) { inBlock = true; continue; }
+    const skipped = skipPreambleBlock(lines, i);
+    if (skipped > i) { i = skipped; continue; }
+    if (/^(?:export\s+)?import\s|^(?:export\s+)?(?:declare\s+)?(?:interface|type)\s+\w+|^(?:const|let|var)\s+.*\brequire\s*\(/.test(trimmed)) continue;
+    if (firstSuite && i > firstSuite.endLine) break;
+    const decl = detectTestDecl(raw, ext, true);
+    if (!decl) continue;
+    if (decl.isSuite) {
+      if (!firstSuite) {
+        const s = extractDeclSpan(lines, i, decl);
+        firstSuite = { span: s, endLine: s.endLine };
+      }
+      continue;
+    }
+    const span = extractDeclSpan(lines, i, decl);
+    const body = lines.slice(span.startLine, span.endLine + 1).join('\n');
+    return { status: 'ok', hasAssertion: ASSERTION_SIGNAL.test(body), testName: span.name ?? null, body };
+  }
+  if (firstSuite) {
+    const body = lines.slice(firstSuite.span.startLine, firstSuite.span.endLine + 1).join('\n');
+    return { status: 'ok', hasAssertion: ASSERTION_SIGNAL.test(body), testName: firstSuite.span.name ?? null, body };
+  }
+  return { status: 'misplaced', hasAssertion: false, testName: null, body: '' };
 }
 
 const rel = (file) => path.relative(REPO, file).split(path.sep).join('/');
@@ -706,8 +1027,10 @@ for (const file of walk(REPO)) {
 
   const isTest = TEST_FILE.test(rel(file)) || TEST_NAME.test(rel(file));
   const fileReqIds = [];
-  // Requirements whose own anchored test carries no assertion (BLKR-04).
+  // Requirements whose own anchored test carries no assertion (BLKR-04) or lacks
+  // a following test declaration within 40 lines (roadmap P0.3).
   const unprovenIds = new Set();
+  const misplacedIds = new Set();
   const sourceLines = source.split('\n');
   for (const [lineIndex, line] of sourceLines.entries()) {
     if (!line.includes('@req')) continue;
@@ -724,23 +1047,33 @@ for (const file of walk(REPO)) {
         continue;
       }
       fileReqIds.push(id);
-      // Remember the line so the assertion can be scoped to *this* anchor's test
-      // rather than to the file as a whole.
-      if (isTest && !scopedAssertionFor(source, lineIndex)) unprovenIds.add(id);
+      let testName = null;
+      let scopedBody = '';
+      if (isTest) {
+        const scoped = scopedAssertionFor(source, lineIndex, file);
+        testName = scoped.testName;
+        scopedBody = scoped.body;
+        if (scoped.status === 'misplaced') misplacedIds.add(id);
+        else if (!scoped.hasAssertion) unprovenIds.add(id);
+      }
       if (!anchored.has(id)) anchored.set(id, []);
-      anchored.get(id).push({ file: rel(file), isTest });
+      anchored.get(id).push({ file: rel(file), line: lineIndex + 1, isTest, testName, body: scopedBody });
     }
   }
   if (isTest && fileReqIds.length > 0) {
     const anchoredIds = [...new Set(fileReqIds)].join(', ');
     const problems = [];
 
-    // File-level first (unchanged for files whose anchors cannot be scoped), then
-    // per requirement. A single asserted test must not vouch for a neighbour that
-    // asserts nothing, which is the false pass this used to allow.
-    if (!ASSERTION_SIGNAL.test(source)) {
+    if (misplacedIds.size > 0) {
+      problems.push(
+        `no test declaration follows ${[...misplacedIds].join(', ')} within 40 lines — ${ANCHOR_PLACEMENT_MESSAGE}`
+      );
+    }
+
+    // File-level first, then per requirement.
+    if (!ASSERTION_SIGNAL.test(source) && misplacedIds.size === 0) {
       problems.push('no assertion in the anchored test');
-    } else if (unprovenIds.size === fileReqIds.length) {
+    } else if (unprovenIds.size === fileReqIds.length && misplacedIds.size === 0) {
       problems.push('no assertion in the anchored test');
     } else if (unprovenIds.size > 0) {
       problems.push(`no assertion in the anchored test for ${[...unprovenIds].join(', ')}`);
@@ -782,6 +1115,7 @@ for (const file of walk(REPO)) {
       // requirement is claimed done AND the file has no assertion at all).
       const hard =
         REQUIRE_ASSERTIONS ||
+        misplacedIds.size > 0 ||
         SKIP_SIGNAL.test(source) ||
         vacuous.length > 0 ||
         (claimed && !ASSERTION_SIGNAL.test(source));
@@ -825,17 +1159,34 @@ for (const requirement of requirements) {
   // justified by a test that passed in the latest run. Names are matched by the
   // requirement id appearing in the report, which every runner preserves when a
   // project names a test after its requirement (`REQ-004 erases every row`).
-  if (status === 'done' && reportPassed) {
-    const justified = inTests.some((hit) => {
-      for (const name of reportPassed) if (name.includes(requirement.id)) return true;
-      return false;
-    });
-    if (!justified) {
+  // P2.1: With a test report, verify the anchored test actually ran and passed
+  // (and reject failed or skipped anchored tests immediately).
+  if (execReport && inTests.length > 0 && (status === 'done' || REQUIRE_REPORT)) {
+    const outcomes = inTests.map((hit) => ({ hit, state: matchHitInReport(hit, requirement.id, execReport) }));
+    const failedHit = outcomes.find((o) => o.state === 'failed');
+    const passedHit = outcomes.find((o) => o.state === 'passed');
+    const skippedHit = outcomes.find((o) => o.state === 'skipped');
+    if (failedHit) {
       errors.push(
-        `${requirement.id} is marked done, but no passing test in ${REPORT} names it. Either the test did not run, it failed, or the status is stale.`
+        `${requirement.id} is ${status === 'done' ? 'marked done' : 'required by --require-report'}, but no passing test in ${REPORT} matched its anchor: the anchored test${failedHit.hit.testName ? ` \"${failedHit.hit.testName}\"` : ''} FAILED there`
       );
       continue;
     }
+    if (skippedHit && !passedHit) {
+      errors.push(
+        `${requirement.id} is ${status === 'done' ? 'marked done' : 'required by --require-report'}, but no passing test in ${REPORT} matched its anchor: the anchored test${skippedHit.hit.testName ? ` \"${skippedHit.hit.testName}\"` : ''} was SKIPPED there`
+      );
+      continue;
+    }
+    if (!passedHit) {
+      errors.push(
+        `${requirement.id} is ${status === 'done' ? 'marked done' : 'required by --require-report'}, but no passing test in ${REPORT} matched its anchor. Either the test did not run, it failed, or the status is stale.`
+      );
+      continue;
+    }
+  } else if (REQUIRE_REPORT && inTests.length === 0) {
+    errors.push(`${requirement.id}: --require-report requires an executed passing test anchor, but none exists`);
+    continue;
   }
 
   if (hits.length > 0 && inTests.length === 0) {
@@ -893,11 +1244,50 @@ if (!STRICT && !REQUIRE_ASSERTIONS) {
 const noEvidence = automatedTotal > 0 && anchoredAutomated === 0;
 const unproven = !failed && noEvidence;
 const verdict = failed ? 'FAIL' : unproven ? 'NOT VERIFIED' : 'PASS';
+const verificationLevel = failed
+  ? 'failed'
+  : unproven
+    ? 'structurally-valid'
+    : execReport
+      ? 'executed-verified'
+      : REQUIRE_ASSERTIONS
+        ? 'static-asserted'
+        : 'anchored-only';
+
+if (JSON_OUT) {
+  console.log(
+    JSON.stringify(
+      {
+        ok: !failed,
+        verdict,
+        verificationLevel,
+        errors,
+        notices,
+        passes,
+        stats: {
+          requirements: requirements.length,
+          automatedTotal,
+          anchoredAutomated,
+          proven,
+          pending,
+          scanned,
+          suppressed
+        }
+      },
+      null,
+      2
+    )
+  );
+  process.exit(failed ? 1 : 0);
+}
+
 console.log(
-  `\n${verdict} · ${errors.length} error(s) · ${pending} pending · ${proven} of ${automatedTotal} automated requirement(s) proven` +
+  `\n${verdict} · ${errors.length} error(s) · ${pending} pending · ${proven} of ${automatedTotal} automated requirement(s) ${execReport ? 'executed-passed' : 'proven'}` +
+    ` [${verificationLevel}]` +
     (proven === 0 && anchoredAutomated > 0 ? `, ${anchoredAutomated} more anchored but not marked done` : '') +
     (suppressed > 0 ? ` · ${suppressed} ignored` : '') +
     (unproven ? ' — no test carries an anchor yet, so this run is not evidence' : '') +
+    (!failed && !unproven && !execReport ? ' (static check — pass --report <path> --require-report to verify test execution)' : '') +
     (notices.length && !failed && !unproven ? ' (pending is expected before implementation; use --strict in release CI)' : '') +
     '\n'
 );

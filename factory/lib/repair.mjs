@@ -144,16 +144,67 @@ export function classifyVerificationFailures(verification = {}) {
   };
 }
 
+const MAX_BRIEF_SECTION_CHARS = 2000;
+
+function briefSection(text) {
+  const value = String(text ?? '').trim();
+  if (value.length <= MAX_BRIEF_SECTION_CHARS) return value;
+  return `${value.slice(0, MAX_BRIEF_SECTION_CHARS)}\n… (truncated)`;
+}
+
+function extractFailingTestNames(diagnosis) {
+  const names = [];
+  for (const failure of diagnosis?.failures ?? []) {
+    if (failure.kind !== 'test-failure') continue;
+    const tap = /\bnot ok \d+ - (.+?)\s*$/.exec(failure.detail);
+    const node = /^✖\s+(.+?)\s*$/.exec(failure.detail);
+    if (tap) names.push(tap[1]);
+    else if (node) names.push(node[1]);
+    else names.push(failure.detail);
+  }
+  return [...new Set(names)];
+}
+
 /**
  * Render a concise, deterministic repair brief scoped strictly to the failing
  * requirements, gates and test assertions (no raw secrets or host paths).
+ * Roadmap P3.4: the brief names the failing tests, carries the spec-check
+ * findings and gate output, and shows what the previous attempt changed.
  */
-export function buildRepairPrompt({ packageId, attempt, maxAttempts, diagnosis, requirements = [] }) {
+export function buildRepairPrompt({ packageId, attempt, maxAttempts, diagnosis, requirements = [], verification = null, previousAttemptDiff = null }) {
   const reqMap = new Map(requirements.map((r) => [r.id, r]));
+  const failingTests = extractFailingTestNames(diagnosis);
+  const specKinds = new Set(['missing-anchor', 'hollow-test', 'unknown-anchor', 'packet-error']);
+  const specFindings = diagnosis.failures.filter((failure) => specKinds.has(failure.kind));
+  const gateFindings = diagnosis.failures.filter((failure) => failure.kind === 'gate-failure');
+  const gateOutputLines = String(verification?.gates?.stdout ?? '')
+    .split(/\r?\n/)
+    .filter((line) => line.trim())
+    .slice(-30)
+    .join('\n');
   const lines = [
     `# Repair Brief · ${packageId} · attempt ${attempt}/${maxAttempts}`,
     '',
     `Failure signature: ${diagnosis.failureDigest.slice(0, 16)} (${diagnosis.failures.length} finding(s))`,
+    '',
+    '## Failing tests',
+    failingTests.length > 0
+      ? failingTests.slice(0, 16).map((name) => `- ${name}`).join('\n')
+      : '- (test output names no specific failing test)',
+    '',
+    '## Spec-check findings',
+    specFindings.length > 0
+      ? specFindings.slice(0, 16).map((item) => `- [${item.kind}] ${item.target}: ${briefSection(item.detail)}`).join('\n')
+      : '- (spec-check reports no drift findings)',
+    '',
+    '## Gate output',
+    gateFindings.length > 0
+      ? gateFindings.slice(0, 16).map((item) => `- [${item.kind}] ${item.target}: ${briefSection(item.detail)}`).join('\n')
+      : '- (no failing gates)',
+    ...(gateOutputLines ? ['', briefSection(redactAgentOutput(gateOutputLines))] : []),
+    '',
+    '## Changes since the previous attempt',
+    previousAttemptDiff ? briefSection(redactAgentOutput(previousAttemptDiff)) : '- (no previous attempt)',
     '',
     '## Findings to resolve'
   ];
@@ -186,7 +237,10 @@ export function buildRepairPrompt({ packageId, attempt, maxAttempts, diagnosis, 
  * Halts immediately when:
  *   - verification passes (`outcome: "converged"` or `"passed-initial"`),
  *   - a non-retryable failure occurs (`outcome: "halted-non-retryable"`),
- *   - two consecutive attempts emit the exact same `failureDigest` (`outcome: "stalled"`),
+ *   - two consecutive attempts emit the exact same `failureDigest`
+ *     (`outcome: "stuck"`, escalated for human review),
+ *   - accumulated agent-run usage passes the package cost ceiling
+ *     (`outcome: "cost-ceiling"`, escalated),
  *   - `budgetMs` is exhausted (`outcome: "budget-exhausted"`), or
  *   - `maxRepairs` repairs have run without convergence (`outcome: "exhausted"`).
  */
@@ -195,6 +249,8 @@ export async function runRepairLoop({
   requirements = [],
   maxRepairs = 2,
   budgetMs = 5 * 60 * 1_000,
+  budget = null,
+  initialUsage = null,
   verify,
   repair
 } = {}) {
@@ -206,6 +262,15 @@ export async function runRepairLoop({
 
   const startedMs = Date.now();
   const ledger = [];
+  // Package cost ceiling (roadmap P3.4): agent-run receipts (initial run plus
+  // every repair attempt) accumulate against the package budget.
+  const spent = {
+    tokens: Number(initialUsage?.totalTokens) || 0,
+    costUsd: Number(initialUsage?.costUsd) || 0
+  };
+  const overCeiling = () =>
+    (budget?.maxTokens !== undefined && spent.tokens > budget.maxTokens) ||
+    (budget?.maxCostUsd !== undefined && spent.costUsd > budget.maxCostUsd);
 
   let currentVerification = await verify({ attempt: 0 });
   let currentDiagnosis = currentVerification.ok
@@ -237,6 +302,7 @@ export async function runRepairLoop({
   }
 
   let previousDigest = currentDiagnosis.failureDigest;
+  let previousAttemptDelta = null;
 
   for (let repairIndex = 1; repairIndex <= maxRepairs; repairIndex += 1) {
     if (!currentDiagnosis.retryable) {
@@ -248,6 +314,7 @@ export async function runRepairLoop({
         durationMs: Math.max(0, Date.now() - startedMs),
         ledger,
         ledgerDigest: digest(ledger),
+        usage: { totalTokens: spent.tokens, costUsd: spent.costUsd },
         finalVerification: currentVerification
       };
     }
@@ -260,6 +327,21 @@ export async function runRepairLoop({
         durationMs: Math.max(0, Date.now() - startedMs),
         ledger,
         ledgerDigest: digest(ledger),
+        usage: { totalTokens: spent.tokens, costUsd: spent.costUsd },
+        finalVerification: currentVerification
+      };
+    }
+    if (overCeiling()) {
+      return {
+        ok: false,
+        outcome: 'cost-ceiling',
+        escalated: true,
+        repairsUsed: repairIndex - 1,
+        maxRepairs,
+        durationMs: Math.max(0, Date.now() - startedMs),
+        ledger,
+        ledgerDigest: digest(ledger),
+        usage: { totalTokens: spent.tokens, costUsd: spent.costUsd },
         finalVerification: currentVerification
       };
     }
@@ -269,7 +351,9 @@ export async function runRepairLoop({
       attempt: repairIndex,
       maxAttempts: maxRepairs,
       diagnosis: currentDiagnosis,
-      requirements
+      requirements,
+      verification: currentVerification,
+      previousAttemptDiff: previousAttemptDelta
     });
     const promptDigest = digest(prompt);
     const repairResult = await repair({
@@ -278,6 +362,9 @@ export async function runRepairLoop({
       promptDigest,
       diagnosis: currentDiagnosis
     });
+    spent.tokens += Number(repairResult?.usage?.totalTokens) || 0;
+    spent.costUsd += Number(repairResult?.usage?.costUsd) || 0;
+    previousAttemptDelta = repairResult?.diffSinceLastAttempt ?? null;
 
     currentVerification = await verify({ attempt: repairIndex });
     currentDiagnosis = currentVerification.ok
@@ -306,6 +393,7 @@ export async function runRepairLoop({
         durationMs: Math.max(0, Date.now() - startedMs),
         ledger,
         ledgerDigest: digest(ledger),
+        usage: { totalTokens: spent.tokens, costUsd: spent.costUsd },
         finalVerification: currentVerification
       };
     }
@@ -313,12 +401,14 @@ export async function runRepairLoop({
     if (currentDiagnosis.failureDigest === previousDigest) {
       return {
         ok: false,
-        outcome: 'stalled',
+        outcome: 'stuck',
+        escalated: true,
         repairsUsed: repairIndex,
         maxRepairs,
         durationMs: Math.max(0, Date.now() - startedMs),
         ledger,
         ledgerDigest: digest(ledger),
+        usage: { totalTokens: spent.tokens, costUsd: spent.costUsd },
         finalVerification: currentVerification
       };
     }
@@ -333,6 +423,7 @@ export async function runRepairLoop({
     durationMs: Math.max(0, Date.now() - startedMs),
     ledger,
     ledgerDigest: digest(ledger),
+    usage: { totalTokens: spent.tokens, costUsd: spent.costUsd },
     finalVerification: currentVerification
   };
 }

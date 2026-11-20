@@ -138,7 +138,7 @@ jobs:
           set -e
           cat "$log"
           if [ "$status" -ne 0 ]; then
-            failure=$(grep -m1 -A 14 '^not ok' "$log" | tr '\n' ' ' || true)
+            failure=$(grep -m1 -A 60 '^not ok' "$log" | tr '\n' ' ' || true)
             echo "::error title=Minimum Node test failure::${failure:-npm test failed without a TAP failure record}"
             exit "$status"
           fi
@@ -167,7 +167,7 @@ jobs:
             '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
             '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
             | node factory/cli.mjs mcp 2>/dev/null \
-            | node -e 'let b="";process.stdin.on("data",d=>b+=d).on("end",()=>{const lines=b.trim().split("\n").map(JSON.parse);const tools=lines.find(l=>l.id===2);if(tools.result.tools.length!==8)process.exit(1);console.log("8 MCP tools advertised")})'
+            | node -e 'let b="";process.stdin.on("data",d=>b+=d).on("end",()=>{const lines=b.trim().split("\n").map(JSON.parse);const tools=lines.find(l=>l.id===2);if(tools.result.tools.length!==10)process.exit(1);console.log("10 MCP tools advertised")})'
 
       # A generated delta starts with pending evidence by design. A minimal reviewed-record
       # fixture proves the positive evidence lifecycle; it is test data, never a CI release approval.
@@ -390,14 +390,15 @@ jobs:
         run: ${{ matrix.command }}
 
   portable-smoke:
-    name: Portable CLI smoke — ${{ matrix.os }}
+    name: Portable CLI smoke — ${{ matrix.os }} (shard ${{ matrix.shard }})
     runs-on: ${{ matrix.os }}
     # Bound each deterministic job; action SHA upgrades are reviewed in CONTRIBUTING.md.
-    timeout-minutes: 25
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         os: [macos-latest, windows-latest]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -406,29 +407,80 @@ jobs:
       # The dependency-free Node CLI and its portable test suite must work under
       # each supported runner shell. Linux retains the shell-heavy pack journey.
       - name: Full portable test suite
-        # Run the same Node suite under Bash on each supported portable runner.
-        # Preserve TAP on failure and surface the failing test in an annotation:
-        # hosted log blobs are not always retained/available to reviewers.
+        # Run the same Node suite under Bash on each supported portable runner,
+        # sharded deterministically by test file so one slow or hanging file can
+        # never starve the lane. Preserve TAP on failure and surface the failing
+        # test in an annotation: hosted log blobs are not always retained.
         shell: bash
         run: |
-          log=/tmp/vld-portable-test.log
+          log=/tmp/vld-portable-test-${{ matrix.shard }}.log
+          files=$(node -e "const fs=require('node:fs');const all=fs.readdirSync('factory/test').filter((f)=>f.endsWith('.test.mjs')).sort();const mine=all.filter((_,i)=>i%8===${{ matrix.shard }}-1);process.stdout.write(mine.map((f)=>'factory/test/'+f).join(' '))")
           set +e
-          npm test >"$log" 2>&1
+          node --test --test-concurrency=1 --test-timeout=180000 $files >"$log" 2>&1
           status=$?
+          if [ "${{ matrix.shard }}" = "1" ]; then
+            node --test factory/studio/vscode/test/*.test.cjs >>"$log" 2>&1
+            status=$(( status | $? ))
+          fi
           set -e
-          cat "$log"
+          tail -n 400 "$log"
           if [ "$status" -ne 0 ]; then
-            failure=$(grep -m1 -A 14 '^not ok' "$log" | tr '\n' ' ' || true)
+            failure=$(grep -m1 -A 60 '^not ok' "$log" | tr '\n' ' ' || true)
             echo "::error title=Portable Node test failure::${failure:-npm test failed without a TAP failure record}"
             exit "$status"
           fi
+
+  # Roadmap P0.1: run the full verification surface inside the reproducible
+  # Debian Bookworm Node 22 container image (Node under /usr/local, git +
+  # unshare + bubblewrap installed) and publish the TAP stream as an artifact.
+  container-baseline:
+    name: Container baseline (Node 22 Bookworm)
+    runs-on: ubuntu-latest
+    container:
+      image: node:22-bookworm
+    timeout-minutes: 25
+    steps:
+      - name: Install sandbox and git tooling
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git util-linux bubblewrap ca-certificates
+          rm -rf /var/lib/apt/lists/*
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Verify bootstrap prerequisites and non-masked Node prefix
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          bash scripts/bootstrap.sh --strict-prefix
+
+      - name: Run full npm run check and record TAP output
+        shell: bash
+        run: |
+          set -o pipefail
+          set +e
+          npm run check 2>&1 | tee /tmp/vld-container-check.tap
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ]; then
+            failure=$(grep -m1 -A 60 '^not ok' /tmp/vld-container-check.tap | tr '\n' ' ' || true)
+            echo "::error title=Container check failure::${failure:-npm run check failed without a TAP failure record}"
+            exit "$status"
+          fi
+
+      - name: Upload container check TAP artifact
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: container-baseline-tap
+          path: /tmp/vld-container-check.tap
+          retention-days: 14
 
   # Keep this ID stable for branch protection. It only succeeds once every
   # complete-coverage job above has completed successfully.
   check:
     name: check
     if: ${{ always() }}
-    needs: [core, secret-history, node-22-minimum, integration, packed-distribution, acp-v1-bridge, evaluations, stress, portable-smoke]
+    needs: [core, secret-history, node-22-minimum, integration, packed-distribution, acp-v1-bridge, evaluations, stress, portable-smoke, container-baseline]
     runs-on: ubuntu-latest
     # Bound each deterministic job; action SHA upgrades are reviewed in CONTRIBUTING.md.
     timeout-minutes: 5
@@ -444,6 +496,7 @@ jobs:
           EVALUATIONS: ${{ needs.evaluations.result }}
           STRESS: ${{ needs.stress.result }}
           PORTABLE: ${{ needs.portable-smoke.result }}
+          CONTAINER_BASELINE: ${{ needs.container-baseline.result }}
         run: |
           test "$CORE" = success
           test "$SECRET_HISTORY" = success
@@ -454,4 +507,5 @@ jobs:
           test "$EVALUATIONS" = success
           test "$STRESS" = success
           test "$PORTABLE" = success
+          test "$CONTAINER_BASELINE" = success
           echo "All required validation coverage passed."
