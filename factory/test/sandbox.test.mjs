@@ -306,6 +306,9 @@ test('P0.2 nvm, fnm, volta, asdf ($HOME) and /tmp Node layouts pass 8/8 conforma
 // Roadmap P3.2 — brokered model egress for the sandbox.
 // ---------------------------------------------------------------------------
 
+// Windows runners deny AF_UNIX binds in Temp (EACCES); loopback TCP is the
+// supported broker transport there — same split agent-adapters.mjs uses.
+const BROKER_MODE = process.platform === 'win32' ? 'loopback-port' : 'unix-socket';
 const CANARY_KEY = 'sk-test-canary-key-never-log-me-42';
 
 function startFakeUpstream() {
@@ -357,7 +360,7 @@ function brokerRequest({ broker, provider = 'openai', urlPath = '/v1/chat/comple
 test('P3.2 model broker forwards only allow-listed POSTs, injects the key host-side, and logs redacted digests', async (t) => {
   const upstream = await startFakeUpstream();
   const broker = createModelBroker({
-    mode: 'unix-socket',
+    mode: BROKER_MODE,
     providers: { openai: { baseUrl: `http://127.0.0.1:${upstream.port}/v1`, tokenEnv: 'TEST_BROKER_CANARY' } },
     env: { TEST_BROKER_CANARY: CANARY_KEY },
     budget: { maxCalls: 8, maxTokens: 100000, maxCostUsd: 5 }
@@ -440,7 +443,7 @@ test('P3.2 model broker denies wrong nonce, unknown providers, stray paths, unli
 test('P3.2 sandbox receipts bind the broker policy and still verify', async (t) => {
   const upstream = await startFakeUpstream();
   const broker = createModelBroker({
-    mode: 'unix-socket',
+    mode: BROKER_MODE,
     providers: { openai: { baseUrl: `http://127.0.0.1:${upstream.port}/v1`, tokenEnv: 'TEST_BROKER_CANARY' } },
     env: { TEST_BROKER_CANARY: CANARY_KEY }
   });
@@ -463,9 +466,9 @@ test('P3.2 sandbox receipts bind the broker policy and still verify', async (t) 
   assert.equal(run.ok, true, run.stderr);
   const policy = run.receipt.brokerPolicy;
   assert.ok(policy, 'receipt lists the broker policy');
-  assert.equal(policy.mode, 'unix-socket');
+  assert.equal(policy.mode, BROKER_MODE);
   assert.deepEqual(policy.allowedProviders, ['openai']);
-  assert.equal(policy.endpoint, broker.binding().socketPath);
+  assert.equal(policy.endpoint, broker.mode === 'unix-socket' ? broker.binding().socketPath : `http://127.0.0.1:${broker.binding().port}`);
   const verified = verifySandboxReceipt(run.receipt, { requireNoNetwork: true, allowBroker: true });
   assert.equal(verified.ok, true, verified.errors?.join('; '));
 });
@@ -473,7 +476,7 @@ test('P3.2 sandbox receipts bind the broker policy and still verify', async (t) 
 test('P3.2 broker conformance: egress denied elsewhere, only the broker answers, the key never leaks', async (t) => {
   const upstream = await startFakeUpstream();
   const broker = createModelBroker({
-    mode: 'unix-socket',
+    mode: BROKER_MODE,
     providers: { openai: { baseUrl: `http://127.0.0.1:${upstream.port}/v1`, tokenEnv: 'TEST_BROKER_CANARY' } },
     env: { TEST_BROKER_CANARY: CANARY_KEY }
   });
