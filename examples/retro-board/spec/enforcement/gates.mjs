@@ -483,7 +483,13 @@ function scrubbedGateEnv() {
 
 function runGateCmd(argv, { timeoutMs = 45_000 } = {}) {
   const t0 = Date.now();
-  const res = spawnSync(argv[0], argv.slice(1), {
+  // Node >= 22.20 refuses direct spawn of .cmd/.bat (CVE-2024-27980 mitigation)
+  // with EINVAL; route them through cmd.exe with a quoted command line instead.
+  const isWinShim = process.platform === 'win32' && /\.(?:cmd|bat)$/i.test(argv[0]);
+  const [cmd, cmdArgs] = isWinShim
+    ? [process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', argv.map((a) => (/^[A-Za-z0-9_./:\\-]+$/.test(a) ? a : `"${String(a).replace(/"/g, '\\"')}"`)).join(' ')]]
+    : [argv[0], argv.slice(1)];
+  const res = spawnSync(cmd, cmdArgs, {
     cwd: REPO,
     env: scrubbedGateEnv(),
     encoding: 'utf8',
