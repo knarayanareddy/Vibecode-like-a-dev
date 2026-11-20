@@ -12,7 +12,8 @@ import { emitPacket } from './emit/index.mjs';
 import { appendEvidence } from './evidence.mjs';
 import { loadIndex } from './indexer.mjs';
 import { buildPlan, loadPolicy } from './planner.mjs';
-import { loadProfile } from './profile.mjs';
+import { defaultedProductionTierFields, loadProfile, normalizeProfile, RISK_FLAGS } from './profile.mjs';
+import { scanRiskHints } from './risk-hints.mjs';
 import { PACKAGE_VERSION } from './version.mjs';
 
 const LEGACY_STACK_ALIASES = Object.freeze({
@@ -44,7 +45,9 @@ export function migrateProject({
   profileFile = 'profile.json',
   packetDir = 'specs',
   dryRun = false,
-  recordEvidence = true
+  recordEvidence = true,
+  waiverDays = 90,
+  referenceDate = new Date().toISOString().slice(0, 10)
 } = {}) {
   const project = path.resolve(projectDir);
   const actions = [];
@@ -78,6 +81,53 @@ export function migrateProject({
       updated.rules = updated.customRules;
       delete updated.customRules;
       changes.push('renamed legacy `customRules` -> `rules`');
+    }
+
+    // Roadmap P1.2: auto-generate expiring riskWaivers stubs for legacy profiles
+    // whose idea triggers unflagged risk signals so migrating to strict-by-default
+    // succeeds loudly and expires on a bounded schedule.
+    const normalized = normalizeProfile(updated);
+    const riskScan = scanRiskHints(normalized, { referenceDate });
+    const unwaived = riskScan.unflaggedRisks.filter((hit) => !hit.traitPresent && !hit.expiredWaiver);
+    if (unwaived.length > 0) {
+      const baseMs = Date.parse(`${referenceDate}T00:00:00Z`);
+      const expires = new Date(baseMs + Math.max(1, Number(waiverDays)) * 86_400_000).toISOString().slice(0, 10);
+      if (!Array.isArray(updated.riskWaivers)) updated.riskWaivers = [];
+      for (const hit of unwaived) {
+        if (updated.riskWaivers.some((w) => w.flag === hit.flag)) continue;
+        updated.riskWaivers.push({
+          flag: hit.flag,
+          reason: `MIGRATION STUB (vld migrate): idea mentions "${hit.phrase}" — set risks.${hit.flag}=true or replace with an audited waiver before ${expires}`,
+          expires
+        });
+        changes.push(`added expiring riskWaivers stub for risks.${hit.flag} (expires ${expires}, cue "${hit.phrase}")`);
+      }
+    }
+
+    // Roadmap P1.5: fill explicit boolean values + provenance for legacy production
+    // profiles that previously relied on implicit `false` defaults.
+    if (updated.stage === 'production') {
+      const stillDefault = defaultedProductionTierFields(updated);
+      if (stillDefault.length > 0) {
+        if (!updated.risks || typeof updated.risks !== 'object') updated.risks = {};
+        if (!updated.users || typeof updated.users !== 'object') updated.users = {};
+        if (!updated.provenance || typeof updated.provenance !== 'object') updated.provenance = {};
+        for (const field of stillDefault) {
+          if (field === 'users.scale') {
+            updated.users.scale = updated.users.scale ?? 'small';
+            updated.provenance['users.scale'] = 'inferred';
+            changes.push(`materialized defaulted production field users.scale="${updated.users.scale}" (provenance=inferred)`);
+          } else if (field.startsWith('risks.')) {
+            const flag = field.slice('risks.'.length);
+            if (RISK_FLAGS.includes(flag) && !(flag in updated.risks)) {
+              const isWaived = Array.isArray(updated.riskWaivers) && updated.riskWaivers.some((w) => w.flag === flag);
+              updated.risks[flag] = false;
+              updated.provenance[field] = isWaived ? 'waived' : 'inferred';
+              changes.push(`materialized defaulted production field ${field}=false (provenance=${updated.provenance[field]})`);
+            }
+          }
+        }
+      }
     }
 
     if (changes.length > 0) {

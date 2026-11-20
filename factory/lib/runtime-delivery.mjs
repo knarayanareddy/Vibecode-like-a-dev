@@ -14,10 +14,17 @@ import { readMission } from './missions.mjs';
 import {
   approveRuntimeCandidate,
   queueRuntimeCandidate,
+  recordRuntimeReview,
   recordRuntimeVerification,
   runtimeStatus,
   submitRuntimeCandidate
 } from './runtime.mjs';
+import {
+  normalizeModelId,
+  requiresHumanReview,
+  REVIEW_SCHEMA_VERSION,
+  validateReviewReport
+} from './review.mjs';
 import { checkResourceClaims, runSandboxed, workspaceTreeDigest } from './sandbox/index.mjs';
 import { runtimeWorkspaceAllocation, withRuntimeIntegrationWorkspace, withRuntimeIntegrationWorkspaceAsync } from './workspaces.mjs';
 import { verifyPacket } from './verify.mjs';
@@ -65,6 +72,18 @@ function verificationFor(status, packageId, candidateId) {
 
 function approvalFor(status, packageId, candidateId) {
   return (status.delivery ?? []).filter((entry) => entry.packageId === packageId && entry.approval?.candidateId === candidateId).map((entry) => entry.approval).at(-1) ?? null;
+}
+
+function reviewsFor(status, packageId, candidateId) {
+  return (status.delivery ?? [])
+    .filter((entry) => entry.packageId === packageId && entry.review?.candidateId === candidateId)
+    .map((entry) => ({ sequence: entry.sequence, review: entry.review }));
+}
+
+function packetSpecFor(mission, projectDir) {
+  const specFile = path.join(projectDir, mission.packet.path, 'spec.json');
+  const specText = readFileSync(specFile, 'utf8');
+  return { specText, spec: JSON.parse(specText) };
 }
 
 function outputReceipt({ summary }) {
@@ -143,6 +162,9 @@ export function submitRuntimeDeliveryCandidate({ missionFile, packageId, candida
       }
     }
   }
+  const transcriptRun = linkedRun
+    ?? (status.agentRuns ?? []).filter((entry) => entry.packageId === packageId && entry.outcome === 'completed').at(-1)
+    ?? null;
   const candidate = {
     id: `candidate-${randomUUID()}`,
     missionId: loaded.mission.id,
@@ -154,6 +176,17 @@ export function submitRuntimeDeliveryCandidate({ missionFile, packageId, candida
     packetDigest: loaded.mission.packet.digest,
     policyDigest: policy.digest,
     adapterRunId,
+    transcriptDigest: transcriptRun?.transcriptDigest ?? null,
+    implementerModelId: linkedRun?.modelId ?? transcriptRun?.modelId ?? null,
+    // Roadmap 4.3: every candidate carries a verifiable provenance block —
+    // which model produced it, the prompt hash over its model requests, the
+    // tool-call transcript digest and the token/cost ledger for the run.
+    provenance: {
+      modelId: (linkedRun ?? transcriptRun)?.modelId ?? null,
+      promptHash: (linkedRun ?? transcriptRun)?.promptHash ?? null,
+      transcriptDigest: (linkedRun ?? transcriptRun)?.transcriptDigest ?? null,
+      usage: (linkedRun ?? transcriptRun)?.usage ?? null
+    },
     generatedAt: now()
   };
   return submitRuntimeCandidate({
@@ -399,6 +432,95 @@ export async function verifyRuntimeDeliveryCandidateAsync({ missionFile, package
   });
 }
 
+/**
+ * Record one independent review of an exact frozen candidate (roadmap P3.5).
+ *
+ * The review follows the ADR-0012 review protocol: six mandatory categories
+ * with requirement-cited findings, session isolation, and no self-review. The
+ * reviewer must run on a different provider+model than the implementer model
+ * recorded in the candidate; the verdict comes from the report, never
+ * negotiated; high or critical findings block the queue, and escalation
+ * packets (tier >= 2 or money/regulated/destructiveWrites) need human
+ * sign-off recorded with or after the review.
+ */
+export function recordRuntimeDeliveryReview({
+  missionFile,
+  packageId,
+  candidateId,
+  policyFile,
+  reviewerModelId,
+  reviewerKind = 'agent',
+  categories,
+  verdict,
+  humanSignoff = null,
+  testWeakeningJustified = false,
+  riskDigest = null,
+  actor,
+  projectDir = '.'
+} = {}) {
+  const policy = loadDeliveryPolicy(policyFile, { projectDir });
+  const status = runtimeStatus({ missionFile, projectDir });
+  const workPackage = packageFor(status, packageId);
+  if (workPackage.state !== 'in_review' && workPackage.state !== 'approved') {
+    throw extensionError(`review requires a package in review or approved, not ${workPackage.state}`, 'RUNTIME_REVIEW_STATE');
+  }
+  const candidate = candidateFor(status, packageId, candidateId);
+  requirePolicyTuple(policy, candidate);
+  const normalizedReviewer = normalizeModelId(reviewerModelId);
+  if (!normalizedReviewer) throw extensionError('review requires a reviewer provider:model id', 'INVALID_REVIEW_MODEL');
+  const implementerModelId = candidate.implementerModelId ?? null;
+  if (implementerModelId && normalizedReviewer === normalizeModelId(implementerModelId)) {
+    throw extensionError(`reviewer model "${normalizedReviewer}" must differ from the implementer model recorded in the candidate`, 'SELF_REVIEW_FORBIDDEN');
+  }
+  const loaded = readMission(missionFile, { projectDir });
+  const { specText, spec } = packetSpecFor(loaded.mission, projectDir);
+  if (digest(specText) !== candidate.packetDigest) throw extensionError('review packet digest differs from the frozen candidate packet', 'STALE_CANDIDATE');
+  const requirementIds = (spec.requirements ?? []).map((requirement) => requirement.id);
+  const escalation = requiresHumanReview(spec);
+  const reviewerId = String(actor?.id ?? '').trim();
+  if (!actor || typeof actor !== 'object' || actor.role !== 'reviewer' || !ID_PATTERN.test(reviewerId)) {
+    throw extensionError('runtime review actor must be a reviewer with a valid id', 'INVALID_RUNTIME_ACTOR');
+  }
+  const report = {
+    schemaVersion: REVIEW_SCHEMA_VERSION,
+    reviewerId,
+    reviewerKind,
+    authorId: workPackage.run?.holderId ?? null,
+    sessionIsolated: true,
+    verdict,
+    categories,
+    ...(humanSignoff ? { humanSignoff } : {}),
+    ...(testWeakeningJustified ? { testWeakeningJustified: true } : {})
+  };
+  const checked = validateReviewReport(report, {
+    knownRequirements: requirementIds,
+    authorId: report.authorId,
+    requireHumanEscalation: escalation.required
+  });
+  if (!checked.ok) {
+    throw extensionError(`review report rejected:\n${checked.errors.map((e) => `- ${e}`).join('\n')}`, 'INVALID_REVIEW_REPORT');
+  }
+  const review = {
+    id: `review-${randomUUID()}`,
+    candidateId: candidate.id,
+    candidateSha: candidate.candidateSha,
+    targetSha: candidate.targetSha,
+    policyDigest: candidate.policyDigest,
+    reviewerId,
+    reviewerKind,
+    reviewerModelId: normalizedReviewer,
+    implementerModelId,
+    requiresHumanSignoff: escalation.required,
+    verdict,
+    categories,
+    blockingFindings: checked.blockingFindings,
+    humanSignoff: humanSignoff ?? null,
+    riskDigest: riskDigest ?? null,
+    reviewedAt: now()
+  };
+  return recordRuntimeReview({ missionFile, projectDir, packageId, review, actor });
+}
+
 /** Record an independent human/local reviewer approval for an exact tuple. */
 export function approveRuntimeDeliveryCandidate({ missionFile, packageId, candidateId, policyFile, actor, reason, projectDir = '.' } = {}) {
   const policy = loadDeliveryPolicy(policyFile, { projectDir });
@@ -433,6 +555,29 @@ export function queueRuntimeDeliveryCandidate({ missionFile, packageId, candidat
   if (!approvalFor(status, packageId, candidate.id)) throw extensionError('queue requires an independent approval receipt', 'RUNTIME_QUEUE_STATE');
   const loaded = readMission(missionFile, { projectDir });
   if (loaded.mission.target.commit !== candidate.targetSha || loaded.mission.packet.digest !== candidate.packetDigest) throw extensionError('candidate queue is invalid because target or packet authority changed', 'STALE_CANDIDATE');
+  // P3.5 review gates: high or critical findings block the queue outright at
+  // every tier, and escalation packets (tier >= 2 or money/regulated/
+  // destructiveWrites) need an independent review with a human sign-off
+  // recorded with or after it before they may queue.
+  const reviews = reviewsFor(status, packageId, candidate.id);
+  const latestReview = reviews.at(-1) ?? null;
+  const { spec } = packetSpecFor(loaded.mission, projectDir);
+  const signoffRequired = latestReview ? latestReview.review.requiresHumanSignoff : requiresHumanReview(spec).required;
+  if (signoffRequired && reviews.length === 0) {
+    throw extensionError('this packet requires an independent review of the frozen candidate before queue', 'REVIEW_REQUIRED');
+  }
+  const blockingCount = reviews.reduce((sum, entry) => sum + (entry.review.blockingFindings ?? 0), 0);
+  if (blockingCount > 0) {
+    throw extensionError(`queue is blocked by ${blockingCount} high or critical review finding(s)`, 'REVIEW_FINDINGS_BLOCK');
+  }
+  if (signoffRequired && latestReview) {
+    const approvalEntry = (status.delivery ?? []).filter((entry) => entry.packageId === packageId && entry.approval?.candidateId === candidate.id).at(-1);
+    const approvedAfterReview = Boolean(approvalEntry) && approvalEntry.sequence > latestReview.sequence;
+    const signedWithReview = Boolean(latestReview.review.humanSignoff);
+    if (!approvedAfterReview && !signedWithReview) {
+      throw extensionError('this packet requires human sign-off recorded with or after the independent review', 'HUMAN_SIGNOFF_REQUIRED');
+    }
+  }
   const queue = {
     id: `queue-${randomUUID()}`,
     candidateId: candidate.id,
