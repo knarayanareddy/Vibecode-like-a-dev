@@ -347,7 +347,7 @@ async function main() {
     '',
     `Write globs: ${writeGlobs.join(', ')}`,
     `Allow-listed commands: ${allowCmds.length ? allowCmds.join(' | ') : '(none)'}`,
-    `Test command: ${testCmd ? `${path.basename(testCmd.executable)} ${testCmd.args.join(' ')}` : '(none declared)'}`
+    `Test command: ${testCmd ? `${path.basename(testCmd.executable).replace(/\.(?:exe|cmd|bat)$/i, '')} ${testCmd.args.join(' ')}` : '(none declared)'}`
   ].join('\n');
 
   // ---- Model client (broker env or cassette supplied by the adapter) --------
