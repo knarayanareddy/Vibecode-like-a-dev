@@ -390,14 +390,15 @@ jobs:
         run: ${{ matrix.command }}
 
   portable-smoke:
-    name: Portable CLI smoke — ${{ matrix.os }}
+    name: Portable CLI smoke — ${{ matrix.os }} (shard ${{ matrix.shard }})
     runs-on: ${{ matrix.os }}
     # Bound each deterministic job; action SHA upgrades are reviewed in CONTRIBUTING.md.
-    timeout-minutes: 90
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         os: [macos-latest, windows-latest]
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -406,17 +407,23 @@ jobs:
       # The dependency-free Node CLI and its portable test suite must work under
       # each supported runner shell. Linux retains the shell-heavy pack journey.
       - name: Full portable test suite
-        # Run the same Node suite under Bash on each supported portable runner.
-        # Preserve TAP on failure and surface the failing test in an annotation:
-        # hosted log blobs are not always retained/available to reviewers.
+        # Run the same Node suite under Bash on each supported portable runner,
+        # sharded deterministically by test file so one slow or hanging file can
+        # never starve the lane. Preserve TAP on failure and surface the failing
+        # test in an annotation: hosted log blobs are not always retained.
         shell: bash
         run: |
-          log=/tmp/vld-portable-test.log
+          log=/tmp/vld-portable-test-${{ matrix.shard }}.log
+          files=$(node -e "const fs=require('node:fs');const all=fs.readdirSync('factory/test').filter((f)=>f.endsWith('.test.mjs')).sort();const mine=all.filter((_,i)=>i%4===${{ matrix.shard }}-1);process.stdout.write(mine.map((f)=>'factory/test/'+f).join(' '))")
           set +e
-          npm test >"$log" 2>&1
+          node --test --test-concurrency=1 $files >"$log" 2>&1
           status=$?
+          if [ "${{ matrix.shard }}" = "1" ]; then
+            node --test factory/studio/vscode/test/*.test.cjs >>"$log" 2>&1
+            status=$(( status | $? ))
+          fi
           set -e
-          cat "$log"
+          tail -n 400 "$log"
           if [ "$status" -ne 0 ]; then
             failure=$(grep -m1 -A 60 '^not ok' "$log" | tr '\n' ' ' || true)
             echo "::error title=Portable Node test failure::${failure:-npm test failed without a TAP failure record}"
