@@ -19,6 +19,16 @@ on:
         required: true
         default: brownfield
         type: string
+      repeat:
+        description: Runs per task x arm cell (variance reporting)
+        required: true
+        default: '1'
+        type: string
+      max_cost_usd:
+        description: Cumulative model cost cap in USD (partial results + finding when hit)
+        required: true
+        default: '25'
+        type: string
 
 permissions:
   contents: read
@@ -42,6 +52,8 @@ jobs:
           BENCHMARK_PROVIDER: ${{ inputs.provider }}
           BENCHMARK_MODEL: ${{ inputs.model }}
           BENCHMARK_TASKS: ${{ inputs.tasks }}
+          BENCHMARK_REPEAT: ${{ inputs.repeat }}
+          BENCHMARK_MAX_COST_USD: ${{ inputs.max_cost_usd }}
           BENCHMARK_COMMIT: ${{ github.sha }}
           BENCHMARK_RUN_ID: ${{ github.run_id }}
           BENCHMARK_RUN_ATTEMPT: ${{ github.run_attempt }}
@@ -54,6 +66,8 @@ jobs:
           BENCHMARK_PROVIDER: ${{ inputs.provider }}
           BENCHMARK_MODEL: ${{ inputs.model }}
           BENCHMARK_TASKS: ${{ inputs.tasks }}
+          BENCHMARK_REPEAT: ${{ inputs.repeat }}
+          BENCHMARK_MAX_COST_USD: ${{ inputs.max_cost_usd }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -66,6 +80,9 @@ jobs:
             --runner "$BENCHMARK_PROVIDER" \
             --model "$BENCHMARK_MODEL" \
             --tasks "$BENCHMARK_TASKS" \
+            --repeat "$BENCHMARK_REPEAT" \
+            --max-cost-usd "$BENCHMARK_MAX_COST_USD" \
+            --confirm-live \
             --out artifacts/outcome-report.json
 
       - name: Retain report and provenance

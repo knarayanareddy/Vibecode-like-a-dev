@@ -58,7 +58,7 @@ All numbers are reproduced offline by `npm run eval` and `npm run stress` and ve
 | Outcome harness (calibration) | **34 tasks** × 3 arms (102 workspaces) | **98.0%** drift catch (95% CI **93.1%–99.5%**), **100.0%** naive patches gated |
 | Context budget | Full packet vs `--lean` | ~16.6k tokens full; use `--lean` for low-token loops |
 
-*Calibration caveat:* the committed 34-task result in [`docs/results/calibration-34.json`](docs/results/calibration-34.json) runs in fixture calibration mode (no live model invoked) to verify oracle solvability, structural gate catch rates, and defect-probe sensitivity. Full split metrics and live-model runner instructions are in [`docs/results/BENCHMARK-REPORT.md`](docs/results/BENCHMARK-REPORT.md).
+*Calibration caveat:* the committed 34-task result in [`docs/results/calibration-34.json`](docs/results/calibration-34.json) runs in fixture calibration mode (no live model invoked) to verify oracle solvability, structural gate catch rates, and defect-probe sensitivity. Full split metrics and live-model runner instructions are in [`docs/results/BENCHMARK-REPORT.md`](docs/results/BENCHMARK-REPORT.md). Live-model runs are gated behind `--dry-run` planning, `--confirm-live` and `--max-cost-usd` caps, and every live report embeds a run-config and honesty block (single-shot completions, not an agent-product ranking).
 
 ## What to commit from `.vld/`
 
