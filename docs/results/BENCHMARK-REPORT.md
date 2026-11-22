@@ -44,9 +44,56 @@ Every figure in this report is produced directly by the committed, zero-dependen
 
 ## 3. Running Live Model Benchmarks
 
-Use `.github/workflows/live-agent-benchmark.yml` or run locally with an API key:
+Live-model runs are a separate, operator-run step that burns real API money and
+produces artifacts that are *not* checked into the repository. This document
+intentionally contains fixture calibration results only (no model was invoked).
+
+### 3.1 The gates (they exist because live runs cost real money)
+
+A live run never starts by accident. Every path requires an explicit
+acknowledgment after a zero-cost plan review:
 
 ```bash
-OPENAI_API_KEY=... node scripts/eval-outcome.mjs --runner openai --model gpt-4o --out docs/results/live-gpt-4o.json
-ANTHROPIC_API_KEY=... node scripts/eval-outcome.mjs --runner anthropic --out docs/results/live-claude.json
+# 0. Plan first — makes NO model calls:
+node scripts/eval-outcome.mjs --runner openai --model gpt-4o-mini --tasks brownfield --dry-run
+#    -> planned model calls = tasks x arms x repeat, ~prompt tokens across all cells
+
+# 1. Cap the spend, then confirm:
+node scripts/eval-outcome.mjs --runner openai --model gpt-4o-mini --tasks brownfield \\
+  --repeat 3 --max-cost-usd 10 --confirm-live --out artifacts/outcome-report.json
 ```
+
+- `--dry-run` exits after printing the plan (exit 0).
+- Without `--confirm-live`, the openai/anthropic/command runners refuse to start
+  (exit 2) and print the plan. The `cmd` runner (any external coding-agent CLI)
+  has its own gate instead: `--unsafe-command`.
+- `--max-cost-usd` bounds cumulative spend: when hit, the run stops, reports the
+  cells completed so far with a `budget-exhausted` finding and `budgetExhausted:
+  true` in `runConfig` — partial results, honestly labeled.
+- `--repeat N` runs each cell N times and reports per-run records (`runIndex`),
+  so variance is visible instead of hidden behind a single sample.
+
+### 3.2 The blessed path: workflow_dispatch
+
+Run `.github/workflows/live-agent-benchmark.yml` (manual dispatch, environment-
+approved; provider/model/task/repeat/cost-cap inputs). It requires the
+`OPENAI_API_KEY` or `ANTHROPIC_API_KEY` secrets. Each run records immutable
+provenance (commit SHA, provider, model, tasks, repeat, cost cap, run
+id/attempt, OS image, Node version, timestamps) and uploads the outcome report
+and provenance JSON as artifacts retained for 90 days. The workflow passes
+`--confirm-live` itself: dispatching it *is* the confirmation.
+
+### 3.3 What live results do and do not prove
+
+Every report embeds a `runConfig` block (provider, model, temperature 0,
+maxTokens 4096, repeat, cost totals) and an `honesty` block. In short:
+
+- They measure one exact model, one prompt protocol and this task set, scored by
+  hidden functional oracles and defect probes in `node --permission` workspaces.
+- They are **not** a ranking of interactive agent products: the openai/anthropic
+  runners are single-shot JSON file-edit completions, not agent loops with tools,
+  and wall clock includes harness overhead.
+- `repeat > 1` shows variance but stays a small-sample estimate.
+- Calibration numbers (this document) prove the tasks, oracles and probes are
+  non-vacuous and quantify structural catch rates — they are **not** model win
+  rates and should never be cited as such.

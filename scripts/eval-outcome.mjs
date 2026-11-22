@@ -16,6 +16,10 @@
  *
  * Options:
  *   --tasks <substr>   filter task IDs or categories (e.g. --tasks brownfield)
+ *   --repeat N         run each live cell N times and report variance (live runners only)
+ *   --max-cost-usd X   abort before exceeding this cumulative model cost (live runners only)
+ *   --confirm-live     explicit acknowledgment that live runners spend real API money
+ *   --dry-run          print the live plan (calls, context tokens) and exit without model calls
  *   --unsafe-command   required only for --runner cmd; arbitrary same-user command execution
  *   --out <file>       save full JSON report
  *   --json             print JSON report to stdout
@@ -40,6 +44,19 @@ const filter = option('--tasks', null);
 const outFile = option('--out', null);
 const jsonOut = hasFlag('--json');
 const unsafeCommandAcknowledged = hasFlag('--unsafe-command');
+const confirmLive = hasFlag('--confirm-live');
+const dryRun = hasFlag('--dry-run');
+const repeat = Number(option('--repeat', '1'));
+const maxCostRaw = option('--max-cost-usd', null);
+const maxCostUsd = maxCostRaw === null ? null : Number(maxCostRaw);
+if (!Number.isInteger(repeat) || repeat < 1) {
+  console.error('--repeat must be a positive integer');
+  process.exit(2);
+}
+if (maxCostUsd !== null && !(maxCostUsd > 0)) {
+  console.error('--max-cost-usd must be a positive number');
+  process.exit(2);
+}
 
 const selectedTasks = filter
   ? OUTCOME_TASKS.filter((task) => task.id.includes(filter) || task.category.includes(filter))
@@ -55,7 +72,11 @@ const report = await runOutcomeHarness({
   runner,
   agentCmd,
   model,
-  unsafeCommandAcknowledged
+  unsafeCommandAcknowledged,
+  repeat,
+  maxCostUsd,
+  confirmLive,
+  dryRun
 });
 
 if (outFile) {
@@ -66,8 +87,18 @@ if (outFile) {
 const pct = (value) => `${(value * 100).toFixed(1)}%`;
 const signedPct = (value) => `${value >= 0 ? '+' : ''}${(value * 100).toFixed(1)}pp`;
 
+const isPlanOutput = Boolean(report.plan && (report.dryRun || (report.findings ?? []).some((f) => f.id === 'live-confirmation-required')));
 if (jsonOut) {
   console.log(JSON.stringify(report, null, 2));
+} else if (report.plan && (report.dryRun || (report.findings ?? []).some((f) => f.id === 'live-confirmation-required'))) {
+  const plan = report.plan;
+  console.log(`outcome harness · LIVE PLAN${report.dryRun ? ' (dry run — no model calls made)' : ' (confirmation required)'}`);
+  console.log(`  runner            ${plan.runner}${plan.model ? ` · ${plan.model}` : ''}`);
+  console.log(`  tasks × arms      ${plan.tasks} × ${plan.arms.length} × repeat ${plan.repeat} = ${plan.modelCalls} planned model calls`);
+  console.log(`  context tokens    ~${plan.estimatedContextTokens.toLocaleString('en-US')} prompt tokens across all cells (before completion tokens)`);
+  console.log('  cost cap          pass --max-cost-usd <X> to bound cumulative spend');
+  console.log('  next step         re-run with --confirm-live (CI: approve the live-agent-benchmark environment) after reviewing docs/results/BENCHMARK-REPORT.md §3');
+  for (const finding of report.findings ?? []) console.log(`  finding           ${finding.id}: ${finding.detail}`);
 } else {
   console.log(`outcome harness · ${report.tasksCount} tasks · ${report.arms.length} arms (${report.arms.join(' / ')})`);
   if (!report.liveAgent) {
@@ -75,7 +106,13 @@ if (jsonOut) {
     console.log('note              proves oracle solvability, defect-probe sensitivity, context cost & drift catch rates;');
     console.log('                  pass --runner cmd|openai|anthropic to measure live agent merge & defect lift.\n');
   } else {
-    console.log(`mode              live agent (${report.runner}${report.model ? ` · ${report.model}` : ''})\n`);
+    console.log(`mode              live agent (${report.runner}${report.model ? ` · ${report.model}` : ''}) · repeat ${report.runConfig?.repeat ?? 1}`);
+    if (report.runConfig) {
+      console.log(`cost              $${report.runConfig.totalLiveCostUsd ?? '?'} total · ${report.runConfig.totalLiveAgentTokens ?? '?'} agent tokens${report.runConfig.budgetExhausted ? ' · BUDGET EXHAUSTED (partial results)' : ''}`);
+    }
+    console.log('honesty           see the report "honesty" block (and docs/results/BENCHMARK-REPORT.md §3):');
+    console.log('                  these are single-shot JSON file-edit completions scored by hidden oracles,');
+    console.log('                  not a ranking of interactive agent products.\n');
   }
 
   const header = ['arm', 'merge', 'clean-merge', 'defects/task', 'naive-gated', 'drift-total', 'drop/gate/sem', 'ctx-tok'];
@@ -135,4 +172,8 @@ if (jsonOut) {
   }
 }
 
-process.exitCode = report.ok ? 0 : 1;
+if (isPlanOutput) {
+  process.exitCode = report.dryRun ? 0 : 2;
+} else {
+  process.exitCode = report.ok ? 0 : 1;
+}

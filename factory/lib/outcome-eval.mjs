@@ -666,7 +666,7 @@ function initGitRepo(workspaceDir) {
   });
 }
 
-async function runExternalAgent(runner, workspaceDir, task, arm, { agentCmd, model, unsafeCommandAcknowledged = false } = {}) {
+async function runExternalAgent(runner, workspaceDir, task, arm, { agentCmd, model, unsafeCommandAcknowledged = false, maxCostUsd = null } = {}) {
   initGitRepo(workspaceDir);
   const started = Date.now();
 
@@ -716,8 +716,11 @@ async function runExternalAgent(runner, workspaceDir, task, arm, { agentCmd, mod
   let rawJson = '{"files":{}}';
   let agentTokens = 0;
 
-  if (runner !== 'openai' && runner !== 'anthropic') {
+  if (runner !== 'openai' && runner !== 'anthropic' && runner !== 'command') {
     throw new Error(`unknown outcome runner "${runner}"`);
+  }
+  if (runner === 'command' && !agentCmd) {
+    throw new Error('the command model runner requires --agent-cmd "<command>" (a local process that reads the request on stdin and prints a JSON response)');
   }
 
   // One shared P3.1 model-client path instead of hand-rolled fetch calls: secret
@@ -726,11 +729,14 @@ async function runExternalAgent(runner, workspaceDir, task, arm, { agentCmd, mod
   const provider = runner;
   const client = createModelClient({
     provider,
-    model: model || process.env.EVAL_MODEL || (provider === 'openai' ? 'gpt-4o-mini' : 'claude-3-5-sonnet-latest'),
+    model: model || process.env.EVAL_MODEL || (provider === 'openai' ? 'gpt-4o-mini' : provider === 'anthropic' ? 'claude-3-5-sonnet-latest' : 'command'),
     baseUrl: process.env[provider === 'openai' ? 'OPENAI_BASE_URL' : 'ANTHROPIC_BASE_URL'] || null,
     cassetteDir: process.env.VLD_MODEL_CASSETTE_DIR || null,
     cassetteMode: process.env.VLD_MODEL_CASSETTE_MODE || null,
-    env: process.env
+    env: process.env,
+    command: provider === 'command' ? splitCommandLike(agentCmd) : undefined,
+    // Per-cell ceiling; the harness also enforces a cumulative live budget.
+    budget: maxCostUsd === null ? {} : { maxCostUsd }
   });
   const response = await client.complete({
     messages: [{ role: 'user', content: prompt }],
@@ -751,6 +757,11 @@ async function runExternalAgent(runner, workspaceDir, task, arm, { agentCmd, mod
   writeModelResponseFiles(workspaceDir, parsed.files ?? {});
 
   return { wallClockMs: Date.now() - started, agentTokens, costUsd: usageCost };
+}
+
+function splitCommandLike(command) {
+  const tokens = String(command).match(/(?:[^\s"]+|"[^"]*")+/g) ?? [];
+  return tokens.map((token) => token.replace(/^"(.*)"$/, '$1'));
 }
 
 function summarizeArm(records) {
@@ -810,7 +821,17 @@ function summarizeArm(records) {
       semanticWeakenByMutationIdentity: Number((semanticWeakenMutationIdentityCaught / count).toFixed(3))
     },
     meanContextTokens,
-    meanWallClockMs
+    meanWallClockMs,
+    // Live-run economics (null in calibration: no model was invoked).
+    totalCostUsd: records.some((r) => r.costUsd != null)
+      ? Number(records.reduce((sum, r) => sum + (r.costUsd ?? 0), 0).toFixed(4))
+      : null,
+    meanCostUsd: records.some((r) => r.costUsd != null)
+      ? Number((records.reduce((sum, r) => sum + (r.costUsd ?? 0), 0) / count).toFixed(4))
+      : null,
+    totalAgentTokens: records.some((r) => r.agentTokens != null)
+      ? records.reduce((sum, r) => sum + (r.agentTokens ?? 0), 0)
+      : null
   };
 }
 
@@ -840,6 +861,48 @@ function deltaBetween(target, baseline) {
   };
 }
 
+/** Describe a live benchmark without making any model call (dry-run plan). */
+export function liveBenchmarkPlan({ tasks = OUTCOME_TASKS, arms = OUTCOME_ARMS, runner = 'openai', model = undefined, repeat = 1, materialize = true } = {}) {
+  const normalizedRepeat = Math.max(1, Math.floor(repeat));
+  let estimatedContextTokens = 0;
+  if (materialize) {
+    const index = buildIndex();
+    const planTmp = canonicalTemporaryPath(mkdtempSync(path.join(os.tmpdir(), 'vld-plan-')));
+    try {
+      for (const task of tasks) {
+        for (const arm of arms) {
+          const dir = path.join(planTmp, `${task.id}-${arm}`);
+          estimatedContextTokens += materializeWorkspace(task, arm, dir, { index }).contextTokensEst;
+        }
+      }
+    } finally {
+      rmSync(planTmp, { recursive: true, force: true });
+    }
+  }
+  return {
+    runner,
+    model: model ?? null,
+    tasks: tasks.length,
+    taskIds: tasks.map((t) => t.id),
+    arms,
+    repeat: normalizedRepeat,
+    modelCalls: runner === 'calibration' ? 0 : tasks.length * arms.length * normalizedRepeat,
+    estimatedContextTokens
+  };
+}
+
+export const LIVE_HONESTY = Object.freeze({
+  whatThisShows: 'Outcomes for one exact model, prompt protocol and task set, scored by hidden functional oracles and defect probes in Node --permission workspaces, with per-arm cost and latency.',
+  whatThisDoesNotShow: [
+    'Not a ranking of agent products: the openai/anthropic/command runners are single-shot JSON file-edit completions, not full agent loops with tools.',
+    'Not a measure of interactive coding performance: no conversation, no test feedback loop, no human review.',
+    'Not a claim about other model versions, providers or prompt shapes: every figure is bound to the recorded run configuration.',
+    'Live cells sample the model once per repeat; repeat > 1 reports variance but stays a small-sample estimate.',
+    'Wall clock includes harness overhead and is not a clean inference-latency measurement.'
+  ],
+  fixtureCalibrationCaveat: 'Calibration mode invokes no model at all: it proves the tasks, oracles and probes are non-vacuous and measures structural gate/drift catch rates. Calibration numbers are never model win rates.'
+});
+
 export async function runOutcomeHarness({
   tasks = OUTCOME_TASKS,
   arms = OUTCOME_ARMS,
@@ -847,14 +910,47 @@ export async function runOutcomeHarness({
   agentCmd = null,
   model = undefined,
   concurrency = 6,
-  unsafeCommandAcknowledged = false
+  unsafeCommandAcknowledged = false,
+  repeat = 1,
+  maxCostUsd = null,
+  confirmLive = false,
+  dryRun = false,
+  runDrift = true
 } = {}) {
+  const isLive = runner !== 'calibration';
+  const normalizedRepeat = Math.max(1, Math.floor(repeat));
+  const plan = liveBenchmarkPlan({ tasks, arms, runner, model, repeat: normalizedRepeat });
+  if (isLive && dryRun) {
+    return {
+      ok: false,
+      dryRun: true,
+      runner,
+      liveAgent: true,
+      plan,
+      honesty: LIVE_HONESTY,
+      findings: [{ id: 'dry-run', detail: 'Dry run: no model calls made. Review the plan and cost cap, then re-run with --confirm-live.' }]
+    };
+  }
   if (runner === 'cmd' && !unsafeCommandAcknowledged) {
     return {
       ok: false,
       runner,
       liveAgent: true,
+      plan,
+      honesty: LIVE_HONESTY,
       findings: [{ id: 'unsafe-command-acknowledgment-required', detail: 'The cmd runner executes an arbitrary same-user command. Pass the explicit unsafe-command acknowledgment; it is not used by ordinary validation or CI.' }]
+    };
+  }
+  // The cmd runner's gate is the unsafe-command acknowledgment; the built-in
+  // model-API runners (openai/anthropic/command) additionally require confirm-live.
+  if (isLive && runner !== 'cmd' && !confirmLive) {
+    return {
+      ok: false,
+      runner,
+      liveAgent: true,
+      plan,
+      honesty: LIVE_HONESTY,
+      findings: [{ id: 'live-confirmation-required', detail: `Live runners invoke a paid model API (${plan.modelCalls} planned calls). Pass the explicit confirm-live acknowledgment (CI: workflow_dispatch environment approval) after reviewing the plan and --max-cost-usd.` }]
     };
   }
   if (runner !== 'calibration' && !PERMISSION_MODEL_AVAILABLE) {
@@ -870,11 +966,14 @@ export async function runOutcomeHarness({
     return { ok: false, runner, liveAgent: runner !== 'calibration', findings: schemaErrors.map((detail) => ({ id: 'invalid-task', detail })) };
   }
 
+  const startedAt = new Date().toISOString();
   const index = buildIndex();
   const rootTmp = canonicalTemporaryPath(mkdtempSync(path.join(os.tmpdir(), 'vld-outcome-')));
   const findings = [];
   const armRecords = Object.fromEntries(arms.map((arm) => [arm, []]));
   const calibrationChecks = [];
+  let liveCostUsd = 0;
+  let budgetExhausted = false;
 
   try {
     // Process tasks with bounded concurrency so 34 tasks x 3 arms finish in ~1-2s.
@@ -948,18 +1047,37 @@ export async function runOutcomeHarness({
           calibrationChecks.push({ taskId: task.id, starterFailedOracle: !starterEval.oraclePass, naiveDefects: naiveCaughtCount });
         } else {
           for (const arm of arms) {
-            const workDir = path.join(rootTmp, `${task.id}-${arm}-live`);
-            const meta = materializeWorkspace(task, arm, workDir, { index });
-            const telemetry = await runExternalAgent(runner, workDir, task, arm, { agentCmd, model, unsafeCommandAcknowledged });
-            const scored = await evaluateWorkspace(task, arm, workDir, { runDrift: true });
-            armRecords[arm].push({
-              ...scored,
-              tier: meta.tier,
-              contextBytes: meta.contextBytes,
-              contextTokensEst: meta.contextTokensEst,
-              naiveBlockedByLocalGates: false,
-              ...telemetry
-            });
+            for (let runIndex = 0; runIndex < normalizedRepeat; runIndex += 1) {
+              if (budgetExhausted) break;
+              const workDir = path.join(rootTmp, `${task.id}-${arm}-live-${runIndex}`);
+              const meta = materializeWorkspace(task, arm, workDir, { index });
+              let telemetry;
+              try {
+                telemetry = await runExternalAgent(runner, workDir, task, arm, { agentCmd, model, unsafeCommandAcknowledged, maxCostUsd });
+              } catch (error) {
+                if (error?.code === 'MODEL_BUDGET_EXCEEDED') {
+                  budgetExhausted = true;
+                  findings.push({ id: 'budget-exhausted', detail: `model budget exhausted after ${Number(liveCostUsd.toFixed(4))} USD at ${task.id}/${arm}/run-${runIndex}: ${error.message}` });
+                  break;
+                }
+                throw error;
+              }
+              liveCostUsd += telemetry.costUsd ?? 0;
+              if (maxCostUsd !== null && liveCostUsd >= maxCostUsd) {
+                budgetExhausted = true;
+                findings.push({ id: 'budget-exhausted', detail: `cumulative live cost ${Number(liveCostUsd.toFixed(4))} USD reached the --max-cost-usd cap (${maxCostUsd}) after ${task.id}/${arm}/run-${runIndex}; remaining cells were not run (partial results)` });
+              }
+              const scored = await evaluateWorkspace(task, arm, workDir, { runDrift });
+              armRecords[arm].push({
+                ...scored,
+                runIndex,
+                tier: meta.tier,
+                contextBytes: meta.contextBytes,
+                contextTokensEst: meta.contextTokensEst,
+                naiveBlockedByLocalGates: false,
+                ...telemetry
+              });
+            }
           }
         }
       }
@@ -994,10 +1112,30 @@ export async function runOutcomeHarness({
   return {
     ok: findings.length === 0,
     runner,
-    liveAgent: runner !== 'calibration',
+    liveAgent: isLive,
     model: model ?? null,
     tasksCount: tasks.length,
     arms,
+    runConfig: {
+      runner,
+      model: model ?? null,
+      temperature: 0,
+      maxTokens: 4096,
+      repeat: normalizedRepeat,
+      maxCostUsd: maxCostUsd ?? null,
+      concurrency,
+      node: process.version,
+      platform: process.platform,
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      totalLiveCostUsd: isLive ? Number(liveCostUsd.toFixed(4)) : null,
+      totalLiveAgentTokens: isLive
+        ? Object.values(armRecords).flat().reduce((sum, r) => sum + (r.agentTokens ?? 0), 0)
+        : null,
+      budgetExhausted
+    },
+    plan,
+    honesty: LIVE_HONESTY,
     summary,
     deltas,
     byCategory,

@@ -4,6 +4,25 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) pr
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-11-16
+### Added
+- **Live-benchmark honesty, gating and economics (roadmap 5.1).** The outcome harness
+  now refuses to spend model API money by accident: `--dry-run` prints a zero-cost
+  plan (tasks x arms x repeat, ~prompt tokens), the openai/anthropic/command runners
+  require `--confirm-live`, and `--max-cost-usd` bounds cumulative spend — hitting the
+  cap stops the run and returns honestly labeled partial results (`budget-exhausted`
+  finding, `runConfig.budgetExhausted`). `--repeat N` runs each cell N times with
+  per-run records (`runIndex`) so variance is visible. Every report embeds a
+  `runConfig` block (provider, model, temperature 0, maxTokens 4096, repeat, cost and
+  token totals) and an `honesty` block stating exactly what live results do and do
+  not prove (single-shot JSON file-edit completions scored by hidden oracles — not a
+  ranking of interactive agent products). `summarizeArm` adds `totalCostUsd`,
+  `meanCostUsd` and `totalAgentTokens`. The `live-agent-benchmark` workflow takes
+  `repeat` and `max_cost_usd` inputs and records them in run provenance. New fixture
+  tests cover the gates, cost aggregation and the budget cap through the shared
+  model-client `command` provider (zero network). Docs: BENCHMARK-REPORT §3 rewritten
+  with the gate sequence and the do/do-not-prove contract; README caveat extended.
+
 ### Added
 
 - **Provenance and cost ledger (roadmap 4.3):** every delivery candidate carries a verifiable provenance block — model id, prompt hash over the run's model requests (recomputable from the recorded request digests), tool-call transcript digest and token usage/cost — surfaced in the build report, the agent-run receipts, the runtime candidate record and each model-produced evidence entry. The frozen mission budget now bounds every model run (an overrun aborts the mission before any candidate exists), the Studio gains a "Cost & provenance" panel with per-run totals and over-budget alerts, and `vld evidence export --format markdown` renders the hash-chained audit report.

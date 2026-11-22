@@ -20,6 +20,8 @@ if (!output || output.startsWith('-')) {
     provider: process.env.BENCHMARK_PROVIDER ?? null,
     model: process.env.BENCHMARK_MODEL ?? null,
     tasks: process.env.BENCHMARK_TASKS ?? null,
+    repeat: Number(process.env.BENCHMARK_REPEAT ?? '1'),
+    maxCostUsd: Number(process.env.BENCHMARK_MAX_COST_USD ?? '25'),
     commit: process.env.BENCHMARK_COMMIT ?? null,
     runId: process.env.BENCHMARK_RUN_ID ?? null,
     runAttempt: process.env.BENCHMARK_RUN_ATTEMPT ?? null,

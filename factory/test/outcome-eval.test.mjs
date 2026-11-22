@@ -15,7 +15,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { OUTCOME_TASKS, validateOutcomeTasks } from '../evals/tasks/index.mjs';
+import { OUTCOME_ARMS, OUTCOME_TASKS, validateOutcomeTasks } from '../evals/tasks/index.mjs';
 import { evaluateWorkspace, materializeWorkspace, runOutcomeHarness, runWorkspaceLocalChecks, writeModelResponseFiles } from '../lib/outcome-eval.mjs';
 import { buildIndex } from '../lib/indexer.mjs';
 
@@ -206,7 +206,7 @@ test('the openai/anthropic runners use the shared model-client auth path, not in
     }
   });
   const single = OUTCOME_TASKS.filter((task) => task.id === 'gf-06-rate-limiter');
-  const run = (runner) => runOutcomeHarness({ tasks: single, runner });
+  const run = (runner) => runOutcomeHarness({ tasks: single, runner, confirmLive: true });
   if (!process.allowedNodeEnvironmentFlags?.has('--permission')) {
     const report = await run('openai');
     assert.equal(report.ok, false);
@@ -219,4 +219,86 @@ test('the openai/anthropic runners use the shared model-client auth path, not in
   const source = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'lib', 'outcome-eval.mjs'), 'utf8');
   assert.match(source, /createModelClient\(/);
   assert.doesNotMatch(source, /api\.openai\.com|api\.anthropic\.com/);
+});
+
+test('live harness gates: dry-run plan, confirm-live refusal and cmd acknowledgment', async () => {
+  const dry = await runOutcomeHarness({ tasks: OUTCOME_TASKS.slice(0, 2), arms: OUTCOME_ARMS, runner: 'openai', dryRun: true });
+  assert.equal(dry.ok, false);
+  assert.equal(dry.dryRun, true);
+  assert.equal(dry.plan.modelCalls, 6);
+  assert.ok(dry.plan.estimatedContextTokens > 0);
+  assert.ok(dry.honesty.whatThisShows && dry.honesty.whatThisDoesNotShow.length >= 3);
+
+  const refused = await runOutcomeHarness({ tasks: OUTCOME_TASKS.slice(0, 1), runner: 'openai' });
+  assert.equal(refused.ok, false);
+  assert.equal(refused.findings[0].id, 'live-confirmation-required');
+  assert.equal(refused.plan.modelCalls, 3);
+
+  const cmdRefused = await runOutcomeHarness({ tasks: OUTCOME_TASKS.slice(0, 1), runner: 'cmd', agentCmd: 'echo hi', confirmLive: true });
+  assert.equal(cmdRefused.findings[0].id, 'unsafe-command-acknowledgment-required');
+});
+
+test('calibration report carries runConfig, honesty and null live-cost fields', async () => {
+  const report = await runOutcomeHarness({ tasks: OUTCOME_TASKS.slice(0, 1), arms: OUTCOME_ARMS, runner: 'calibration' });
+  assert.equal(report.ok, true, `calibration findings: ${JSON.stringify(report.findings)}`);
+  assert.equal(report.runConfig.temperature, 0);
+  assert.equal(report.runConfig.maxTokens, 4096);
+  assert.equal(report.runConfig.totalLiveCostUsd, null);
+  assert.equal(report.summary['vld-packet'].totalCostUsd, null);
+  assert.equal(report.summary['vld-packet'].totalAgentTokens, null);
+  assert.ok(report.honesty.fixtureCalibrationCaveat.includes('no model'));
+  assert.ok(report.plan && typeof report.plan.estimatedContextTokens === 'number');
+});
+
+test('command-model live path: repeat runs, cost aggregation and budget cap (no network)', async () => {
+  const tmp = mkdtempSync(path.join(os.tmpdir(), 'vld-fake-model-'));
+  const script = path.join(tmp, 'fake-model.mjs');
+  writeFileSync(script, [
+    "let raw = '';",
+    "process.stdin.on('data', (c) => { raw += c; });",
+    "process.stdin.on('end', () => {",
+    "  const request = JSON.parse(raw);",
+    "  console.log(JSON.stringify({",
+    "    json: { files: {} },",
+    "    usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120, costUsd: 0.01 },",
+    "    model: 'fake-' + (request.requestDigest ?? '').slice(0, 6)",
+    "  }));",
+    "});"
+  ].join('\n'), 'utf8');
+  const task = OUTCOME_TASKS.filter((t) => t.category === 'greenfield').slice(0, 1);
+  const common = {
+    tasks: task,
+    arms: ['vld-packet'],
+    runner: 'command',
+    agentCmd: `node ${script}`,
+    confirmLive: true,
+    runDrift: false
+  };
+
+  const report = await runOutcomeHarness({ ...common, repeat: 2 });
+  if (!process.allowedNodeEnvironmentFlags?.has('--permission')) {
+    // Nodes without filesystem permissions must refuse live cells honestly.
+    assert.equal(report.findings[0].id, 'workspace-sandbox-unavailable');
+    rmSync(tmp, { recursive: true, force: true });
+    return;
+  }
+  assert.equal(report.ok, true, `live findings: ${JSON.stringify(report.findings)}`);
+  const records = report.records['vld-packet'];
+  assert.equal(records.length, 2);
+  assert.deepEqual(records.map((r) => r.runIndex), [0, 1]);
+  assert.ok(records.every((r) => r.costUsd === 0.01));
+  assert.equal(report.summary['vld-packet'].totalCostUsd, 0.02);
+  assert.equal(report.summary['vld-packet'].totalAgentTokens, 240);
+  assert.equal(report.runConfig.totalLiveCostUsd, 0.02);
+  assert.equal(report.runConfig.repeat, 2);
+  assert.equal(report.runConfig.budgetExhausted, false);
+  assert.ok(report.honesty.whatThisDoesNotShow.some((line) => line.includes('single-shot')));
+
+  const capped = await runOutcomeHarness({ ...common, repeat: 2, maxCostUsd: 0.015 });
+  assert.equal(capped.records['vld-packet'].length, 2);
+  assert.equal(capped.runConfig.budgetExhausted, true);
+  assert.ok(capped.findings.some((f) => f.id === 'budget-exhausted'));
+  assert.equal(capped.ok, false);
+
+  rmSync(tmp, { recursive: true, force: true });
 });
